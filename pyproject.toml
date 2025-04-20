@@ -5,12 +5,20 @@ description = "Minimal RL for LLM implementations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "datasets>=3.5.0",
+    "fire>=0.7.0",
     "jinja2>=3.1.6",
+    "loguru>=0.7.3",
+    "numpy>=2.2.5",
     "pandas>=2.2.3",
     "pyarrow>=19.0.1",
     "pyyaml>=6.0.2",
     "safetensors>=0.5.3",
+    "scikit-learn>=1.6.1",
     "tensorboard>=2.19.0",
+    "tensorboardx>=2.6.2.2",
     "tokenizers>=0.21.1",
     "torch>=2.6.0",
+    "transformers>=4.51.3",
+    "vllm>=0.8.4",
 ]
