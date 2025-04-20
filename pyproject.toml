@@ -1,0 +1,16 @@
+[project]
+name = "minrl"
+version = "0.1.0"
+description = "Minimal RL for LLM implementations"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2>=3.1.6",
+    "pandas>=2.2.3",
+    "pyarrow>=19.0.1",
+    "pyyaml>=6.0.2",
+    "safetensors>=0.5.3",
+    "tensorboard>=2.19.0",
+    "tokenizers>=0.21.1",
+    "torch>=2.6.0",
+]
