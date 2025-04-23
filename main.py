@@ -1,16 +1,21 @@
+import html
 from pathlib import Path
 from time import time
+
 import fire
 import numpy as np
-from sympy import evaluate
 import torch
 from loguru import logger
+from sympy import evaluate
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from tensorboardX import SummaryWriter
-import html
 
 from dataset import ConnectionsDataset, create_connections_datasets
+from grpo import rollout
+from dataclasses import dataclass
+
+from tasks.countdown import reward_function
 
 
 def get_available_device() -> str:
@@ -37,6 +42,15 @@ def init_model(
     return tokenizer, model
 
 
+@dataclass
+class Config:
+    model_id: str = "Qwen2.5-3B-Instruct"
+    eval_interval: int = 100
+    num_answer_per_question: int = 1
+    max_gen_len: int = 100
+    micro_batch_size: int = 1
+
+
 def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
     tokenizer, model = init_model(model_id)
     train_dataset, val_dataset = create_connections_datasets()
@@ -55,14 +69,15 @@ def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     dtype = torch.bfloat16
     tb_writer = SummaryWriter()
+    config = Config()
 
     for step, batch in enumerate(train_dataloader, start=1):
         episodes = rollout(
             model=model,
             tokenizer=tokenizer,
             batch=batch,
-            max_gen_len=config["training"]["max_gen_len"],
-            num_answer_per_question=NUM_ANSWERS_PER_QUESTION,
+            max_gen_len=config.max_gen_len,
+            num_answer_per_question=config.num_answer_per_question,
             reward_function=reward_function,
             device=device,
             dtype=dtype,
