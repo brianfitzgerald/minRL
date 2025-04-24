@@ -1,7 +1,11 @@
+import dataclasses
 import gc
+from collections import defaultdict
 from typing import Callable, List
 
 import torch
+import torch.nn as nn
+from loguru import logger
 from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 
 from data_types import Episode, MiniBatch
@@ -83,3 +87,86 @@ def rollout(
             episodes.append(episode)
     
     return episodes
+
+def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
+    """
+    Compute entropy of logits.
+    This is defined as -sum(p(x) * log(p(x))) for all x in the logits.
+    """
+    probs = nn.functional.softmax(logits, dim=-1)
+    entropy = -torch.sum(probs * torch.log(probs), dim=-1)
+    return entropy
+
+def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
+    """
+    Normalize rewards per group.
+    This is done by subtracting the mean and dividing by the standard deviation of the rewards in each group.
+    """
+    # Group episodes by prefix and calculate stats
+    groups = defaultdict(list)
+    for episode in episodes:
+        groups[episode.prefix].append(episode)
+    
+    # Normalize rewards within each group
+    normalized_episodes = []
+    for group in groups.values():
+        rewards = torch.tensor([e.reward for e in group])
+        mean, std = rewards.mean(), rewards.std()
+        for episode in group:
+            normalized_episodes.append(
+                dataclasses.replace(episode, reward=(episode.reward - mean) / std)
+            )
+    
+    return normalized_episodes
+
+def update_policy(
+    model: AutoModelForCausalLM,
+    optimizer: torch.optim.Optimizer,
+    episodes: List[Episode],
+    micro_batch_size: int,
+    pad_token_id: int,
+    device: torch.device,
+    dtype: torch.dtype,
+):
+    episodes = normalize_rewards_per_group(episodes)
+    # sort episodes by length, for more efficient batching
+    episodes.sort(key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True)
+    n_micro_batches = len(episodes) // micro_batch_size
+    n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
+    entropy = 0.0
+
+
+    for i in range(0, len(episodes), micro_batch_size):
+        logger.info(
+            f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}",
+            flush=True,
+            end="",
+        )
+        # get a micro-batch of episodes
+        j = min(i + micro_batch_size, len(episodes))
+        batch_episodes = episodes[i:j]
+        batch_lengths = [
+            len(episode.prefix_token_ids) + len(episode.generated_token_ids)
+            for episode in batch_episodes
+        ]
+        batch_max_length = max(batch_lengths)
+        # get the token ids for the micro-batch
+        batch_token_ids = [
+            episode.prefix_token_ids
+            + episode.generated_token_ids
+            + [pad_token_id] * (batch_max_length - batch_lengths[i])
+            for i, episode in enumerate(batch_episodes)
+        ]
+        batch_masks = [
+            [0] * len(episode.prefix_token_ids)
+            + [1] * len(episode.generated_token_ids)
+            + [0] * (batch_max_length - batch_lengths[i])
+            for i, episode in enumerate(batch_episodes)
+        ]
+        # advantage is just reward, once normalized
+        batch_advantages = [episode.reward for episode in batch_episodes]
+        batch_token_ids = torch.tensor(batch_token_ids, device=device, dtype=torch.long)
+        batch_masks = torch.tensor(batch_masks, device=device, dtype=torch.bool)
+        batch_advantages = torch.tensor(
+            batch_advantages, device=device, dtype=torch.float32
+        )
