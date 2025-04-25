@@ -1,6 +1,6 @@
 import html
 from pathlib import Path
-from time import time
+import time
 
 import fire
 import numpy as np

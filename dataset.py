@@ -151,13 +151,13 @@ def _connections_map(example: dict) -> dict:
 
 class ConnectionsDataset(Dataset):
     def __init__(self, data: pd.DataFrame):
-        self.data: pd.DataFrame = data
+        self.dataframe: pd.DataFrame = data
 
     def __len__(self):
-        return len(self.data)
+        return len(self.dataframe)
 
     def __getitem__(self, idx):
-        item = self.data.iloc[idx]
+        item = self.dataframe.iloc[idx]
         return _connections_map(item)
 
     @staticmethod
@@ -176,11 +176,12 @@ class ConnectionsDataset(Dataset):
 
 
 def create_connections_datasets(
-    jsonl_path: str = "../dataset_files/connections_prompts.jsonl",
+    jsonl_path: str = "connections_prompts.jsonl",
     num_samples: int = 10000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     # Load and process data
+    print(jsonl_path)
     prompts_pd = pd.read_json(jsonl_path, lines=True)
     df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
 
@@ -198,6 +199,7 @@ def create_connections_datasets(
     # Create DataFrame and split
     groups_pd = pd.DataFrame(groups)
     train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
+    print(train_data)
 
     # Create datasets
     train_dataset = ConnectionsDataset(train_data)
