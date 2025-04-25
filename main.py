@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from dataset import ConnectionsDataset, create_connections_datasets
-from grpo import rollout
+from grpo import rollout, update_policy
 from dataclasses import dataclass
 
 from tasks.countdown import reward_function
@@ -49,12 +49,11 @@ class Config:
     num_answer_per_question: int = 1
     max_gen_len: int = 100
     micro_batch_size: int = 1
+    max_grad_norm: float = 1.0
+    eval_interval: int = 100
+    ckpt_save_interval: int = 100
 
-
-def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
-    tokenizer, model = init_model(model_id)
-    train_dataset, val_dataset = create_connections_datasets()
-    device = get_available_device()
+def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
     generator = torch.Generator(device=device)
     train_dataloader = DataLoader(
         train_dataset,
@@ -125,7 +124,7 @@ def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
             f"mean_response_len: {mean_response_len:.2f}, "
             f"entropy: {entropy:.2f}"
         )
-        if step % eval_interval == 0:
+        if step % config.eval_interval == 0:
             eval_success_rate = evaluate(model, tokenizer, device, dtype, config)
             print(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
             tb_writer.add_scalar("success_rate/eval", eval_success_rate, step)
@@ -147,13 +146,19 @@ def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
             tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
 
         # save checkpoint
-        if step % config["training"]["ckpt_save_interval"] == 0:
+        if step % config.ckpt_save_interval == 0:
             output_file = ckpt_dir / f"ckpt_{step:06d}.pt"
             torch.save(model.state_dict(), output_file)
             print(f"Saved checkpoint to {output_file}")
 
 
 
+def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
+    tokenizer, model = init_model(model_id)
+    train_dataset, _ = create_connections_datasets()
+    device = get_available_device()
+    training_loop(model, tokenizer, train_dataset, device)
 
 if __name__ == "__main__":
     fire.Fire(main)
+

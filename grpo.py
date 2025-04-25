@@ -1,7 +1,7 @@
 import dataclasses
 import gc
 from collections import defaultdict
-from typing import Callable, List
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -21,7 +21,7 @@ def rollout(
     reward_function: Callable,
     device: torch.device,
     dtype: torch.dtype,
-) -> List[Episode]:
+) -> list[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token = tokenizer.eos_token
     end_token_id = tokenizer.eos_token_id
@@ -97,7 +97,7 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     entropy = -torch.sum(probs * torch.log(probs), dim=-1)
     return entropy
 
-def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
+def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
     """
     Normalize rewards per group.
     This is done by subtracting the mean and dividing by the standard deviation of the rewards in each group.
@@ -120,11 +120,12 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     return normalized_episodes
 
 def update_policy(
-    model: AutoModelForCausalLM,
+    model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    episodes: List[Episode],
+    episodes: list[Episode],
     micro_batch_size: int,
     pad_token_id: int,
+    max_grad_norm: float,
     device: torch.device,
     dtype: torch.dtype,
 ):
@@ -135,6 +136,7 @@ def update_policy(
     n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
     entropy = 0.0
 
+    logger.info(f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches")
 
     for i in range(0, len(episodes), micro_batch_size):
         logger.info(
@@ -142,6 +144,7 @@ def update_policy(
             flush=True,
             end="",
         )
+
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
@@ -157,12 +160,13 @@ def update_policy(
             + [pad_token_id] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
-        batch_masks = [
+        batch_masks: list[list[int]] = [
             [0] * len(episode.prefix_token_ids)
             + [1] * len(episode.generated_token_ids)
             + [0] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
+
         # advantage is just reward, once normalized
         batch_advantages = [episode.reward for episode in batch_episodes]
         batch_token_ids = torch.tensor(batch_token_ids, device=device, dtype=torch.long)
@@ -170,3 +174,43 @@ def update_policy(
         batch_advantages = torch.tensor(
             batch_advantages, device=device, dtype=torch.float32
         )
+
+        with torch.autocast(device_type=device.type, dtype=dtype):
+            input_token_ids = batch_token_ids[:, :-1]
+            target_token_ids = batch_token_ids[:, 1:]
+            target_masks = batch_masks[:, 1:]
+            # get the logits for the micro-batch
+            # TODO replace with vllm
+            logits = model.forward(input_token_ids).float()
+
+        # cross entropy, ignore padding tokens
+        log_probs = -torch.nn.functional.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            target_token_ids.reshape(-1),
+            ignore_index=pad_token_id,
+            reduction="none",
+        ).reshape(input_token_ids.shape[0], -1)
+
+        with torch.no_grad():
+            token_entropy = compute_entropy(logits)
+            entropy = entropy + (token_entropy * target_masks).sum() / n_target_tokens
+
+        # multiply the log probs by the advantages
+        obj = log_probs * batch_advantages[:, None]
+        # scale by the mask, and normalize by token count
+        obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
+        loss = -obj
+        loss.backward()
+
+
+    # update the policy
+    grad_norm = torch.nn.utils.clip_grad_norm_(
+        model.parameters(), max_norm=max_grad_norm
+    )
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    return {
+        "loss": loss.item(),
+        "grad_norm": grad_norm.item(),
+        "entropy": entropy.item(),
+    }
