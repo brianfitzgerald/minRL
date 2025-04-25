@@ -29,7 +29,7 @@ def get_available_device() -> str:
 
 
 def init_model(
-    model_id: str = "Qwen2.5-3B-Instruct",
+    model_id: str = "Qwen/Qwen2.5-3B-Instruct",
 ) -> tuple[AutoTokenizer, AutoModelForCausalLM]:
     logger.info(f"Loading model {model_id}")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -153,7 +153,7 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
 
 
 
-def main(model_id: str = "Qwen2.5-3B-Instruct", eval_interval: int = 100):
+def main(model_id):
     tokenizer, model = init_model(model_id)
     train_dataset, _ = create_connections_datasets()
     device = get_available_device()
