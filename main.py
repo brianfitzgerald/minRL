@@ -36,6 +36,7 @@ def init_model(
     model = AutoModelForCausalLM.from_pretrained(model_id)
     logger.info("Model loaded.")
     device = get_available_device()
+    model.to(device)
     logger.info(f"Using device {device}")
     torch.set_default_device(device)
     torch.random.manual_seed(42)
@@ -55,10 +56,12 @@ class Config:
 
 def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
     generator = torch.Generator(device=device)
+    collate_fn = train_dataset.get_collate_fn()
+    print(collate_fn)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=ConnectionsDataset.collate_fn,
+        collate_fn=collate_fn,
         generator=generator,
         batch_size=1,
     )

@@ -1,10 +1,10 @@
 import itertools
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+from torch.utils.data import Dataset
 
 import pandas as pd
-from datasets import Dataset
 from loguru import logger
 from sklearn.model_selection import train_test_split
 from tokenizers import Tokenizer
@@ -114,8 +114,8 @@ Respond in the following format:
 User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
 Assistant: <reasoning>
 I'll start with breaking down the reasoning. For Group 1, the words related to wax: candle, crayon, honeycomb, seal — connecting to wax in various forms, such as crayon and candles being wax-based.
-For Group 2, “My Favorite Things” connects to lyrics mentioning kettles, mittens, raindrops, whiskers.
-Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves “no” related phrases like “no excuse,” “no defense.”
+For Group 2, "My Favorite Things" connects to lyrics mentioning kettles, mittens, raindrops, whiskers.
+Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves "no" related phrases like "no excuse," "no defense."
 </reasoning>
 <answer>
 <group> candle, crayon, honeycomb, seal</group>
@@ -150,38 +150,40 @@ def _connections_map(example: dict) -> dict:
 
 
 class ConnectionsDataset(Dataset):
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self, data: pd.DataFrame, tokenizer: Tokenizer):
         self.dataframe: pd.DataFrame = data
+        self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.dataframe)
 
-    def __getitem__(self, idx):
-        item = self.dataframe.iloc[idx]
-        return _connections_map(item)
+    def __getitem__(self, idx: int) -> dict:
+        item = self.dataframe.loc[idx].to_dict()
+        mapped = _connections_map(item)
+        return mapped
 
-    @staticmethod
-    def collate_fn(batch: list[dict]) -> dict:
-        # Combine all prompts and answers from the batch
-        prompts = []
-        answers = []
-        answer_groups = []
-
-        for item in batch:
-            prompts.extend(item["prompt"])
-            answers.append(item["answer"])
-            answer_groups.extend(item["answer_groups"])
-
-        return {"prompt": prompts, "answer": answers, "answer_groups": answer_groups}
+    def get_collate_fn(self) -> Callable[[list[dict]], MiniBatch]:
+        def _collate_fn(batch: list[dict]) -> MiniBatch:
+            prompts = [item["prompt"] for item in batch]
+            prefix_tokens = [self.tokenizer.encode(p).tokens for p in prompts]
+            prefix_token_ids = [self.tokenizer.encode(p).ids for p in prompts]
+            answer = [item["answer"] for item in batch]
+            return MiniBatch(
+                prefix=prompts,
+                prefix_tokens=prefix_tokens,
+                prefix_token_ids=prefix_token_ids,
+                target=answer,
+            )
+        return _collate_fn
 
 
 def create_connections_datasets(
+    tokenizer: Tokenizer,
     jsonl_path: str = "connections_prompts.jsonl",
     num_samples: int = 10000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     # Load and process data
-    print(jsonl_path)
     prompts_pd = pd.read_json(jsonl_path, lines=True)
     df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
 
@@ -199,10 +201,9 @@ def create_connections_datasets(
     # Create DataFrame and split
     groups_pd = pd.DataFrame(groups)
     train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
-    print(train_data)
 
     # Create datasets
-    train_dataset = ConnectionsDataset(train_data)
-    val_dataset = ConnectionsDataset(val_data)
+    train_dataset = ConnectionsDataset(train_data, tokenizer)
+    val_dataset = ConnectionsDataset(val_data, tokenizer)
 
     return train_dataset, val_dataset
