@@ -8,9 +8,8 @@ class Episode:
 
     prefix: str
     text: str
-    prefix_token_ids: List[int]
-    prefix_tokens: List[str]
-    generated_token_ids: List[int]
+    prefix_token_ids: list[int]
+    generated_token_ids: list[int]
     is_finished: bool
     reward: float
     reward_info: Dict[str, float]

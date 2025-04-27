@@ -1,7 +1,6 @@
 import itertools
 import re
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 from torch.utils.data import Dataset
 
 import pandas as pd
@@ -100,11 +99,10 @@ class ConnectionsDataset(Dataset):
             tokenize=False
         )
         tokens = self.tokenizer.encode(prefix)
-        print(tokens)
         return {
             "prefix": prefix,
-            "prefix_tokens": tokens.tokens,
-            "prefix_token_ids": tokens.ids,
+            "prefix_tokens": tokens,
+            "prefix_token_ids": tokens,
             "answer": mapped["answer"],
             "answer_groups": mapped["answer_groups"],
         }

@@ -26,16 +26,17 @@ def rollout(
     end_token = tokenizer.eos_token
     end_token_id = tokenizer.eos_token_id
     pad_token_id = tokenizer.pad_token_id
-    
+
     # Prepare input_ids for generation
     input_ids = []
     for prefix_ids in batch.prefix_token_ids:
         for _ in range(num_answer_per_question):
             input_ids.append(prefix_ids)
-    
+
     # Convert to tensor and move to device
     input_ids = torch.tensor(input_ids, dtype=torch.long, device=device)
-    
+
+    logger.info(f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}")
     # Generate responses
     outputs = model.generate(
         input_ids=input_ids,
@@ -47,46 +48,55 @@ def rollout(
         return_dict_in_generate=True,
         output_scores=True,
     )
-    
+
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
-    
+
     # Process outputs and create episodes
     episodes = []
     for i in range(len(batch.prefix)):
         for j in range(num_answer_per_question):
             idx = i * num_answer_per_question + j
-            generated_token_ids = outputs.sequences[idx][len(batch.prefix_token_ids[i]):].tolist()
-            
+            generated_token_ids = outputs.sequences[idx][
+                len(batch.prefix_token_ids[i]) :
+            ].tolist()
+
+            logger.info(f"Generated token ids: {len(generated_token_ids)}")
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
-                generated_token_ids = generated_token_ids[:generated_token_ids.index(pad_token_id)]
-            
-            generated_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True)
-            
+                generated_token_ids = generated_token_ids[
+                    : generated_token_ids.index(pad_token_id)
+                ]
+            logger.info(f"Generated token ids after removing padding: {len(generated_token_ids)}")
+
+            generated_text = tokenizer.decode(
+                generated_token_ids, skip_special_tokens=True
+            )
+            logger.info(f"Generated text: {generated_text}")
+
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
-                numbers=batch.numbers[i],
-                target=batch.target[i],
+                answer=batch.answer[i],
+                answer_groups=batch.answer_groups[i],
                 end_token=end_token,
             )
-            
+
             # Create episode
             episode = Episode(
                 prefix=batch.prefix[i],
                 text=batch.prefix[i] + generated_text,
                 prefix_token_ids=batch.prefix_token_ids[i],
-                prefix_tokens=batch.prefix_tokens[i],
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards["reward"],
                 reward_info=rewards["reward_info"],
             )
             episodes.append(episode)
-    
+
     return episodes
+
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     """
@@ -97,6 +107,7 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     entropy = -torch.sum(probs * torch.log(probs), dim=-1)
     return entropy
 
+
 def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
     """
     Normalize rewards per group.
@@ -106,7 +117,7 @@ def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
     groups = defaultdict(list)
     for episode in episodes:
         groups[episode.prefix].append(episode)
-    
+
     # Normalize rewards within each group
     normalized_episodes = []
     for group in groups.values():
@@ -116,8 +127,9 @@ def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
             normalized_episodes.append(
                 dataclasses.replace(episode, reward=(episode.reward - mean) / std)
             )
-    
+
     return normalized_episodes
+
 
 def update_policy(
     model: nn.Module,
@@ -131,12 +143,16 @@ def update_policy(
 ):
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
-    episodes.sort(key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True)
+    episodes.sort(
+        key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True
+    )
     n_micro_batches = len(episodes) // micro_batch_size
     n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
     entropy = 0.0
 
-    logger.info(f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches")
+    logger.info(
+        f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches"
+    )
 
     for i in range(0, len(episodes), micro_batch_size):
         logger.info(
@@ -201,7 +217,6 @@ def update_policy(
         obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
         loss = -obj
         loss.backward()
-
 
     # update the policy
     grad_norm = torch.nn.utils.clip_grad_norm_(

@@ -55,6 +55,7 @@ class Config:
     ckpt_save_interval: int = 100
 
 def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
+    logger.info("Starting training loop")
     generator = torch.Generator(device=device)
     train_dataloader = DataLoader(
         train_dataset,
@@ -70,8 +71,10 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
     dtype = torch.bfloat16
     tb_writer = SummaryWriter()
     config = Config()
+    logger.info("Training loop initialized")
 
     for step, batch in enumerate(train_dataloader, start=1):
+        logger.info(f"Starting rollout for step {step}")
         episodes = rollout(
             model=model,
             tokenizer=tokenizer,
@@ -84,6 +87,7 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
         )
         if config["training"]["skip_unfinished_episodes"]:
             episodes = [episode for episode in episodes if episode.is_finished]
+        logger.info(f"Updating policy for step {step}")
         results = update_policy(
             model=model,
             optimizer=optimizer,
