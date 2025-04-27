@@ -56,12 +56,10 @@ class Config:
 
 def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
     generator = torch.Generator(device=device)
-    collate_fn = train_dataset.get_collate_fn()
-    print(collate_fn)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=ConnectionsDataset.collate_fn,
         generator=generator,
         batch_size=1,
     )
@@ -158,7 +156,7 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
 
 def main(model_id):
     tokenizer, model = init_model(model_id)
-    train_dataset, _ = create_connections_datasets()
+    train_dataset, _ = create_connections_datasets(tokenizer)
     device = get_available_device()
     training_loop(model, tokenizer, train_dataset, device)
 

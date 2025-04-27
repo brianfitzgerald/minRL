@@ -20,7 +20,8 @@ class Episode:
 class MiniBatch:
     """Batch of data for each training step."""
 
-    prefix: List[str]
-    prefix_tokens: List[List[str]]
-    prefix_token_ids: List[List[int]]
-    target: List[str]
+    prefix: list[str]
+    prefix_tokens: list[list[str]]
+    prefix_token_ids: list[list[int]]
+    answer: list[str]
+    answer_groups: list[list[str]]
