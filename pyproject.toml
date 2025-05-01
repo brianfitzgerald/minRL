@@ -5,6 +5,7 @@ description = "Minimal RL for LLM implementations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "accelerate>=1.6.0",
     "datasets>=3.5.0",
     "fire>=0.7.0",
     "ipykernel>=6.29.5",

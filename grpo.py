@@ -35,6 +35,7 @@ def rollout(
 
     # Convert to tensor and move to device
     input_ids = torch.tensor(input_ids, dtype=torch.long, device=device)
+    print('batch pref',len(batch.prefix), num_answer_per_question)
 
     logger.info(f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}")
     # Generate responses
@@ -53,16 +54,20 @@ def rollout(
     gc.collect()
     torch.cuda.empty_cache()
 
+
     # Process outputs and create episodes
     episodes = []
     for i in range(len(batch.prefix)):
         for j in range(num_answer_per_question):
             idx = i * num_answer_per_question + j
+
+            # Get tokens generated
             generated_token_ids = outputs.sequences[idx][
                 len(batch.prefix_token_ids[i]) :
             ].tolist()
 
             logger.info(f"Generated token ids: {len(generated_token_ids)}")
+
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
                 generated_token_ids = generated_token_ids[
@@ -79,7 +84,6 @@ def rollout(
             rewards = reward_function(
                 response=generated_text,
                 answer=batch.answer[i],
-                answer_groups=batch.answer_groups[i],
                 end_token=end_token,
             )
 

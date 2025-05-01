@@ -29,11 +29,16 @@ def get_available_device() -> str:
 
 
 def init_model(
-    model_id: str = "Qwen/Qwen2.5-3B-Instruct",
+    model_id: str = "Qwen/Qwen2.5-0.5B-Instruct",
 ) -> tuple[AutoTokenizer, AutoModelForCausalLM]:
-    logger.info(f"Loading model {model_id}")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        ignore_mismatched_sizes=True,
+    )
+
     logger.info("Model loaded.")
     device = get_available_device()
     model.to(device)
@@ -53,6 +58,7 @@ class Config:
     max_grad_norm: float = 1.0
     eval_interval: int = 100
     ckpt_save_interval: int = 100
+    skip_unfinished_episodes: bool = False
 
 def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
     logger.info("Starting training loop")
@@ -75,6 +81,7 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
 
     for step, batch in enumerate(train_dataloader, start=1):
         logger.info(f"Starting rollout for step {step}")
+
         episodes = rollout(
             model=model,
             tokenizer=tokenizer,
@@ -85,16 +92,18 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
             device=device,
             dtype=dtype,
         )
-        if config["training"]["skip_unfinished_episodes"]:
+        if config.skip_unfinished_episodes:
             episodes = [episode for episode in episodes if episode.is_finished]
         logger.info(f"Updating policy for step {step}")
+
+        # Update policy - compute loss and perform backward pass
         results = update_policy(
             model=model,
             optimizer=optimizer,
             episodes=episodes,
-            micro_batch_size=config["training"]["micro_batch_size"],
+            micro_batch_size=config.micro_batch_size,
             pad_token_id=tokenizer.pad_token_id,
-            max_grad_norm=config["training"]["max_grad_norm"],
+            max_grad_norm=config.max_grad_norm,
             device=device,
             dtype=dtype,
         )

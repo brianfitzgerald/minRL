@@ -69,7 +69,7 @@ def answer_reward_function(
 def reward_function(
     response: str,
     numbers: List[int] = None,
-    target: int = None,
+    answer: int = None,
     end_token: str = None,
 ) -> Dict[str, Any]:
     """Reward function for Countdown Tasks.
@@ -77,7 +77,7 @@ def reward_function(
     Total reward = 0.1 * format_reward + answer_reward
     """
     format_reward = format_reward_function("<think>" + response, end_token)
-    answer_reward = answer_reward_function(response, numbers, target)
+    answer_reward = answer_reward_function(response, numbers, answer)
     return {
         "reward": format_reward * 0.1 + answer_reward,
         "reward_info": {
