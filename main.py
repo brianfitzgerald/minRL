@@ -60,24 +60,16 @@ class Config:
     ckpt_save_interval: int = 100
     skip_unfinished_episodes: bool = False
 
-def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_dataset: ConnectionsDataset, device: str):
-    logger.info("Starting training loop")
-    generator = torch.Generator(device=device)
-    train_dataloader = DataLoader(
-        train_dataset,
-        shuffle=True,
-        collate_fn=ConnectionsDataset.collate_fn,
-        generator=generator,
-        batch_size=1,
+
+def training_loop(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    train_dataset: ConnectionsDataset,
+    device: str,
+):
+    train_dataloader, optimizer, start_time, ckpt_dir, dtype, tb_writer, config = (
+        init_training(model, train_dataset, device)
     )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    start_time = time.time()
-    ckpt_dir = Path("ckpts")
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    dtype = torch.bfloat16
-    tb_writer = SummaryWriter()
-    config = Config()
-    logger.info("Training loop initialized")
 
     for step, batch in enumerate(train_dataloader, start=1):
         logger.info(f"Starting rollout for step {step}")
@@ -166,6 +158,26 @@ def training_loop(model: AutoModelForCausalLM, tokenizer: AutoTokenizer, train_d
             print(f"Saved checkpoint to {output_file}")
 
 
+def init_training(model, train_dataset, device):
+    logger.info("Starting training loop")
+    generator = torch.Generator(device=device)
+    train_dataloader = DataLoader(
+        train_dataset,
+        shuffle=True,
+        collate_fn=ConnectionsDataset.collate_fn,
+        generator=generator,
+        batch_size=1,
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    start_time = time.time()
+    ckpt_dir = Path("ckpts")
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    dtype = torch.bfloat16
+    tb_writer = SummaryWriter()
+    config = Config()
+    logger.info("Training loop initialized")
+    return train_dataloader, optimizer, start_time, ckpt_dir, dtype, tb_writer, config
+
 
 def main(model_id):
     tokenizer, model = init_model(model_id)
@@ -173,6 +185,6 @@ def main(model_id):
     device = get_available_device()
     training_loop(model, tokenizer, train_dataset, device)
 
+
 if __name__ == "__main__":
     fire.Fire(main)
-
