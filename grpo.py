@@ -1,12 +1,17 @@
 import dataclasses
 import gc
 from collections import defaultdict
-from typing import Callable
+from pydoc import html
+from typing import Callable, Dict, List, Any
+from tensorboardX import SummaryWriter
 
+import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers import AutoModelForCausalLM, PreTrainedTokenizer
+from transformers.generation.utils import GenerateOutput
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 from data_types import Episode, MiniBatch
 
@@ -14,31 +19,33 @@ from data_types import Episode, MiniBatch
 @torch.no_grad()
 def rollout(
     model: AutoModelForCausalLM,
-    batch: MiniBatch,
     tokenizer: PreTrainedTokenizer,
+    batch: MiniBatch,
     max_gen_len: int,
     num_answer_per_question: int,
     reward_function: Callable,
     device: torch.device,
-) -> list[Episode]:
+) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token = tokenizer.eos_token
     end_token_id = tokenizer.eos_token_id
     pad_token_id = tokenizer.pad_token_id
 
     # Prepare input_ids for generation
-    input_ids = []
+    input_ids: List[List[int]] = []
     for prefix_ids in batch.prefix_token_ids:
         for _ in range(num_answer_per_question):
             input_ids.append(prefix_ids)
 
     # Convert to tensor and move to device
-    input_ids = torch.tensor(input_ids, dtype=torch.long, device=device)
+    input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
 
-    logger.info(f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}")
+    logger.info(
+        f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}"
+    )
     # Generate responses
-    outputs = model.generate(
-        input_ids=input_ids,
+    outputs: GenerateOutput = model.generate(  # type: ignore
+        input_ids=input_ids_tensor,
         max_new_tokens=max_gen_len,
         pad_token_id=pad_token_id,
         eos_token_id=end_token_id,
@@ -52,9 +59,8 @@ def rollout(
     gc.collect()
     torch.cuda.empty_cache()
 
-
     # Process outputs and create episodes
-    episodes = []
+    episodes: List[Episode] = []
     for i in range(len(batch.prefix)):
         for j in range(num_answer_per_question):
             idx = i * num_answer_per_question + j
@@ -71,7 +77,9 @@ def rollout(
                 generated_token_ids = generated_token_ids[
                     : generated_token_ids.index(pad_token_id)
                 ]
-            logger.info(f"Generated token ids after removing padding: {len(generated_token_ids)}")
+            logger.info(
+                f"Generated token ids after removing padding: {len(generated_token_ids)}"
+            )
 
             generated_text = tokenizer.decode(
                 generated_token_ids, skip_special_tokens=True
@@ -110,18 +118,18 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     return entropy
 
 
-def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
+def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     """
     Normalize rewards per group.
     This is done by subtracting the mean and dividing by the standard deviation of the rewards in each group.
     """
     # Group episodes by prefix and calculate stats
-    groups = defaultdict(list)
+    groups: Dict[str, List[Episode]] = defaultdict(list)
     for episode in episodes:
         groups[episode.prefix].append(episode)
 
     # Normalize rewards within each group
-    normalized_episodes = []
+    normalized_episodes: List[Episode] = []
     for group in groups.values():
         rewards = torch.tensor([e.reward for e in group])
         mean, std = rewards.mean(), rewards.std()
@@ -136,13 +144,13 @@ def normalize_rewards_per_group(episodes: list[Episode]) -> list[Episode]:
 def update_policy(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    episodes: list[Episode],
+    episodes: List[Episode],
     micro_batch_size: int,
     pad_token_id: int,
     max_grad_norm: float,
     device: torch.device,
     dtype: torch.dtype,
-):
+) -> Dict[str, float]:
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
     episodes.sort(
@@ -150,7 +158,7 @@ def update_policy(
     )
     n_micro_batches = len(episodes) // micro_batch_size
     n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
-    entropy = 0.0
+    entropy = torch.tensor(0.0, device=device)
 
     logger.info(
         f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches"
@@ -178,27 +186,32 @@ def update_policy(
             + [pad_token_id] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
-        batch_masks: list[list[int]] = [
+        print(batch_token_ids)
+        batch_masks = [
             [0] * len(episode.prefix_token_ids)
             + [1] * len(episode.generated_token_ids)
             + [0] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
+        print(batch_masks)
 
         # advantage is just reward, once normalized
         batch_advantages = [episode.reward for episode in batch_episodes]
-        batch_token_ids = torch.tensor(batch_token_ids, device=device, dtype=torch.long)
-        batch_masks = torch.tensor(batch_masks, device=device, dtype=torch.bool)
-        batch_advantages = torch.tensor(
+        batch_token_ids_tensor = torch.tensor(
+            batch_token_ids, device=device, dtype=torch.long
+        )
+        batch_masks_tensor = torch.tensor(batch_masks, device=device, dtype=torch.bool)
+        batch_advantages_tensor = torch.tensor(
             batch_advantages, device=device, dtype=torch.float32
         )
 
         with torch.autocast(device_type=device.type, dtype=dtype):
-            input_token_ids = batch_token_ids[:, :-1]
-            target_token_ids = batch_token_ids[:, 1:]
-            target_masks = batch_masks[:, 1:]
+            input_token_ids = batch_token_ids_tensor[:, :-1]
+            target_token_ids = batch_token_ids_tensor[:, 1:]
+            target_masks = batch_masks_tensor[:, 1:]
             # get the logits for the micro-batch
             # TODO replace with vllm
+            print(input_token_ids)
             out = model.forward(input_token_ids)
             logits: torch.Tensor = out.logits.float()
 
@@ -209,13 +222,12 @@ def update_policy(
             ignore_index=pad_token_id,
             reduction="none",
         ).reshape(input_token_ids.shape[0], -1)
-
         with torch.no_grad():
             token_entropy = compute_entropy(logits)
             entropy = entropy + (token_entropy * target_masks).sum() / n_target_tokens
 
         # multiply the log probs by the advantages
-        obj = log_probs * batch_advantages[:, None]
+        obj = log_probs * batch_advantages_tensor[:, None]
         # scale by the mask, and normalize by token count
         obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
         loss = -obj
@@ -228,7 +240,78 @@ def update_policy(
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
     return {
-        "loss": loss.item(),
-        "grad_norm": grad_norm.item(),
-        "entropy": entropy.item(),
+        "loss": float(loss),
+        "grad_norm": float(grad_norm),
+        "entropy": float(entropy),
+    }
+
+
+def compute_metrics(
+    episodes: List[Episode],
+    results: Dict[str, float],
+    tb_writer: SummaryWriter,
+    step: int,
+    optimizer: torch.optim.Optimizer,
+) -> Dict[str, float]:
+    """
+    Compute and return important metrics from episodes and training results.
+
+    Args:
+        episodes: List of episodes from the current batch
+        results: Dictionary containing training results (loss, grad_norm, entropy)
+        optimizer: The optimizer used for training
+
+    Returns:
+        Dictionary containing all computed metrics
+    """
+    reward = [episode.reward for episode in episodes]
+    formatted_reward = [episode.reward_info["format_reward"] for episode in episodes]
+    answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
+    num_finished_episodes = sum(episode.is_finished for episode in episodes)
+    mean_reward = float(np.mean(reward))
+    std_reward = float(np.std(reward))
+    success_rate = float(np.mean(answer_reward))
+    format_reward = float(np.mean(formatted_reward))
+    grad_norm = results["grad_norm"]
+    entropy = results["entropy"]
+    lr = optimizer.param_groups[0]["lr"]
+    loss = results["loss"]
+    mean_response_len = float(
+        np.mean([len(episode.generated_token_ids) for episode in episodes])
+    )
+
+    tb_writer.add_scalar("loss", loss, step)
+    tb_writer.add_scalar("mean_reward", mean_reward, step)
+    tb_writer.add_scalar("std_reward", std_reward, step)
+    tb_writer.add_scalar("success_rate/train", success_rate, step)
+    tb_writer.add_scalar("format_reward", format_reward, step)
+    tb_writer.add_scalar("grad_norm", grad_norm, step)
+    tb_writer.add_scalar("num_finished_episodes", num_finished_episodes, step)
+    tb_writer.add_scalar("learning_rate", lr, step)
+    tb_writer.add_scalar("mean_response_len", mean_response_len, step)
+    tb_writer.add_scalar("entropy", entropy, step)
+    for i, episode in enumerate(episodes):
+        # TensorBoard treats text as markdown.
+        text = html.escape(episode.text)
+        tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
+    print(
+        f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
+        f"train success_rate: {success_rate:.2f}, "
+        f"grad_norm: {grad_norm:.2f}, "
+        f"num_finished_episodes: {num_finished_episodes}, "
+        f"mean_response_len: {mean_response_len:.2f}, "
+        f"entropy: {entropy:.2f}"
+    )
+
+    return {
+        "mean_reward": mean_reward,
+        "std_reward": std_reward,
+        "success_rate": success_rate,
+        "format_reward": format_reward,
+        "grad_norm": grad_norm,
+        "entropy": entropy,
+        "learning_rate": lr,
+        "loss": loss,
+        "mean_response_len": mean_response_len,
+        "num_finished_episodes": float(num_finished_episodes),
     }
