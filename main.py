@@ -1,6 +1,8 @@
 import html
-from pathlib import Path
 import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import fire
 import numpy as np
@@ -9,12 +11,10 @@ from loguru import logger
 from sympy import evaluate
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer
 
 from dataset import ConnectionsDataset, create_connections_datasets
 from grpo import rollout, update_policy
-from dataclasses import dataclass
-
 from tasks.countdown import reward_function
 
 
@@ -63,46 +63,43 @@ class Config:
 
 def training_loop(
     model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
+    tokenizer: PreTrainedTokenizer,
     train_dataset: ConnectionsDataset,
     device: torch.device,
 ):
-    train_dataloader, optimizer, start_time, ckpt_dir, dtype, tb_writer, config = (
-        init_training(model, train_dataset, device)
-    )
+    training_objects = init_training(model, train_dataset, device)
 
-    for step, batch in enumerate(train_dataloader, start=1):
+    for step, batch in enumerate(training_objects.train_dataloader, start=1):
         logger.info(f"Starting rollout for step {step}")
 
         episodes = rollout(
             model=model,
             tokenizer=tokenizer,
             batch=batch,
-            max_gen_len=config.max_gen_len,
-            num_answer_per_question=config.num_answer_per_question,
+            max_gen_len=training_objects.config.max_gen_len,
+            num_answer_per_question=training_objects.config.num_answer_per_question,
             reward_function=reward_function,
             device=device,
-            dtype=dtype,
         )
-        if config.skip_unfinished_episodes:
+        if training_objects.config.skip_unfinished_episodes:
             episodes = [episode for episode in episodes if episode.is_finished]
         logger.info(f"Updating policy for step {step}")
 
         # Update policy - compute loss and perform backward pass
         results = update_policy(
             model=model,
-            optimizer=optimizer,
+            optimizer=training_objects.optimizer,
             episodes=episodes,
-            micro_batch_size=config.micro_batch_size,
+            micro_batch_size=training_objects.config.micro_batch_size,
             pad_token_id=tokenizer.pad_token_id,
-            max_grad_norm=config.max_grad_norm,
+            max_grad_norm=training_objects.config.max_grad_norm,
             device=device,
-            dtype=dtype,
+            dtype=training_objects.dtype,
         )
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         end_time = time.time()
-        duration = end_time - start_time
-        start_time = end_time
+        duration = end_time - training_objects.start_time
 
         # compute and log important metrics
         reward = [episode.reward for episode in episodes]
@@ -117,11 +114,12 @@ def training_loop(
         format_reward = np.mean(formatted_reward)
         grad_norm = results["grad_norm"]
         entropy = results["entropy"]
-        lr = optimizer.param_groups[0]["lr"]
+        lr = training_objects.optimizer.param_groups[0]["lr"]
         loss = results["loss"]
         mean_response_len = np.mean(
             [len(episode.generated_token_ids) for episode in episodes]
         )
+
         print(
             f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
             f"train success_rate: {success_rate:.2f}, "
@@ -130,10 +128,12 @@ def training_loop(
             f"mean_response_len: {mean_response_len:.2f}, "
             f"entropy: {entropy:.2f}"
         )
-        if step % config.eval_interval == 0:
-            eval_success_rate = evaluate(model, tokenizer, device, dtype, config)
+        if step % training_objects.config.eval_interval == 0:
+            eval_success_rate = evaluate(model, tokenizer, device, dtype, training_objects.config)
             print(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
-            tb_writer.add_scalar("success_rate/eval", eval_success_rate, step)
+            training_objects.tb_writer.add_scalar("success_rate/eval", eval_success_rate, step)
+
+        tb_writer = training_objects.tb_writer
 
         tb_writer.add_scalar("loss", loss, step)
         tb_writer.add_scalar("mean_reward", mean_reward, step)
@@ -158,6 +158,16 @@ def training_loop(
             print(f"Saved checkpoint to {output_file}")
 
 
+@dataclass
+class TrainingObjects:
+    train_dataloader: DataLoader
+    optimizer: torch.optim.Optimizer
+    start_time: float
+    ckpt_dir: Path
+    dtype: torch.dtype
+    tb_writer: SummaryWriter
+    config: Config
+
 def init_training(model, train_dataset, device):
     logger.info("Starting training loop")
     generator = torch.Generator(device=device)
@@ -176,7 +186,15 @@ def init_training(model, train_dataset, device):
     tb_writer = SummaryWriter()
     config = Config()
     logger.info("Training loop initialized")
-    return train_dataloader, optimizer, start_time, ckpt_dir, dtype, tb_writer, config
+    return TrainingObjects(
+        train_dataloader=train_dataloader,
+        optimizer=optimizer,
+        start_time=start_time,
+        ckpt_dir=ckpt_dir,
+        dtype=dtype,
+        tb_writer=tb_writer,
+        config=config
+    )
 
 
 def main(model_id):

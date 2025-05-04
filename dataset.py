@@ -128,7 +128,7 @@ class ConnectionsDataset(Dataset):
 def create_connections_datasets(
     tokenizer: Tokenizer,
     jsonl_path: str = "connections_prompts.jsonl",
-    num_samples: int = 10000,
+    num_samples: int = 1000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     # Load and process data

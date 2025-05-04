@@ -20,7 +20,6 @@ def rollout(
     num_answer_per_question: int,
     reward_function: Callable,
     device: torch.device,
-    dtype: torch.dtype,
 ) -> list[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token = tokenizer.eos_token
@@ -35,7 +34,6 @@ def rollout(
 
     # Convert to tensor and move to device
     input_ids = torch.tensor(input_ids, dtype=torch.long, device=device)
-    print('batch pref',len(batch.prefix), num_answer_per_question)
 
     logger.info(f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}")
     # Generate responses
