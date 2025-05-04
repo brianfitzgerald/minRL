@@ -201,7 +201,8 @@ def update_policy(
             target_masks = batch_masks[:, 1:]
             # get the logits for the micro-batch
             # TODO replace with vllm
-            logits = model.forward(input_token_ids).float()
+            out = model.forward(input_token_ids)
+            logits: torch.Tensor = out.logits.float()
 
         # cross entropy, ignore padding tokens
         log_probs = -torch.nn.functional.cross_entropy(

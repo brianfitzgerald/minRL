@@ -65,7 +65,7 @@ def training_loop(
     model: AutoModelForCausalLM,
     tokenizer: AutoTokenizer,
     train_dataset: ConnectionsDataset,
-    device: str,
+    device: torch.device,
 ):
     train_dataloader, optimizer, start_time, ckpt_dir, dtype, tb_writer, config = (
         init_training(model, train_dataset, device)
