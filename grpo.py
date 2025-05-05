@@ -92,6 +92,7 @@ def rollout(
                 answer=batch.answer[i],
                 end_token=end_token,
             )
+            print("rewards", rewards)
 
             # Create episode
             episode = Episode(
@@ -122,6 +123,7 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     """
     Normalize rewards per group.
     This is done by subtracting the mean and dividing by the standard deviation of the rewards in each group.
+    If std is 0, returns the original rewards.
     """
     # Group episodes by prefix and calculate stats
     groups: Dict[str, List[Episode]] = defaultdict(list)
@@ -132,10 +134,23 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     normalized_episodes: List[Episode] = []
     for group in groups.values():
         rewards = torch.tensor([e.reward for e in group])
-        mean, std = rewards.mean(), rewards.std()
-        for episode in group:
+        mean = rewards.mean()
+        std = rewards.std()
+        if torch.isnan(std):
+            std = 0
+        print('rewards',rewards)
+        print('mean',mean)
+        print('std',std)
+
+        # Handle case where std is 0 to avoid division by zero
+        if std == 0:
+            normalized_rewards = rewards - mean
+        else:
+            normalized_rewards = (rewards - mean) / std
+
+        for episode, norm_reward in zip(group, normalized_rewards):
             normalized_episodes.append(
-                dataclasses.replace(episode, reward=(episode.reward - mean) / std)
+                dataclasses.replace(episode, reward=float(norm_reward))
             )
 
     return normalized_episodes
@@ -150,7 +165,9 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     dtype: torch.dtype,
-) -> Dict[str, float]:
+    apply_loss: bool = True,
+) -> dict[str, float]:
+    print("episodes", [episode.reward for episode in episodes])
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
     episodes.sort(
@@ -164,6 +181,8 @@ def update_policy(
         f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches"
     )
 
+    loss, grad_norm, entropy = 0, 0, 0
+
     for i in range(0, len(episodes), micro_batch_size):
         logger.info(
             f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}",
@@ -174,6 +193,7 @@ def update_policy(
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
+        print("batch ep", [episode.reward for episode in batch_episodes])
         batch_lengths = [
             len(episode.prefix_token_ids) + len(episode.generated_token_ids)
             for episode in batch_episodes
@@ -186,14 +206,12 @@ def update_policy(
             + [pad_token_id] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
-        print(batch_token_ids)
         batch_masks = [
             [0] * len(episode.prefix_token_ids)
             + [1] * len(episode.generated_token_ids)
             + [0] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
-        print(batch_masks)
 
         # advantage is just reward, once normalized
         batch_advantages = [episode.reward for episode in batch_episodes]
@@ -211,9 +229,8 @@ def update_policy(
             target_masks = batch_masks_tensor[:, 1:]
             # get the logits for the micro-batch
             # TODO replace with vllm
-            print(input_token_ids)
-            out = model.forward(input_token_ids)
-            logits: torch.Tensor = out.logits.float()
+            out = model(input_ids=input_token_ids, attention_mask=batch_masks_tensor)
+            logits: torch.Tensor = out.logits
 
         # cross entropy, ignore padding tokens
         log_probs = -torch.nn.functional.cross_entropy(
@@ -224,21 +241,25 @@ def update_policy(
         ).reshape(input_token_ids.shape[0], -1)
         with torch.no_grad():
             token_entropy = compute_entropy(logits)
+            # single entropy value for the sequence
             entropy = entropy + (token_entropy * target_masks).sum() / n_target_tokens
 
         # multiply the log probs by the advantages
         obj = log_probs * batch_advantages_tensor[:, None]
         # scale by the mask, and normalize by token count
         obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
-        loss = -obj
-        loss.backward()
+        if apply_loss:
+            loss = -obj
+            loss.backward()
 
-    # update the policy
-    grad_norm = torch.nn.utils.clip_grad_norm_(
-        model.parameters(), max_norm=max_grad_norm
-    )
-    optimizer.step()
-    optimizer.zero_grad(set_to_none=True)
+    if apply_loss:
+        # update the policy
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=max_grad_norm
+        )
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
     return {
         "loss": float(loss),
         "grad_norm": float(grad_norm),
