@@ -32,9 +32,9 @@ You are an expert puzzle solving model.
 Find groups of words that are related to each other. Each group is four words long. There are exactly four groups in total.
 You may only use each word in one group.
 Respond in the following format:
-<reasoning>
+<think>
 ...
-</reasoning>
+</think>
 <answer>
 <group>
 ...
@@ -46,11 +46,11 @@ Respond in the following format:
 # Example
 
 User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
-Assistant: <reasoning>
-I'll start with breaking down the reasoning. For Group 1, the words related to wax: candle, crayon, honeycomb, seal — connecting to wax in various forms, such as crayon and candles being wax-based.
+Assistant: <think>
+For Group 1, the words related to wax: candle, crayon, honeycomb, seal — connecting to wax in various forms, such as crayon and candles being wax-based.
 For Group 2, "My Favorite Things" connects to lyrics mentioning kettles, mittens, raindrops, whiskers.
 Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves "no" related phrases like "no excuse," "no defense."
-</reasoning>
+</think>
 <answer>
 <group> candle, crayon, honeycomb, seal</group>
 <group> kettles, mittens, raindrops, whiskers</group>
@@ -92,7 +92,7 @@ class ConnectionsDataset(Dataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx: int) -> dict:
-        item = self.dataframe.loc[idx].to_dict()
+        item = self.dataframe.iloc[idx].to_dict()
         mapped = _connections_map(item)
         prefix = self.tokenizer.apply_chat_template( # type: ignore
             mapped["prompt"],
@@ -129,7 +129,7 @@ class ConnectionsDataset(Dataset):
 def create_connections_datasets(
     tokenizer: Tokenizer,
     jsonl_path: str = "connections_prompts.jsonl",
-    num_samples: int = 1000,
+    num_samples: int = 10000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     # Load and process data
