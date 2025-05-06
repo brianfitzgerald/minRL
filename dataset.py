@@ -96,7 +96,8 @@ class ConnectionsDataset(Dataset):
         mapped = _connections_map(item)
         prefix = self.tokenizer.apply_chat_template( # type: ignore
             mapped["prompt"],
-            tokenize=False
+            tokenize=False,
+            enable_thinking=False
         )
         tokens = self.tokenizer.encode(prefix)
         return {

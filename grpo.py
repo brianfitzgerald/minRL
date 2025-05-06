@@ -2,7 +2,7 @@ import dataclasses
 import gc
 from collections import defaultdict
 from pydoc import html
-from typing import Callable, Dict, List, Any
+from typing import Callable, Dict, List
 from tensorboardX import SummaryWriter
 
 import numpy as np
@@ -21,7 +21,7 @@ def rollout(
     model: AutoModelForCausalLM,
     tokenizer: PreTrainedTokenizer,
     batch: MiniBatch,
-    max_gen_len: int,
+    max_new_tokens: int,
     num_answer_per_question: int,
     reward_function: Callable,
     device: torch.device,
@@ -41,12 +41,12 @@ def rollout(
     input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
 
     logger.info(
-        f"Generating responses for {len(input_ids)} prompts, max_gen_len={max_gen_len}"
+        f"Generating responses for {len(input_ids)} prompts, max_tokens={max_new_tokens}"
     )
     # Generate responses
     outputs: GenerateOutput = model.generate(  # type: ignore
         input_ids=input_ids_tensor,
-        max_new_tokens=max_gen_len,
+        max_new_tokens=max_new_tokens,
         pad_token_id=pad_token_id,
         eos_token_id=end_token_id,
         do_sample=True,

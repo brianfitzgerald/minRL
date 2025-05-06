@@ -52,9 +52,9 @@ def init_model(
 class Config:
     model_id: str = "Qwen2.5-3B-Instruct"
     eval_interval: int = 100
-    num_answer_per_question: int = 1
-    max_gen_len: int = 100
-    micro_batch_size: int = 1
+    num_answer_per_question: int = 2
+    max_new_tokens: int = 512
+    micro_batch_size: int = 2
     max_grad_norm: float = 1.0
     eval_interval: int = 100
     ckpt_save_interval: int = 100
@@ -75,10 +75,10 @@ def training_loop(
             model=model,
             tokenizer=tokenizer,
             batch=batch,
-            max_gen_len=to.config.max_gen_len,
+            max_new_tokens=to.config.max_new_tokens,
             num_answer_per_question=to.config.num_answer_per_question,
             reward_function=reward_function,
-            device=device,
+            device=to.device,
         )
         if to.config.skip_unfinished_episodes:
             episodes = [episode for episode in episodes if episode.is_finished]
@@ -92,13 +92,13 @@ def training_loop(
             micro_batch_size=to.config.micro_batch_size,
             pad_token_id=tokenizer.pad_token_id,
             max_grad_norm=to.config.max_grad_norm,
-            device=device,
+            device=to.device,
             dtype=to.dtype,
         )
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         if step % to.config.eval_interval == 0:
-            eval_success_rate = evaluate(model, tokenizer, device, to.dtype, to.config)
+            eval_success_rate = evaluate(model, tokenizer, to.device, to.dtype, to.config)
             print(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
             to.tb_writer.add_scalar("success_rate/eval", eval_success_rate, step)
 
@@ -150,11 +150,10 @@ def init_training(model: nn.Module, train_dataset: Dataset) -> TrainingObjects:
     )
 
 
-def main(model_id):
+def main(model_id: str = "Qwen/Qwen3-0.6B"):
     tokenizer, model = init_model(model_id)
     train_dataset, _ = create_connections_datasets(tokenizer)
-    device = get_available_device()
-    training_loop(model, tokenizer, train_dataset, device)
+    training_loop(model, tokenizer, train_dataset)
 
 
 if __name__ == "__main__":
