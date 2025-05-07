@@ -215,12 +215,15 @@ class VLLMClient:
 if __name__ == "__main__":
     client = VLLMClient()
 
-    # Generate completions
-    responses = client.generate(["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32)
-    print("Responses:", responses)  # noqa
+    for i in range(10):
+        # Generate completions
+        responses = client.generate(["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32)
+        print("Responses:", responses)  # noqa
 
     # Update model weights
     from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B").to("cuda")
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to("cuda")
+    print('updating model params')
     client.update_model_params(model)
+    print('done')
