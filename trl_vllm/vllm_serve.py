@@ -31,50 +31,17 @@ os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 class WeightSyncWorkerExtension:
     """
-    A vLLM worker extension that enables weight synchronization between a client and multiple server workers.
-
-    This worker uses a `StatelessProcessGroup` to establish communication and a `PyNcclCommunicator` to handle
-    efficient GPU-based communication using NCCL. The primary purpose of this class is to receive updated model weights
-    from a client process and distribute them to all worker processes participating in model inference.
+    A vLLM worker extension that enables weight synchronization between a client and server worker.
+    This version works with a single GPU and uses direct tensor operations instead of NCCL.
     """
 
-    # The following attributes are initialized when `init_communicator` method is called.
-    pynccl_comm = None  # Communicator for weight updates
-    client_rank = None  # Source rank for broadcasting updated weights
-
-    def init_communicator(self, host: str, port: int, world_size: int) -> None:
-        """
-        Initializes the weight update communicator using a stateless process group.
-
-        This method creates a `StatelessProcessGroup` that allows external training processes to
-        communicate with vLLM workers without interfering with the global torch distributed group.
-
-        Args:
-            host (`str`):
-                Hostname or IP address of the master node.
-            port (`int`):
-                Port number to be used for communication.
-            world_size (`int`):
-                Total number of participating processes in the update group.
-        """
-        if self.pynccl_comm is not None:
-            raise RuntimeError("Weight update group already initialized. Call close_communicator first.")
-
-        # Get the rank of the current worker in the global world group.
-        rank = get_world_group().rank
-
-        # Create a stateless process group to manage communication between training processes and vLLM workers.
-        pg = StatelessProcessGroup.create(host=host, port=port, rank=rank, world_size=world_size)
-
-        # Initialize the NCCL-based communicator for weight synchronization.
-        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device)
-
-        # The client process that sends updated weights has the highest rank (world_size - 1).
-        self.client_rank = world_size - 1
+    def __init__(self):
+        self.device = torch.device("cuda")
+        self.model_runner = None
 
     def update_named_param(self, name: str, dtype: torch.dtype, shape: Sequence[int]) -> None:
         """
-        Receives updated weights from the client process and updates the named parameter in the model.
+        Receives updated weights and updates the named parameter in the model.
 
         Args:
             name (`str`):
@@ -84,30 +51,20 @@ class WeightSyncWorkerExtension:
             shape (`Sequence[int]`):
                 Shape of the weight tensor.
         """
-        if self.pynccl_comm is None:
-            raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
-
-        # Allocate memory for the incoming weight tensor on the correct device.
+        if self.model_runner is None:
+            raise RuntimeError("Model runner not initialized")
+            
+        # Allocate memory for the incoming weight tensor on the correct device
         weight = torch.empty(shape, dtype=dtype, device=self.device)
-
-        # Use NCCL to broadcast the updated weights from the client (src) to all workers.
-        self.pynccl_comm.broadcast(weight, src=self.client_rank)
-        self.pynccl_comm.group.barrier()
-
-        # Load the received weights into the model.
+        
+        # Load the received weights into the model
         self.model_runner.model.load_weights(weights=[(name, weight)])
 
     def close_communicator(self) -> None:
         """
-        Closes the communicator when weight synchronization is no longer needed.
-
-        This method deletes the NCCL communicator to release associated resources.
+        Closes the weight update mechanism. In single GPU mode, this is a no-op.
         """
-
-        if self.pynccl_comm is not None:
-            del self.pynccl_comm
-            self.pynccl_comm = None  # Ensure attribute is reset to None
-            self.client_rank = None  # Ensure attribute is reset to None
+        pass
 
 
 @dataclass
@@ -380,7 +337,6 @@ def main(script_args: ScriptArguments):
         {"completion_ids": [[101, 102, 103], [201, 202, 203]]}
         ```
         """
-
         # Guided decoding, if enabled
         if request.guided_decoding_regex is not None:
             guided_decoding = GuidedDecodingParams(backend="outlines", regex=request.guided_decoding_regex)
@@ -398,57 +354,20 @@ def main(script_args: ScriptArguments):
             max_tokens=request.max_tokens,
             guided_decoding=guided_decoding,
         )
-        # Evenly distribute prompts across DP ranks
-        chunked_prompts = chunk_list(request.prompts, script_args.data_parallel_size)
 
-        # Send the prompts to each worker
-        for connection, prompts in zip(connections, chunked_prompts):
-            # When the number of prompts is less than data_parallel_size, some workers will receive empty prompts.
-            # However, vLLM requires that we always send at least one prompt. So we send a placeholder prompt to comply
-            # with vLLM's requirement, and we later ignore the result.
-            if not prompts:
-                prompts = ["<placeholder>"]
-            kwargs = {"prompts": prompts, "sampling_params": sampling_params}
-            connection.send({"type": "call", "method": "generate", "kwargs": kwargs})
+        # Send the prompts to the worker
+        kwargs = {"prompts": request.prompts, "sampling_params": sampling_params}
+        connections[0].send({"type": "call", "method": "generate", "kwargs": kwargs})
 
         # Receive results
-        all_outputs = [connection.recv() for connection in connections]
-
-        # Handle empty prompts (see above)
-        all_outputs = [output for output, prompts in zip(all_outputs, chunked_prompts) if prompts]
-
-        # Flatten and combine all results
-        all_outputs = list(chain.from_iterable(all_outputs))  # from list of list to single list
-        completion_ids = [list(output.token_ids) for outputs in all_outputs for output in outputs.outputs]
+        outputs = connections[0].recv()
+        completion_ids = [list(output.token_ids) for outputs in outputs for output in outputs.outputs]
         return {"completion_ids": completion_ids}
 
     class InitCommunicatorRequest(BaseModel):
         host: str
         port: int
         world_size: int
-
-    @app.post("/init_communicator/")
-    async def init_communicator(request: InitCommunicatorRequest):
-        """
-        Initializes the communicator for synchronizing model weights between a client and multiple server
-        workers.
-
-        Args:
-            request (`InitCommunicatorRequest`):
-                - `host` (`str`): Hostname or IP address of the master node.
-                - `port` (`int`): Port number to be used for communication.
-                - `world_size` (`int`): Total number of participating processes in the group.
-        """
-        world_size = script_args.tensor_parallel_size * script_args.data_parallel_size + 1
-
-        # The function init_communicator is called this way: init_communicator(host, port, world_size)
-        # So with collective_rpc we need to call it this way:
-        # llm.collective_rpc(method="init_communicator", args=(host, port, world_size))
-        kwargs = {"method": "init_communicator", "args": (request.host, request.port, world_size)}
-        for connection in connections:
-            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
-
-        return {"message": "Request received, initializing communicator"}
 
     class UpdateWeightsRequest(BaseModel):
         name: str
@@ -460,23 +379,15 @@ def main(script_args: ScriptArguments):
         """
         Updates the model weights with the provided tensor.
 
-        Once this endpoint is called, the client process should broadcast the updated weights to all server workers.
-
         Args:
             request (`UpdateWeightsRequest`):
                 - `name` (`str`): Name of the weight tensor being updated.
                 - `dtype` (`str`): Data type of the weight tensor (e.g., `"torch.float32"`).
-                - `shape` (list of `int`): Shape of the weight
-
+                - `shape` (list of `int`): Shape of the weight tensor.
         """
-        # The function update_named_param is called this way: update_named_param("name", torch.float32, (10, 10))
-        # So with collective_rpc we need to call it this way:
-        # llm.collective_rpc("update_named_param", args=("name", torch.float32, (10, 10)))
-        dtype = torch.__getattribute__(request.dtype.split(".")[-1])
+        dtype = getattr(torch, request.dtype.split(".")[-1])
         kwargs = {"method": "update_named_param", "args": (request.name, dtype, tuple(request.shape))}
-        for connection in connections:
-            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
-
+        connections[0].send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
         return {"message": "Request received, updating named parameter"}
 
     @app.post("/reset_prefix_cache/")
@@ -484,21 +395,15 @@ def main(script_args: ScriptArguments):
         """
         Resets the prefix cache for the model.
         """
-        for connection in connections:
-            connection.send({"type": "call", "method": "reset_prefix_cache"})
-        # Wait for and collect all results
-        all_outputs = [connection.recv() for connection in connections]
-        success = all(output for output in all_outputs)
+        connections[0].send({"type": "call", "method": "reset_prefix_cache"})
+        success = connections[0].recv()
         return {"message": "Request received, resetting prefix cache status: " + str(success)}
 
     @app.post("/close_communicator/")
     async def close_communicator():
         """
-        Closes the weight update group and cleans up associated resources.
+        Closes the weight update mechanism. In single GPU mode, this is a no-op.
         """
-        kwargs = {"method": "close_communicator"}
-        for connection in connections:
-            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
         return {"message": "Request received, closing communicator"}
 
     # Start the server

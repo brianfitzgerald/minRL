@@ -36,7 +36,6 @@ def init_model(
         model_id,
         device_map="auto",
         torch_dtype=torch.bfloat16,
-        ignore_mismatched_sizes=True,
         attn_implementation="flash_attention_2",
     )
 

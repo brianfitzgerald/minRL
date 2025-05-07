@@ -35,16 +35,14 @@ class VLLMClient:
     """
     A client class to interact with a vLLM server.
 
-    This class provides methods to generate completions, initialize and manage weight update groups, and update model
-    weights in a distributed setting. Before using it, start the vLLM server with `trl vllm-serve`.
+    This class provides methods to generate completions and update model weights in a single GPU setup.
+    Before using it, start the vLLM server with `trl vllm-serve`.
 
     Args:
         host (`str`, *optional*, defaults to `"0.0.0.0"`):
             IP address of the vLLM server.
         server_port (`int`, *optional*, defaults to `8000`):
             Port number of the vLLM server.
-        group_port (`int`, *optional*, defaults to `51216`):
-            Port number for the weight update group.
         connection_timeout (`float`, *optional*, defaults to `0.0`):
             Total timeout duration in seconds to wait for the server to be up. If the server is not up after the
             timeout, a `ConnectionError` is raised.
@@ -70,19 +68,16 @@ class VLLMClient:
 
         >>> from transformers import AutoModelForCausalLM
         >>> model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B", device_map="cuda")
-        >>> client.init_communicator()
         >>> client.update_model_params(model)
         ```
     """
 
     def __init__(
-        self, host: str = "0.0.0.0", server_port: int = 8000, group_port: int = 51216, connection_timeout: float = 0.0
+        self, host: str = "0.0.0.0", server_port: int = 8000, connection_timeout: float = 0.0
     ):
-
         self.session = requests.Session()
         self.host = host
         self.server_port = server_port
-        self.group_port = group_port
         self.check_server(connection_timeout)  # check server and fail after timeout
 
     def check_server(self, total_timeout: float = 0.0, retry_interval: float = 2.0):
@@ -178,47 +173,9 @@ class VLLMClient:
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
-    def init_communicator(self):
-        """
-        Initializes the weight update group in a distributed setup for model synchronization.
-        """
-        # Get the world size from the server
-        url = f"http://{self.host}:{self.server_port}/get_world_size/"
-        response = requests.get(url)
-        if response.status_code == 200:
-            vllm_world_size = response.json()["world_size"]
-        else:
-            raise Exception(f"Request failed: {response.status_code}, {response.text}")
-
-        world_size = vllm_world_size + 1  # add the client to the world
-        self.rank = vllm_world_size  # the client's rank is the last process
-
-        # Initialize weight update group
-        url = f"http://{self.host}:{self.server_port}/init_communicator/"
-        # In the server side, the host is set to 0.0.0.0
-        response = self.session.post(url, json={"host": "0.0.0.0", "port": self.group_port, "world_size": world_size})
-        if response.status_code != 200:
-            raise Exception(f"Request failed: {response.status_code}, {response.text}")
-
-        # Brief delay to allow server initialization. While not strictly required (client socket will retry on
-        # connection failure), this prevents log warnings like:
-        # [W416 23:24:57.460001114 socket.cpp:204] [c10d] The hostname of the client socket cannot be retrieved. err=-3
-        time.sleep(0.1)
-
-        # Set up the communication group for weight broadcasting
-        logger.info(f"Setting up communication group for weight broadcasting on {self.host}:{self.group_port}")
-        pg = StatelessProcessGroup.create(host=self.host, port=self.group_port, rank=self.rank, world_size=world_size)
-        self.pynccl_comm = PyNcclCommunicator(pg, device=0)
-
-        logger.info(f"Communication group setup complete. World size: {world_size}, Rank: {self.rank}")
-
-        # When the client object is deleted, close the weight update group
-        logger.info("Registering cleanup function to close communicator on object deletion")
-        atexit.register(self.close_communicator)
-
     def update_named_param(self, name: str, weights: torch.Tensor):
         """
-        Updates a specific named parameter in the model and broadcasts it to other processes.
+        Updates a specific named parameter in the model.
 
         Args:
             name (`str`):
@@ -231,10 +188,6 @@ class VLLMClient:
         response = self.session.post(url, json={"name": name, "dtype": dtype, "shape": shape})
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
-
-        # Broadcast the weights to the other processes
-        self.pynccl_comm.broadcast(weights, src=self.rank)
-        self.pynccl_comm.group.barrier()
 
     def update_model_params(self, model: nn.Module):
         """
@@ -257,35 +210,17 @@ class VLLMClient:
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
-    def close_communicator(self):
-        """
-        Closes the weight update group and cleans up the communication group.
-        """
-        url = f"http://{self.host}:{self.server_port}/close_communicator/"
-
-        try:
-            response = self.session.post(url)
-        except ConnectionError:
-            # The server might be already down, so we don't need to close the communicator
-            pass
-        else:
-            if response.status_code != 200:
-                raise Exception(f"Request failed: {response.status_code}, {response.text}")
-
 
 # Example usage
 if __name__ == "__main__":
-    from vllm import SamplingParams
-
     client = VLLMClient()
-    client.init_communicator()
 
     # Generate completions
-    responses = client.generate(["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32, sampling_params=SamplingParams())
+    responses = client.generate(["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32)
     print("Responses:", responses)  # noqa
 
     # Update model weights
-    from transformers import AutoModelForCausalLM
+    from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-7B").to("cuda")
     client.update_model_params(model)
