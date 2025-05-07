@@ -37,6 +37,7 @@ def init_model(
         device_map="auto",
         torch_dtype=torch.bfloat16,
         ignore_mismatched_sizes=True,
+        attn_implementation="flash_attention_2",
     )
 
     logger.info("Model loaded.")
@@ -53,7 +54,7 @@ class Config:
     model_id: str = "Qwen2.5-3B-Instruct"
     eval_interval: int = 100
     num_answer_per_question: int = 2
-    max_new_tokens: int = 512
+    max_new_tokens: int = 256
     micro_batch_size: int = 2
     max_grad_norm: float = 1.0
     eval_interval: int = 100

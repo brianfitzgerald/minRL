@@ -598,6 +598,16 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6b/b6/82c7e601d6d3c3278c40b7bd35e17e82aa227f050aa9f66cb7b7fce29471/fire-0.7.0.tar.gz", hash = "sha256:961550f07936eaf65ad1dc8360f2b2bf8408fad46abbfa4d2a3794f8d2a95cdf", size = 87189 }
 
 [[package]]
+name = "flash-attn"
+version = "2.7.4.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765", size = 5986610 }
+
+[[package]]
 name = "frozenlist"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1191,6 +1201,7 @@ dependencies = [
     { name = "accelerate" },
     { name = "datasets" },
     { name = "fire" },
+    { name = "flash-attn" },
     { name = "ipykernel" },
     { name = "jinja2" },
     { name = "loguru" },
@@ -1205,6 +1216,7 @@ dependencies = [
     { name = "tokenizers" },
     { name = "torch" },
     { name = "transformers" },
+    { name = "uvicorn" },
     { name = "vllm" },
 ]
 
@@ -1213,6 +1225,7 @@ requires-dist = [
     { name = "accelerate", specifier = ">=1.6.0" },
     { name = "datasets", specifier = ">=3.5.0" },
     { name = "fire", specifier = ">=0.7.0" },
+    { name = "flash-attn", specifier = ">=2.7.4.post1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "loguru", specifier = ">=0.7.3" },
@@ -1227,6 +1240,7 @@ requires-dist = [
     { name = "tokenizers", specifier = ">=0.21.1" },
     { name = "torch", specifier = ">=2.6.0" },
     { name = "transformers", specifier = ">=4.51.3" },
+    { name = "uvicorn", specifier = ">=0.34.2" },
     { name = "vllm", specifier = ">=0.8.4" },
 ]
 

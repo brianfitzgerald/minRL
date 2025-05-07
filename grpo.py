@@ -51,6 +51,7 @@ def rollout(
         eos_token_id=end_token_id,
         do_sample=True,
         use_cache=True,
+        top_k=20,
         return_dict_in_generate=True,
         output_scores=True,
     )
