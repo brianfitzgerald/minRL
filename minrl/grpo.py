@@ -32,22 +32,30 @@ def rollout(
     end_token = tokenizer.eos_token
     end_token_id = tokenizer.eos_token_id
     pad_token_id = tokenizer.pad_token_id
-
-    # Prepare input_ids for generation
-    input_ids: List[List[int]] = []
-    for prefix_ids in batch.prefix_token_ids:
-        for _ in range(num_answer_per_question):
-            input_ids.append(prefix_ids)
+    using_vllm = client is not None
 
     # Convert to tensor and move to device
-    input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
 
     logger.info(
-        f"Generating responses for {len(input_ids)} prompts, max_tokens={max_new_tokens}"
+        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}"
     )
-    if client is not None:
-        outputs = client.generate(prompts=batch.prefixes)
+    if using_vllm:
+        # repeat each prompt num_answer_per_question times
+        prefixes_batch = [
+            batch.prefixes[i]
+            for i in range(len(batch.prefixes))
+            for _ in range(num_answer_per_question)
+        ]
+        print(len(prefixes_batch))
+        outputs = client.generate(prompts=prefixes_batch)
     else:
+
+        # Prepare input_ids for generation
+        input_ids: list[list[int]] = []
+        for prefix_ids in batch.prefix_token_ids:
+            for _ in range(num_answer_per_question):
+                input_ids.append(prefix_ids)
+        input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
         # Generate responses
         outputs = model.generate(  # type: ignore
             input_ids=input_ids_tensor,
@@ -71,10 +79,15 @@ def rollout(
         for j in range(num_answer_per_question):
             idx = i * num_answer_per_question + j
 
-            # Get tokens generated
-            generated_token_ids = outputs.sequences[idx][
-                len(batch.prefix_token_ids[i]) :
-            ].tolist()
+            if using_vllm:
+                print(len(outputs))
+                print(outputs)
+                generated_token_ids = outputs[idx]
+            else:
+                # Get tokens generated
+                generated_token_ids = outputs.sequences[idx][  # type: ignore
+                    len(batch.prefix_token_ids[i]) :
+                ].tolist()
 
             logger.info(f"Generated token ids: {len(generated_token_ids)}")
 
@@ -144,9 +157,9 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
         std = rewards.std()
         if torch.isnan(std):
             std = 0
-        print('rewards',rewards)
-        print('mean',mean)
-        print('std',std)
+        print("rewards", rewards)
+        print("mean", mean)
+        print("std", std)
 
         # Handle case where std is 0 to avoid division by zero
         if std == 0:
