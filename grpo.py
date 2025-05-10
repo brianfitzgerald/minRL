@@ -14,6 +14,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from data_types import Episode, MiniBatch
+from vllm_inference.client import VLLMClient
 
 
 @torch.no_grad()
@@ -25,6 +26,7 @@ def rollout(
     num_answer_per_question: int,
     reward_function: Callable,
     device: torch.device,
+    client: VLLMClient | None = None,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token = tokenizer.eos_token
@@ -43,18 +45,21 @@ def rollout(
     logger.info(
         f"Generating responses for {len(input_ids)} prompts, max_tokens={max_new_tokens}"
     )
-    # Generate responses
-    outputs: GenerateOutput = model.generate(  # type: ignore
-        input_ids=input_ids_tensor,
-        max_new_tokens=max_new_tokens,
-        pad_token_id=pad_token_id,
-        eos_token_id=end_token_id,
-        do_sample=True,
-        use_cache=True,
-        top_k=20,
-        return_dict_in_generate=True,
-        output_scores=True,
-    )
+    if client is not None:
+        outputs = client.generate(input_ids_tensor.tolist())
+    else:
+        # Generate responses
+        outputs: GenerateOutput = model.generate(  # type: ignore
+            input_ids=input_ids_tensor,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=pad_token_id,
+            eos_token_id=end_token_id,
+            do_sample=True,
+            use_cache=True,
+            top_k=20,
+            return_dict_in_generate=True,
+            output_scores=True,
+        )
 
     # Clear CUDA cache
     gc.collect()

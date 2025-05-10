@@ -16,6 +16,7 @@ from transformers.models.qwen3 import Qwen3ForCausalLM
 from dataset import ConnectionsDataset, create_connections_datasets
 from grpo import compute_metrics, rollout, update_policy
 from tasks.countdown import reward_function
+from vllm_inference.client import VLLMClient
 
 
 def get_available_device() -> str:
@@ -79,6 +80,7 @@ def training_loop(
             num_answer_per_question=to.config.num_answer_per_question,
             reward_function=reward_function,
             device=to.device,
+            client=to.client,
         )
         if to.config.skip_unfinished_episodes:
             episodes = [episode for episode in episodes if episode.is_finished]
@@ -120,6 +122,7 @@ class TrainingObjects:
     tb_writer: SummaryWriter
     config: Config
     device: torch.device
+    client: VLLMClient
 
 def init_training(model: nn.Module, train_dataset: Dataset) -> TrainingObjects:
     device = torch.device(get_available_device())
@@ -138,6 +141,7 @@ def init_training(model: nn.Module, train_dataset: Dataset) -> TrainingObjects:
     dtype = torch.bfloat16
     tb_writer = SummaryWriter()
     config = Config()
+    client = VLLMClient()
     return TrainingObjects(
         train_dataloader=train_dataloader,
         optimizer=optimizer,
@@ -147,6 +151,7 @@ def init_training(model: nn.Module, train_dataset: Dataset) -> TrainingObjects:
         tb_writer=tb_writer,
         config=config,
         device=device,
+        client=client
     )
 
 
