@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GenerateResponse:
     completion_ids: list[list[int]]
-    logits: list[list[list[float]]] | None = None
+    generated_logprobs: list[list[list[float]]] | None = None
 
 
 class VLLMClient:
@@ -168,6 +168,7 @@ class VLLMClient:
                 List of lists of token IDs representing the model-generated completions for each prompt.
         """
         url = f"http://{self.host}:{self.server_port}/generate/"
+        print('logprobs', logprobs)
         response = self.session.post(
             url,
             json={
@@ -184,12 +185,14 @@ class VLLMClient:
                 "prompt_logprobs": prompt_logprobs,
             },
         )
+        print(response.status_code)
         if response.status_code == 200:
             response_json = response.json()
-            return GenerateResponse(
-                completion_ids=response_json["completion_ids"],
-                logits=response_json["generated_logprobs"],
-            )
+            print(response_json.keys())
+            response = GenerateResponse(completion_ids=response_json["completion_ids"])
+            if "generated_logprobs" in response_json:
+                response.generated_logprobs = response_json["generated_logprobs"]
+            return response
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
@@ -240,7 +243,7 @@ if __name__ == "__main__":
     for i in range(10):
         # Generate completions
         responses = client.generate(
-            ["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32
+            ["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32, logprobs=10
         )
         print("Responses:", responses)  # noqa
 

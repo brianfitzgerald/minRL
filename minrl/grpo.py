@@ -70,7 +70,7 @@ def rollout(
         )
         outputs = GenerateResponse(
             completion_ids=outputs_transformers.sequences,
-            logits=outputs_transformers.logits,
+            generated_logprobs=outputs_transformers.logits,
         )
     # Clear CUDA cache
     gc.collect()
@@ -85,8 +85,8 @@ def rollout(
             if using_vllm:
                 print(outputs)
                 generated_token_ids = outputs.completion_ids[idx]
-                assert outputs.logits is not None
-                generated_logprobs = outputs.logits[idx]
+                assert outputs.generated_logprobs is not None
+                generated_logprobs = outputs.generated_logprobs[idx]
             else:
                 # Get tokens generated
                 generated_token_ids = outputs.sequences[idx][  # type: ignore

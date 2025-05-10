@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import signal
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from fastapi import FastAPI
 
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
-from vllm import LLM, SamplingParams
+from vllm import LLM, RequestOutput, SamplingParams
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,25 @@ def main(script_args: ScriptArguments):
     connections = []
     processes = []
 
+    def signal_handler(signum, frame):
+        logger.info("Received interrupt signal. Shutting down...")
+        # Send shutdown command to all workers
+        for connection in connections:
+            try:
+                connection.send({"type": "shutdown"})
+            except:
+                pass
+        # Terminate all processes
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+        # Exit the main process
+        os._exit(0)
+
+    # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
         process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
@@ -314,30 +334,10 @@ def main(script_args: ScriptArguments):
 
     class GenerateResponse(BaseModel):
         completion_ids: list[list[int]]
+        generated_logprobs: list[list[list[float]]] | None = None
 
     @app.post("/generate/", response_model=GenerateResponse)
     async def generate(request: GenerateRequest):
-        """
-        Generates completions for the provided prompts.
-
-        Args:
-            request (`GenerateRequest`):
-                - `prompts` (list of `str`): A list of prompts (text strings) for the model to generate completions.
-
-        Returns:
-            `GenerateResponse`:
-                - `completion_ids` (list of list of `int`): A list of lists of token IDs for each generated completion.
-
-        Example request:
-        ```json
-        {"prompts": ["Hello world", "What is AI?"]}
-        ```
-
-        Example response:
-        ```json
-        {"completion_ids": [[101, 102, 103], [201, 202, 203]]}
-        ```
-        """
         # Guided decoding, if enabled
         if request.guided_decoding_regex is not None:
             guided_decoding = GuidedDecodingParams(backend="outlines", regex=request.guided_decoding_regex)
@@ -363,9 +363,24 @@ def main(script_args: ScriptArguments):
         connections[0].send({"type": "call", "method": "generate", "kwargs": kwargs})
 
         # Receive results
-        outputs = connections[0].recv()
-        completion_ids = [list(output.token_ids) for outputs in outputs for output in outputs.outputs]
-        return {"completion_ids": completion_ids}
+        request_outputs: list[RequestOutput] = connections[0].recv()
+        completion_ids = [list(output.token_ids) for outputs in request_outputs for output in outputs.outputs]
+        out = {"completion_ids": completion_ids}
+
+        if request.logprobs is not None:
+            generated_logprobs: list[list[list[float]]] = []
+            for request_output in request_outputs:
+                req_logprobs = []
+                for completion_output in request_output.outputs:
+                    assert completion_output.logprobs is not None
+                    for logprob in completion_output.logprobs:
+                        sorted_logprobs = sorted(logprob.items(), key=lambda x: x[1].rank)
+                        sorted_logprobs = [v for _, v in sorted_logprobs]
+                        req_logprobs.append([v.logprob for v in sorted_logprobs])
+                generated_logprobs.append(req_logprobs)
+            out["generated_logprobs"] = generated_logprobs
+
+        return out
 
     class InitCommunicatorRequest(BaseModel):
         host: str
