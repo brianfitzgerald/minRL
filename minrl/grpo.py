@@ -46,10 +46,10 @@ def rollout(
         f"Generating responses for {len(input_ids)} prompts, max_tokens={max_new_tokens}"
     )
     if client is not None:
-        outputs = client.generate(input_ids_tensor.tolist())
+        outputs = client.generate(prompts=batch.prefixes)
     else:
         # Generate responses
-        outputs: GenerateOutput = model.generate(  # type: ignore
+        outputs = model.generate(  # type: ignore
             input_ids=input_ids_tensor,
             max_new_tokens=max_new_tokens,
             pad_token_id=pad_token_id,
@@ -67,7 +67,7 @@ def rollout(
 
     # Process outputs and create episodes
     episodes: List[Episode] = []
-    for i in range(len(batch.prefix)):
+    for i in range(len(batch.prefixes)):
         for j in range(num_answer_per_question):
             idx = i * num_answer_per_question + j
 
@@ -102,8 +102,8 @@ def rollout(
 
             # Create episode
             episode = Episode(
-                prefix=batch.prefix[i],
-                text=batch.prefix[i] + generated_text,
+                prefix=batch.prefixes[i],
+                text=batch.prefixes[i] + generated_text,
                 prefix_token_ids=batch.prefix_token_ids[i],
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,

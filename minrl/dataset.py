@@ -118,7 +118,7 @@ class ConnectionsDataset(Dataset):
         answer = [item["answer"] for item in batch]
         answer_groups = [item["answer_groups"] for item in batch]
         return MiniBatch(
-            prefix=prefix,
+            prefixes=prefix,
             prefix_tokens=prefix_tokens,
             prefix_token_ids=prefix_token_ids,
             answer=answer,
