@@ -50,7 +50,7 @@ def init_model(
 
 @dataclass
 class Config:
-    model_id: str = "Qwen2.5-3B-Instruct"
+    model_id: str = "Qwen/Qwen3-0.6B"
     eval_interval: int = 100
     num_answer_per_question: int = 2
     max_new_tokens: int = 256

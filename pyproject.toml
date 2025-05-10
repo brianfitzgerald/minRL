@@ -24,5 +24,5 @@ dependencies = [
     "torch>=2.6.0",
     "transformers>=4.51.3",
     "uvicorn>=0.34.2",
-    "vllm>=0.8.4",
+    "vllm==0.8.5.post1",
 ]

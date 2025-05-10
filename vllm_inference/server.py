@@ -14,12 +14,10 @@ import uvicorn
 import torch
 
 from fastapi import FastAPI
-from vllm import LLM, SamplingParams
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-from vllm.distributed.parallel_state import get_world_group
-from vllm.distributed.utils import StatelessProcessGroup
+
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
+from vllm import LLM, SamplingParams
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +130,7 @@ class ScriptArguments:
         metadata={"help": "Port to run the server on."},
     )
     gpu_memory_utilization: float = field(
-        default=0.9,
+        default=0.4,
         metadata={
             "help": "Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV "
             "cache on the device dedicated to generation powered by vLLM. Higher values will increase the KV cache "
@@ -148,7 +146,7 @@ class ScriptArguments:
         },
     )
     max_model_len: Optional[int] = field(
-        default=None,
+        default=4096,
         metadata={
             "help": "If set, the `max_model_len` to use for vLLM. This can be useful when running with reduced "
             "`vllm_gpu_memory_utilization`, leading to a reduced KV cache size. If not set, vLLM will use the model "
@@ -163,7 +161,7 @@ class ScriptArguments:
         },
     )
     enforce_eager: Optional[bool] = field(
-        default=None,
+        default=True,
         metadata={
             "help": "Whether to enforce eager execution. If set to `True`, we will disable CUDA graph and always "
             "execute the model in eager mode. If `False` (default behavior), we will use CUDA graph and eager "
@@ -200,7 +198,7 @@ def llm_worker(
         # This is particularly useful here because we generate completions from the same prompts.
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
-        worker_extension_cls="vllm_serve.WeightSyncWorkerExtension",
+        worker_extension_cls="server.WeightSyncWorkerExtension",
     )
 
     # Send ready signal to parent process
@@ -247,6 +245,7 @@ def main(script_args: ScriptArguments):
     master_port = get_open_port()
     connections = []
     processes = []
+
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
         process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
