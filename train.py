@@ -13,8 +13,8 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.qwen3 import Qwen3ForCausalLM
 
-from dataset import ConnectionsDataset, create_connections_datasets
-from grpo import compute_metrics, rollout, update_policy
+from minrl.dataset import ConnectionsDataset, create_connections_datasets
+from minrl.grpo import compute_metrics, rollout, update_policy
 from tasks.countdown import reward_function
 from vllm_inference.client import VLLMClient
 

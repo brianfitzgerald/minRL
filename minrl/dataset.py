@@ -8,7 +8,7 @@ from loguru import logger
 from sklearn.model_selection import train_test_split
 from tokenizers import Tokenizer
 
-from data_types import MiniBatch
+from minrl.data_types import MiniBatch
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -128,7 +128,7 @@ class ConnectionsDataset(Dataset):
 
 def create_connections_datasets(
     tokenizer: Tokenizer,
-    jsonl_path: str = "connections_prompts.jsonl",
+    jsonl_path: str = "data/connections_prompts.jsonl",
     num_samples: int = 10000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:

@@ -13,7 +13,7 @@ from transformers.generation.utils import GenerateOutput
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from data_types import Episode, MiniBatch
+from minrl.data_types import Episode, MiniBatch
 from vllm_inference.client import VLLMClient
 
 
