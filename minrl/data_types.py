@@ -13,6 +13,8 @@ class Episode:
     is_finished: bool
     reward: float
     reward_info: Dict[str, float]
+    # Only populated with vllm
+    generated_logprobs: list[list[float]] | None = None
 
 
 @dataclass

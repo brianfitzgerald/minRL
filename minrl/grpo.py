@@ -14,7 +14,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from minrl.data_types import Episode, MiniBatch
-from vllm_inference.client import VLLMClient
+from vllm_inference.client import GenerateResponse, VLLMClient
 
 
 @torch.no_grad()
@@ -57,7 +57,7 @@ def rollout(
                 input_ids.append(prefix_ids)
         input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
         # Generate responses
-        outputs = model.generate(  # type: ignore
+        outputs_transformers = model.generate(  # type: ignore
             input_ids=input_ids_tensor,
             max_new_tokens=max_new_tokens,
             pad_token_id=pad_token_id,
@@ -68,7 +68,10 @@ def rollout(
             return_dict_in_generate=True,
             output_scores=True,
         )
-
+        outputs = GenerateResponse(
+            completion_ids=outputs_transformers.sequences,
+            logits=outputs_transformers.logits,
+        )
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
@@ -80,9 +83,10 @@ def rollout(
             idx = i * num_answer_per_question + j
 
             if using_vllm:
-                print(len(outputs))
                 print(outputs)
-                generated_token_ids = outputs[idx]
+                generated_token_ids = outputs.completion_ids[idx]
+                assert outputs.logits is not None
+                generated_logprobs = outputs.logits[idx]
             else:
                 # Get tokens generated
                 generated_token_ids = outputs.sequences[idx][  # type: ignore
@@ -122,6 +126,7 @@ def rollout(
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards["reward"],
                 reward_info=rewards["reward_info"],
+                generated_logprobs=generated_logprobs,
             )
             episodes.append(episode)
 
@@ -246,9 +251,18 @@ def update_policy(
             target_token_ids = batch_token_ids_tensor[:, 1:]
             target_masks = batch_masks_tensor[:, 1:]
             # get the logits for the micro-batch
-            # TODO replace with vllm
-            out = model(input_ids=input_token_ids, attention_mask=batch_masks_tensor)
-            logits: torch.Tensor = out.logits
+            if episodes[0].generated_logprobs is not None:
+                all_logprobs = []
+                for episode in batch_episodes:
+                    assert episode.generated_logprobs is not None
+                    for logprobs in episode.generated_logprobs:
+                        all_logprobs.append(logprobs)
+                # HACK: vllm returns logprobs, not logits - this is likely unstable and needs to be fixed.
+                # Need to at least prune to top N logprobs and remove low probability tokens.
+                logits = torch.tensor(all_logprobs, device=device, dtype=dtype)
+            else:
+                out = model(input_ids=input_token_ids, attention_mask=batch_masks_tensor)
+                logits: torch.Tensor = out.logits
 
         # cross entropy, ignore padding tokens
         log_probs = -torch.nn.functional.cross_entropy(

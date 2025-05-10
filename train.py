@@ -86,6 +86,7 @@ class Trainer:
         self.train_dataset, _ = create_connections_datasets(
             cast(Tokenizer, self.tokenizer),
             jsonl_path="data/train_prompts.jsonl",
+            num_samples=1000
         )
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(

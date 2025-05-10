@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import atexit
+from dataclasses import dataclass
 import logging
 import time
 from typing import Optional
@@ -29,6 +30,12 @@ from vllm.distributed.utils import StatelessProcessGroup
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GenerateResponse:
+    completion_ids: list[list[int]]
+    logits: list[list[list[float]]] | None = None
 
 
 class VLLMClient:
@@ -73,7 +80,10 @@ class VLLMClient:
     """
 
     def __init__(
-        self, host: str = "0.0.0.0", server_port: int = 8000, connection_timeout: float = 0.0
+        self,
+        host: str = "0.0.0.0",
+        server_port: int = 8000,
+        connection_timeout: float = 0.0,
     ):
         self.session = requests.Session()
         self.host = host
@@ -111,7 +121,9 @@ class VLLMClient:
                     return None
 
             # Retry logic: wait before trying again
-            logger.info(f"Server is not up yet. Retrying in {retry_interval} seconds...")
+            logger.info(
+                f"Server is not up yet. Retrying in {retry_interval} seconds..."
+            )
             time.sleep(retry_interval)
 
     def generate(
@@ -125,7 +137,9 @@ class VLLMClient:
         min_p: float = 0.0,
         max_tokens: int = 16,
         guided_decoding_regex: Optional[str] = None,
-    ) -> list[list[int]]:
+        logprobs: int | None = None,
+        prompt_logprobs: int | None = None,
+    ) -> GenerateResponse:
         """
         Generates model completions for the provided prompts.
 
@@ -166,10 +180,16 @@ class VLLMClient:
                 "min_p": min_p,
                 "max_tokens": max_tokens,
                 "guided_decoding_regex": guided_decoding_regex,
+                "logprobs": logprobs,
+                "prompt_logprobs": prompt_logprobs,
             },
         )
         if response.status_code == 200:
-            return response.json()["completion_ids"]
+            response_json = response.json()
+            return GenerateResponse(
+                completion_ids=response_json["completion_ids"],
+                logits=response_json["generated_logprobs"],
+            )
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
@@ -185,7 +205,9 @@ class VLLMClient:
         """
         dtype, shape = str(weights.dtype), tuple(weights.shape)
         url = f"http://{self.host}:{self.server_port}/update_named_param/"
-        response = self.session.post(url, json={"name": name, "dtype": dtype, "shape": shape})
+        response = self.session.post(
+            url, json={"name": name, "dtype": dtype, "shape": shape}
+        )
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
@@ -217,13 +239,15 @@ if __name__ == "__main__":
 
     for i in range(10):
         # Generate completions
-        responses = client.generate(["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32)
+        responses = client.generate(
+            ["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32
+        )
         print("Responses:", responses)  # noqa
 
     # Update model weights
     from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to("cuda")
-    print('updating model params')
+    print("updating model params")
     client.update_model_params(model)
-    print('done')
+    print("done")
