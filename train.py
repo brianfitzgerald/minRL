@@ -1,6 +1,7 @@
+import os
 import time
 from pathlib import Path
-from typing import Optional, Tuple, cast, Any
+from typing import Optional, cast, Any
 
 import fire
 import torch
@@ -54,7 +55,9 @@ class Trainer:
     tokenizer: PreTrainedTokenizer | None = None
     model: AutoModelForCausalLM | None = None
 
-    def __init__(self, config: Optional[TrainerConfig] = None) -> None:
+    def __init__(
+        self, config: Optional[TrainerConfig] = None
+    ) -> None:
         """Initialize the trainer with configuration."""
         self.config = config or TrainerConfig()
         self.device = torch.device(get_available_device())
@@ -81,7 +84,8 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         self.train_dataset, _ = create_connections_datasets(
-            cast(Tokenizer, self.tokenizer)
+            cast(Tokenizer, self.tokenizer),
+            jsonl_path="data/train_prompts.jsonl",
         )
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
@@ -108,6 +112,7 @@ class Trainer:
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb_writer = SummaryWriter()
         self.client = VLLMClient()
+        self.client.reset_prefix_cache()
 
     def train(self) -> None:
         """Run the main training loop.

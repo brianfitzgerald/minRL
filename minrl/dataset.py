@@ -133,9 +133,11 @@ def create_connections_datasets(
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     # Load and process data
+    logger.info(f"Loading data from {jsonl_path}")
     prompts_pd = pd.read_json(jsonl_path, lines=True)
     df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
 
+    logger.info(f"Generating {num_samples} samples")
     # Generate samples
     groups = [
         {
@@ -150,7 +152,7 @@ def create_connections_datasets(
     # Create DataFrame and split
     groups_pd = pd.DataFrame(groups)
     train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
-
+    logger.info("Splitting into train and val sets")
     # Create datasets
     train_dataset = ConnectionsDataset(train_data, tokenizer)
     val_dataset = ConnectionsDataset(val_data, tokenizer)
