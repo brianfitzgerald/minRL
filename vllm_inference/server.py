@@ -309,6 +309,8 @@ def main(script_args: ScriptArguments):
         min_p: float = 0.0
         max_tokens: int = 16
         guided_decoding_regex: Optional[str] = None
+        logprobs: int | None = None
+        prompt_logprobs: int | None = None
 
     class GenerateResponse(BaseModel):
         completion_ids: list[list[int]]
@@ -352,6 +354,8 @@ def main(script_args: ScriptArguments):
             min_p=request.min_p,
             max_tokens=request.max_tokens,
             guided_decoding=guided_decoding,
+            logprobs=request.logprobs,
+            prompt_logprobs=request.prompt_logprobs,
         )
 
         # Send the prompts to the worker

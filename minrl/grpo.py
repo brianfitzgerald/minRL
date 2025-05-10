@@ -212,7 +212,6 @@ def update_policy(
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
-        print("batch ep", [episode.reward for episode in batch_episodes])
         batch_lengths = [
             len(episode.prefix_token_ids) + len(episode.generated_token_ids)
             for episode in batch_episodes
