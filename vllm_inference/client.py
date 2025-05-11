@@ -1,33 +1,13 @@
-# Copyright 2020-2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-import atexit
-from dataclasses import dataclass
+# Copied from TRL
 import logging
 import time
+from dataclasses import dataclass
 from typing import Optional
 
-import torch
-from torch import nn
-
 import requests
+import torch
 from requests import ConnectionError
-
-
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-from vllm.distributed.utils import StatelessProcessGroup
-
+from torch import nn
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GenerateResponse:
     completion_ids: list[list[int]]
-    generated_logprobs: list[list[list[float]]] | None = None
+    generated_logprobs: list[list[dict[int, float]]] | None = None
 
 
 class VLLMClient:
@@ -250,7 +230,8 @@ if __name__ == "__main__":
     # Update model weights
     from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to("cuda")
+    device = "cuda" if torch.cuda.is_available() else "mps"
+    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to(device)
     print("updating model params")
     client.update_model_params(model)
     print("done")

@@ -14,6 +14,13 @@
             "request": "launch",
             "program": "evaluate.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "vLLM Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "vllm_inference/server.py",
+            "console": "integratedTerminal"
         }
     ]
 }

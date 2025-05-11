@@ -98,7 +98,7 @@ def rollout(
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
                 generated_token_ids = generated_token_ids[
-                    : generated_token_ids.index(pad_token_id)
+                    : generated_token_ids.index(pad_token_id) # type: ignore
                 ]
             logger.info(
                 f"Generated token ids after removing padding: {len(generated_token_ids)}"

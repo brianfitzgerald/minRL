@@ -1,11 +1,10 @@
-import argparse
+# Copied from TRL
 import logging
 import os
 import signal
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from itertools import chain
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from typing import Optional
@@ -253,7 +252,7 @@ def main(script_args: ScriptArguments):
         for connection in connections:
             try:
                 connection.send({"type": "shutdown"})
-            except:
+            except:  # noqa: E722
                 pass
         # Terminate all processes
         for process in processes:
@@ -332,9 +331,10 @@ def main(script_args: ScriptArguments):
         logprobs: int | None = None
         prompt_logprobs: int | None = None
 
+
     class GenerateResponse(BaseModel):
         completion_ids: list[list[int]]
-        generated_logprobs: list[list[list[float]]] | None = None
+        generated_logprobs: list[list[dict[int, float]]] | None = None
 
     @app.post("/generate/", response_model=GenerateResponse)
     async def generate(request: GenerateRequest):
@@ -368,15 +368,14 @@ def main(script_args: ScriptArguments):
         out = {"completion_ids": completion_ids}
 
         if request.logprobs is not None:
-            generated_logprobs: list[list[list[float]]] = []
+            generated_logprobs: list = []
             for request_output in request_outputs:
                 req_logprobs = []
                 for completion_output in request_output.outputs:
                     assert completion_output.logprobs is not None
-                    for logprob in completion_output.logprobs:
-                        sorted_logprobs = sorted(logprob.items(), key=lambda x: x[1].rank)
-                        sorted_logprobs = [v for _, v in sorted_logprobs]
-                        req_logprobs.append([v.logprob for v in sorted_logprobs])
+                    for cmpl_logprobs in completion_output.logprobs:
+                        sorted_logprobs = {k: v.logprob for k, v in cmpl_logprobs.items()}
+                        req_logprobs.append(sorted_logprobs)
                 generated_logprobs.append(req_logprobs)
             out["generated_logprobs"] = generated_logprobs
 
