@@ -1,4 +1,3 @@
-import os
 import time
 from pathlib import Path
 from typing import Optional, cast, Any
@@ -19,7 +18,9 @@ from vllm_inference.client import VLLMClient
 from pydantic import BaseModel
 from typing import Literal
 
-from bitsandbytes.optim import Adam8bit
+USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
+if not USING_MPS:
+    from bitsandbytes.optim import Adam8bit
 
 
 def get_available_device() -> str:
@@ -66,11 +67,12 @@ class Trainer:
     def init_model(self):
         """Initialize the model and tokenizer."""
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
+        attn_impl = "flash_attention_2" if self.device.type == "cuda" else "flex_attention"
         model = AutoModelForCausalLM.from_pretrained(
             self.config.model_id,
             device_map="auto",
             torch_dtype=self.dtype,
-            attn_implementation="flash_attention_2",
+            attn_implementation=attn_impl,
         )
 
         logger.info("Model loaded.")
