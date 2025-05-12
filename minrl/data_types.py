@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict, List
 
+from torch import Tensor
+
 
 @dataclass
 class Episode:
@@ -14,7 +16,7 @@ class Episode:
     reward: float
     reward_info: Dict[str, float]
     # Only populated with vllm
-    generated_logprobs: list[list[float]] | None = None
+    generated_logprobs: Tensor
 
 
 @dataclass

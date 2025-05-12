@@ -148,7 +148,6 @@ class VLLMClient:
                 List of lists of token IDs representing the model-generated completions for each prompt.
         """
         url = f"http://{self.host}:{self.server_port}/generate/"
-        print('logprobs', logprobs)
         response = self.session.post(
             url,
             json={

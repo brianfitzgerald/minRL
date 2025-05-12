@@ -9,12 +9,27 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers.generation.utils import GenerateOutput
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from minrl.data_types import Episode, MiniBatch
 from vllm_inference.client import GenerateResponse, VLLMClient
+
+
+def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size: int) -> torch.Tensor:
+    """Convert from vLLM format to logprobs"""
+    all_probs = []
+    for seq in logprobs:
+        seq_probs = []
+        for token in seq:
+            tokens_sorted = sorted(token.items(), key=lambda x: x[1], reverse=True)
+            out_tensor = torch.zeros(vocab_size)
+            for (token_idx, prob) in tokens_sorted:
+                out_tensor[int(token_idx)] = prob
+            seq_probs.append(out_tensor)
+        all_probs.append(torch.stack(seq_probs))
+    return torch.stack(all_probs)
+
 
 
 @torch.no_grad()
@@ -47,7 +62,7 @@ def rollout(
             for _ in range(num_answer_per_question)
         ]
         print(len(prefixes_batch))
-        outputs = client.generate(prompts=prefixes_batch)
+        outputs = client.generate(prompts=prefixes_batch, logprobs=10)
     else:
 
         # Prepare input_ids for generation
@@ -117,6 +132,9 @@ def rollout(
             )
             print("rewards", rewards)
 
+            # TODO why out of bounds?
+            logprobs = logprob_dict_to_logprobs([generated_logprobs], tokenizer.vocab_size + 10000)
+
             # Create episode
             episode = Episode(
                 prefix=batch.prefixes[i],
@@ -126,7 +144,7 @@ def rollout(
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards["reward"],
                 reward_info=rewards["reward_info"],
-                generated_logprobs=generated_logprobs,
+                generated_logprobs=logprobs,
             )
             episodes.append(episode)
 
@@ -259,7 +277,7 @@ def update_policy(
                         all_logprobs.append(logprobs)
                 # HACK: vllm returns logprobs, not logits - this is likely unstable and needs to be fixed.
                 # Need to at least prune to top N logprobs and remove low probability tokens.
-                logits = torch.tensor(all_logprobs, device=device, dtype=dtype)
+                logits = torch.stack(all_logprobs).to(device=device, dtype=dtype)
             else:
                 out = model(input_ids=input_token_ids, attention_mask=batch_masks_tensor)
                 logits: torch.Tensor = out.logits
