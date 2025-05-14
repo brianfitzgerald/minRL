@@ -98,7 +98,6 @@ def rollout(
             idx = i * num_answer_per_question + j
 
             if using_vllm:
-                print(outputs)
                 generated_token_ids = outputs.completion_ids[idx]
                 assert outputs.generated_logprobs is not None
                 generated_logprobs = outputs.generated_logprobs[idx]

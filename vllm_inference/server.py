@@ -374,8 +374,8 @@ def main(script_args: ScriptArguments):
                 for completion_output in request_output.outputs:
                     assert completion_output.logprobs is not None
                     for cmpl_logprobs in completion_output.logprobs:
-                        sorted_logprobs = {k: v.logprob for k, v in cmpl_logprobs.items()}
-                        req_logprobs.append(sorted_logprobs)
+                        logprobs_dict = {k: v.logprob for k, v in cmpl_logprobs.items()}
+                        req_logprobs.append(logprobs_dict)
                 generated_logprobs.append(req_logprobs)
             out["generated_logprobs"] = generated_logprobs
 
