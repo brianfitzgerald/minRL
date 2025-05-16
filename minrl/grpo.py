@@ -224,6 +224,7 @@ def update_policy(
 
     loss, grad_norm, entropy = 0, 0, 0
 
+    # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
         logger.info(
             f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}",
@@ -282,9 +283,11 @@ def update_policy(
                 logits: torch.Tensor = out.logits
 
         # cross entropy, ignore padding tokens
+        logits = logits.reshape(-1, logits.size(-1))
+        target_token_ids = target_token_ids.reshape(-1)
         log_probs = -torch.nn.functional.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            target_token_ids.reshape(-1),
+            logits,
+            target_token_ids,
             ignore_index=pad_token_id,
             reduction="none",
         ).reshape(input_token_ids.shape[0], -1)

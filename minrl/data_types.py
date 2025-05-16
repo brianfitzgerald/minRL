@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict, List
 
 from torch import Tensor
 
@@ -14,7 +13,7 @@ class Episode:
     generated_token_ids: list[int]
     is_finished: bool
     reward: float
-    reward_info: Dict[str, float]
+    reward_info: dict[str, float]
     # Only populated with vllm
     generated_logprobs: Tensor
 
