@@ -381,11 +381,6 @@ def main(script_args: ScriptArguments):
 
         return out
 
-    class InitCommunicatorRequest(BaseModel):
-        host: str
-        port: int
-        world_size: int
-
     class UpdateWeightsRequest(BaseModel):
         name: str
         dtype: str

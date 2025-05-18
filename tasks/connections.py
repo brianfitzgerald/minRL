@@ -1,6 +1,6 @@
 import itertools
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TypedDict
 from torch.utils.data import Dataset
 
 import pandas as pd
@@ -16,15 +16,8 @@ SYSTEM_MESSAGE = (
 )
 RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 
-
-def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
-    """Reward function that checks if the completion has the right format, with strict spacing."""
-    pattern = r"^<reasoning>.*?</reasoning>\s*<answer>.*?</answer>\s*$"
-    responses = [completion[0]["content"] for completion in completions]
-    matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    rewards = [0.25 if match else 0.0 for match in matches]
-    logger.info(f"Strict format rewards: {rewards}")
-    return rewards
+N_GROUPS = 4
+GROUP_SIZE = 4
 
 
 CONNECTIONS_PROMPT = """
@@ -61,12 +54,23 @@ Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves "
 """
 
 
-def _connections_map(example: dict) -> dict:
-    words = example["words"]
+class ConnectionsItem(TypedDict):
+    words: list[str]
+    groups: list[dict[str, list[str]]]
+
+
+class ConversationDict(TypedDict):
+    prompt: list[dict[str, str]]
+    answer: str
+    answer_groups: list[list[str]]
+
+
+def _sample_to_conversation(sample: ConnectionsItem) -> ConversationDict:
+    words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
     answer_groups = []
-    for group in example["groups"]:
+    for group in sample["groups"]:
         answer.append(", ".join(group["words"]))
         answer_groups.append(group["words"])
     answer_formatted = "\n".join([f"<group>{a}</group>" for a in answer])
@@ -84,20 +88,20 @@ def _connections_map(example: dict) -> dict:
 
 
 class ConnectionsDataset(Dataset):
-    def __init__(self, data: pd.DataFrame, tokenizer: Tokenizer):
+    def __init__(self, data: pd.DataFrame, tokenizer: Tokenizer | None = None):
         self.dataframe: pd.DataFrame = data
         self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.dataframe)
 
-    def __getitem__(self, idx: int) -> dict:
-        item = self.dataframe.iloc[idx].to_dict()
-        mapped = _connections_map(item)
-        prefix = self.tokenizer.apply_chat_template( # type: ignore
-            mapped["prompt"],
-            tokenize=False,
-            enable_thinking=False
+    def __getitem__(self, idx: int) -> ConversationDict:
+        item: ConnectionsItem = self.dataframe.iloc[idx].to_dict()  # type: ignore
+        mapped = _sample_to_conversation(item)
+        if self.tokenizer is None:
+            return mapped
+        prefix = self.tokenizer.apply_chat_template(  # type: ignore
+            mapped["prompt"], tokenize=False, enable_thinking=False
         )
         tokens = self.tokenizer.encode(prefix)
         return {
@@ -107,7 +111,6 @@ class ConnectionsDataset(Dataset):
             "answer": mapped["answer"],
             "answer_groups": mapped["answer_groups"],
         }
-
 
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> MiniBatch:
@@ -121,7 +124,7 @@ class ConnectionsDataset(Dataset):
             prefixes=prefix,
             prefix_tokens=prefix_tokens,
             prefix_token_ids=prefix_token_ids,
-            answer=answer,
+            answers=answer,
             answer_groups=answer_groups,
         )
 
@@ -132,13 +135,14 @@ def create_connections_datasets(
     num_samples: int = 10000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
+    """Create connections datasets for training."""
     # Load and process data
     logger.info(f"Loading data from {jsonl_path}")
     prompts_pd = pd.read_json(jsonl_path, lines=True)
     df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
 
     logger.info(f"Generating {num_samples} samples")
-    # Generate samples
+
     groups = [
         {
             "groups": (
@@ -153,8 +157,97 @@ def create_connections_datasets(
     groups_pd = pd.DataFrame(groups)
     train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
     logger.info("Splitting into train and val sets")
+
     # Create datasets
     train_dataset = ConnectionsDataset(train_data, tokenizer)
     val_dataset = ConnectionsDataset(val_data, tokenizer)
 
     return train_dataset, val_dataset
+
+
+def strict_format_reward_func(
+    response: str, samples: dict[str, Any]
+) -> Dict[str, float]:
+    """Reward function that checks if the completion has the right format, with strict spacing."""
+    pattern = r"^<reasoning>.*?</reasoning>\s*<answer>.*?</answer>\s*$"
+    match = re.match(pattern, response, flags=re.DOTALL)
+    return {"reward": 0.25 if match else 0.0}
+
+
+def parse_groups(input_string) -> list[list[str]]:
+    # Find all occurrences of text within <group>...</group>
+    group_contents = re.findall(r"<group>(.*?)</group>", input_string, re.DOTALL)
+
+    groups = []
+    for content in group_contents:
+        # Split on commas and trim each word
+        words = [word.strip() for word in content.split(",") if word.strip()]
+        groups.append(words)
+
+    return groups
+
+
+def score_connections_soft(
+    solution_groups: list[list[str]], submitted_groups: list[list[str]]
+) -> float:
+    """Return the best match count for each solution group."""
+    solution_sets = [set(group) for group in solution_groups]
+    submitted_sets = [
+        set(group) for group in submitted_groups if len(group) == GROUP_SIZE
+    ]
+
+    if len(submitted_sets) > N_GROUPS:
+        return 0.0
+
+    if len(submitted_groups) == 0 or len(solution_groups) == 0:
+        return 0.0
+
+    # Get highest match count for each solution group
+    best_match_counts = []
+    if submitted_sets:
+        for sol_set in solution_sets:
+            if submitted_sets:
+                best_match_counts.append(
+                    max(
+                        len(sol_set.intersection(submitted))
+                        for submitted in submitted_sets
+                    )
+                )
+            else:
+                best_match_counts.append(0)
+    else:
+        best_match_counts = [0] * len(solution_sets)
+    return float(sum(best_match_counts) / len(solution_groups)) / len(submitted_groups)
+
+
+def score_connections_hard(
+    solution_groups: list[list[str]], submitted_groups: list[list[str]]
+) -> float:
+    """Return the number of correct groups."""
+    hard_score = 0
+    correct_group_indices = []  # Track indices of correctly solved solution groups.
+
+    solution_set = [set(group) for group in solution_groups]
+    solved = set()
+
+    if len(submitted_groups) > N_GROUPS:
+        return 0.0
+
+    for submitted_group in submitted_groups:
+        for i, correct_set in enumerate(solution_set):
+            if set(submitted_group) == correct_set and i not in solved:
+                hard_score += 1
+                correct_group_indices.append(i)
+                solved.add(i)
+                break
+
+    if len(submitted_groups) == 0:
+        return 0.0
+    return float(hard_score) / len(submitted_groups)
+
+
+def connections_reward_func(
+    response: str, sample: dict[str, Any]
+) -> float:
+    """Reward the number of correct groups."""
+    return soft_group_reward(response, sample["answer_groups"]) + score_connections_hard(sample["answer_groups"], parse_groups(response))

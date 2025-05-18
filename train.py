@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
-from minrl.dataset import ConnectionsDataset, create_connections_datasets, Tokenizer
+from tasks.connections import ConnectionsDataset, connections_reward_func, create_connections_datasets, Tokenizer
 from minrl.grpo import compute_metrics, rollout, update_policy
-from tasks.countdown import reward_function
+from tasks.countdown import countdown_reward_function
 from vllm_inference.client import VLLMClient
 from pydantic import BaseModel
 from typing import Literal
@@ -139,7 +139,7 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answer_per_question=self.config.num_answer_per_question,
-                reward_function=reward_function,
+                reward_function=connections_reward_func,
                 device=self.device,
                 client=self.client,
             )

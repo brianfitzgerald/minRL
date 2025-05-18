@@ -2,7 +2,7 @@ import dataclasses
 import gc
 from collections import defaultdict
 from pydoc import html
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, TypedDict, Protocol
 from tensorboardX import SummaryWriter
 
 import numpy as np
@@ -17,7 +17,10 @@ from vllm_inference.client import GenerateResponse, VLLMClient
 
 
 def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size: int) -> torch.Tensor:
-    """Convert from vLLM format to logprobs"""
+    """Convert from vLLM format to logprobs.
+    vLLM returns a list of dicts, each containing a token and its logprob.
+    We convert this to a tensor of shape (batch_size, seq_len, vocab_size)
+    """
     all_probs = []
     for seq in logprobs:
         seq_probs = []
@@ -31,6 +34,9 @@ def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size:
     return torch.stack(all_probs)
 
 
+class RewardFunction(Protocol):
+    def __call__(self, response: str, sample: dict[str, Any]) -> Dict[str, float]: ...
+
 
 @torch.no_grad()
 def rollout(
@@ -39,7 +45,7 @@ def rollout(
     batch: MiniBatch,
     max_new_tokens: int,
     num_answer_per_question: int,
-    reward_function: Callable,
+    reward_function: RewardFunction,
     device: torch.device,
     client: VLLMClient | None = None,
 ) -> List[Episode]:
@@ -61,7 +67,6 @@ def rollout(
             for i in range(len(batch.prefixes))
             for _ in range(num_answer_per_question)
         ]
-        print(len(prefixes_batch))
         outputs = client.generate(prompts=prefixes_batch, logprobs=10)
     else:
 
@@ -95,17 +100,17 @@ def rollout(
     episodes: List[Episode] = []
     for i in range(len(batch.prefixes)):
         for j in range(num_answer_per_question):
+            # idx of the j-th answer for the i-th prompt
             idx = i * num_answer_per_question + j
 
             if using_vllm:
                 generated_token_ids = outputs.completion_ids[idx]
                 assert outputs.generated_logprobs is not None
+                # Get the generated logprobs for the batch
                 generated_logprobs = outputs.generated_logprobs[idx]
             else:
                 # Get tokens generated
-                generated_token_ids = outputs.sequences[idx][  # type: ignore
-                    len(batch.prefix_token_ids[i]) :
-                ].tolist()
+                raise ValueError("Not implemented")
 
             logger.info(f"Generated token ids: {len(generated_token_ids)}")
 
@@ -126,13 +131,12 @@ def rollout(
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
-                answer=batch.answer[i],
-                end_token=end_token,
+                sample=batch.answers[i],
             )
             print("rewards", rewards)
 
             # TODO why out of bounds?
-            logprobs = logprob_dict_to_logprobs([generated_logprobs], tokenizer.vocab_size + 10000)
+            logprobs = logprob_dict_to_logprobs([generated_logprobs], tokenizer.vocab_size + 1000)
 
             # Create episode
             episode = Episode(
@@ -142,7 +146,7 @@ def rollout(
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards["reward"],
-                reward_info=rewards["reward_info"],
+                reward_info=rewards,
                 generated_logprobs=logprobs,
             )
             episodes.append(episode)

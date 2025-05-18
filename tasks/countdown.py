@@ -1,14 +1,11 @@
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, TypedDict
 
 
-def format_reward_function(response: str, end_token: Optional[str] = None) -> float:
+def format_reward_function(response: str) -> float:
     """
     Checks if the response follows the format <think>...</think><answer>...</answer>
     """
-    # Strip end token if present
-    if end_token and response.endswith(end_token):
-        response = response[: -len(end_token)]
 
     think_regex = r"<think>.*?<\/think>"
     answer_regex = r"<answer>.*?<\/answer>"
@@ -33,7 +30,7 @@ def format_reward_function(response: str, end_token: Optional[str] = None) -> fl
 
 
 def answer_reward_function(
-    response: str, numbers: List[int] = None, target: int = None
+    response: str, numbers: List[int], target: int
 ) -> float:
     """
     Checks if the answer uses all numbers exactly once and evaluates to the target
@@ -66,22 +63,35 @@ def answer_reward_function(
 
     return 0.0
 
-def reward_function(
+
+class CountdownSample(TypedDict):
+    numbers: list[int]
+    answer: int
+
+def countdown_reward_function(
     response: str,
-    numbers: List[int] = None,
-    answer: int = None,
-    end_token: str = None,
-) -> Dict[str, Any]:
+    sample: list[str]
+) -> Dict[str, float]:
     """Reward function for Countdown Tasks.
 
     Total reward = 0.1 * format_reward + answer_reward
+    Args:
+        response: The response from the model.
+        sample: A list containing [numbers_str, target_str] where numbers_str is a comma-separated list of numbers
+               and target_str is the target number as a string.
+    Returns:
+        A dictionary containing the reward and individual reward components.
     """
-    format_reward = format_reward_function("<think>" + response, end_token)
-    answer_reward = answer_reward_function(response, numbers, answer)
+    numbers_str, target_str = sample
+    numbers = [int(n.strip()) for n in numbers_str.split(",")]
+    target = int(target_str)
+    
+    format_reward = format_reward_function("<think>" + response)
+    answer_reward = answer_reward_function(response, numbers, target)
+    total_reward = format_reward * 0.1 + answer_reward
+    
     return {
-        "reward": format_reward * 0.1 + answer_reward,
-        "reward_info": {
-            "format_reward": format_reward,
-            "answer_reward": answer_reward,
-        },
+        "reward": total_reward,
+        "format_reward": format_reward,
+        "answer_reward": answer_reward,
     }

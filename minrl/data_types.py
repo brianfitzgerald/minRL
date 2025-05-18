@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from typing import Any
 from torch import Tensor
 
 
@@ -9,7 +10,9 @@ class Episode:
 
     prefix: str
     text: str
+    # Token IDs of the prefix
     prefix_token_ids: list[int]
+    # Token IDs of the generated text
     generated_token_ids: list[int]
     is_finished: bool
     reward: float
@@ -25,5 +28,5 @@ class MiniBatch:
     prefixes: list[str]
     prefix_tokens: list[list[str]]
     prefix_token_ids: list[list[int]]
-    answer: list[str]
+    answers: list[dict[str, Any]]
     answer_groups: list[list[str]]
