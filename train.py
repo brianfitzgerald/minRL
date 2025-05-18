@@ -13,7 +13,6 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from tasks.connections import ConnectionsDataset, connections_reward_func, create_connections_datasets, Tokenizer
 from minrl.grpo import compute_metrics, rollout, update_policy
-from tasks.countdown import countdown_reward_function
 from vllm_inference.client import VLLMClient
 from pydantic import BaseModel
 from typing import Literal

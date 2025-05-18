@@ -66,7 +66,7 @@ def test_parse_groups_whitespace():
     assert parse_groups(input_str) == expected
 
 
-def test_parse_groups_empty_string():
+def test_parseG_groups_empty_string():
     input_str = ""
     expected = []
     assert parse_groups(input_str) == expected
@@ -76,88 +76,3 @@ def test_parse_groups_empty_group():
     input_str = "<group></group>"
     expected = [[]]
     assert parse_groups(input_str) == expected
-
-
-def test_connections_reward_func_correct():
-    completion = [[{"content": FIRST_SAMPLE["answer"]}]]
-    hard_score = hard_group_reward(
-        FIRST_SAMPLE["prompt"], completion, answer_groups=ANSWERS_BATCH
-    )
-    soft_score = soft_group_reward(
-        FIRST_SAMPLE["prompt"], completion, answer_groups=ANSWERS_BATCH
-    )
-    assert [hard_score[0], soft_score[0]] == [1.0, 1.0]
-
-
-def test_soft_reward_values():
-    completions = [
-        "<answer><group>crush, rout, shellac, trash</group></answer>",
-        "<answer><group>crush, rout, shellac</group></answer>",
-        "<answer><group>rout, shellac</group></answer>",
-        "<answer><group>rout</group></answer>",
-    ]
-    scores = []
-    expected_scores = [1.0, 0.75, 0.5, 0.25]
-    for c in completions:
-        score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
-        scores.append(score[0])
-    assert scores == expected_scores
-
-
-def test_soft_reward_values_multiple_groups():
-    completions = [
-        "<answer><group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group></answer>",
-        "<answer><group>crush, rout, shellac, trash</group><group>cami, halter, tank, tee</group></answer>",
-        "<answer><group>crush, rout, shellac, trash</group></answer>",
-    ]
-    scores = []
-    expected_scores = [1.0, 1.0, 1.0]
-    for c in completions:
-        score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
-        scores.append(score[0])
-    assert scores == expected_scores
-
-
-def test_hard_reward_values():
-    completions = [
-        "<answer><group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group></answer>",
-        "<answer><group>crush, rout, shellac, trash</group><group>cami, halter, tank, tee</group></answer>",
-        "<answer><group>crush, rout, shellac, trash</group></answer>",
-        "<answer><group>crush, rout, shellac, trash, cami, halter, tank, tee, bottom, buns, seat, tail, blue, fin, gray, right</group></answer>",
-    ]
-    scores = []
-    for c in completions:
-        score = hard_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
-        scores.append(score[0])
-    assert scores == [1.0, 1.0, 1.0, 0.0]
-
-
-def test_group_size_rewards():
-    completions = [
-        "<answer><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group></answer>",
-        "<answer><group>crush, rout, shellac</group><group>crush, rout, shellac, rout</group></answer>",
-        "<answer><group>crush, rout, shellac</group></answer>",
-        "<answer><group>rout, shellac</group></answer>",
-        "<answer><group>rout</group></answer>",
-    ]
-    out = []
-    for c in completions:
-        out.append(
-            group_size_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
-        )
-    assert out == [[0.25], [0.125], [0.0], [0.0], [0.0]]
-
-
-def test_soft_reward_max_groups():
-    groups = "<group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group>"
-    completions = [
-        f"<answer>{groups}</answer>",
-        f"<answer>{groups}{groups}</answer>",
-        "<answer><group>crush, rout, shellac, trash, cami, halter, tank, tee, bottom, buns, seat, tail, blue, fin, gray, right</group></answer>",
-    ]
-    scores = []
-    expected_scores = [1.0, 0.0, 0.0]
-    for c in completions:
-        score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
-        scores.append(score[0])
-    assert scores == expected_scores

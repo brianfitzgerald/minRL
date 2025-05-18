@@ -35,7 +35,7 @@ def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size:
 
 
 class RewardFunction(Protocol):
-    def __call__(self, response: str, sample: dict[str, Any]) -> Dict[str, float]: ...
+    def __call__(self, response: str, sample: dict[str, Any]) -> float: ...
 
 
 @torch.no_grad()
@@ -145,8 +145,8 @@ def rollout(
                 prefix_token_ids=batch.prefix_token_ids[i],
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,
-                reward=rewards["reward"],
-                reward_info=rewards,
+                reward=rewards,
+                reward_info={},
                 generated_logprobs=logprobs,
             )
             episodes.append(episode)

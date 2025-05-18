@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, TypedDict
+from typing import Any, List, TypedDict
 
 
 def format_reward_function(response: str) -> float:
@@ -29,9 +29,7 @@ def format_reward_function(response: str) -> float:
     return reward
 
 
-def answer_reward_function(
-    response: str, numbers: List[int], target: int
-) -> float:
+def answer_reward_function(response: str, numbers: List[int], target: int) -> float:
     """
     Checks if the answer uses all numbers exactly once and evaluates to the target
     """
@@ -68,10 +66,8 @@ class CountdownSample(TypedDict):
     numbers: list[int]
     answer: int
 
-def countdown_reward_function(
-    response: str,
-    sample: list[str]
-) -> Dict[str, float]:
+
+def countdown_reward_function(response: str, sample: dict[str, Any]) -> float:
     """Reward function for Countdown Tasks.
 
     Total reward = 0.1 * format_reward + answer_reward
@@ -85,13 +81,9 @@ def countdown_reward_function(
     numbers_str, target_str = sample
     numbers = [int(n.strip()) for n in numbers_str.split(",")]
     target = int(target_str)
-    
+
     format_reward = format_reward_function("<think>" + response)
     answer_reward = answer_reward_function(response, numbers, target)
     total_reward = format_reward * 0.1 + answer_reward
-    
-    return {
-        "reward": total_reward,
-        "format_reward": format_reward,
-        "answer_reward": answer_reward,
-    }
+
+    return total_reward

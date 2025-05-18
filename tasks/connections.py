@@ -59,13 +59,8 @@ class ConnectionsItem(TypedDict):
     groups: list[dict[str, list[str]]]
 
 
-class ConversationDict(TypedDict):
-    prompt: list[dict[str, str]]
-    answer: str
-    answer_groups: list[list[str]]
 
-
-def _sample_to_conversation(sample: ConnectionsItem) -> ConversationDict:
+def _sample_to_conversation(sample: ConnectionsItem) -> dict:
     words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
@@ -86,7 +81,6 @@ def _sample_to_conversation(sample: ConnectionsItem) -> ConversationDict:
         "answer_groups": answer_groups,
     }
 
-
 class ConnectionsDataset(Dataset):
     def __init__(self, data: pd.DataFrame, tokenizer: Tokenizer | None = None):
         self.dataframe: pd.DataFrame = data
@@ -95,7 +89,7 @@ class ConnectionsDataset(Dataset):
     def __len__(self):
         return len(self.dataframe)
 
-    def __getitem__(self, idx: int) -> ConversationDict:
+    def __getitem__(self, idx: int) -> dict:
         item: ConnectionsItem = self.dataframe.iloc[idx].to_dict()  # type: ignore
         mapped = _sample_to_conversation(item)
         if self.tokenizer is None:
@@ -250,4 +244,4 @@ def connections_reward_func(
     response: str, sample: dict[str, Any]
 ) -> float:
     """Reward the number of correct groups."""
-    return soft_group_reward(response, sample["answer_groups"]) + score_connections_hard(sample["answer_groups"], parse_groups(response))
+    return score_connections_hard(sample["answer_groups"], parse_groups(response))
