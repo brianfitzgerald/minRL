@@ -82,8 +82,38 @@ def _sample_to_conversation(sample: ConnectionsItem) -> dict:
     }
 
 class ConnectionsDataset(Dataset):
-    def __init__(self, data: pd.DataFrame, tokenizer: Tokenizer | None = None):
-        self.dataframe: pd.DataFrame = data
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        jsonl_path: str = "data/connections_prompts.jsonl",
+        num_samples: int = 10000,
+        seed: int = 42,
+        is_train: bool = True,
+    ):
+        # Load and process data
+        logger.info(f"Loading data from {jsonl_path}")
+        prompts_pd = pd.read_json(jsonl_path, lines=True)
+        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
+
+        logger.info(f"Generating {num_samples} samples")
+
+        groups = [
+            {
+                "groups": (
+                    g := df_groups.sample(4, replace=False).reset_index(drop=True)
+                ).to_dict(orient="records"),
+                "words": list(itertools.chain.from_iterable(g["words"].dropna())),
+            }
+            for _ in range(num_samples)
+        ]
+
+        # Create DataFrame and split
+        groups_pd = pd.DataFrame(groups)
+        train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
+        logger.info("Splitting into train and val sets")
+
+        # Select appropriate dataset
+        self.dataframe = train_data if is_train else val_data
         self.tokenizer = tokenizer
 
     def __len__(self):
@@ -130,32 +160,8 @@ def create_connections_datasets(
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     """Create connections datasets for training."""
-    # Load and process data
-    logger.info(f"Loading data from {jsonl_path}")
-    prompts_pd = pd.read_json(jsonl_path, lines=True)
-    df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
-
-    logger.info(f"Generating {num_samples} samples")
-
-    groups = [
-        {
-            "groups": (
-                g := df_groups.sample(4, replace=False).reset_index(drop=True)
-            ).to_dict(orient="records"),
-            "words": list(itertools.chain.from_iterable(g["words"].dropna())),
-        }
-        for _ in range(num_samples)
-    ]
-
-    # Create DataFrame and split
-    groups_pd = pd.DataFrame(groups)
-    train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
-    logger.info("Splitting into train and val sets")
-
-    # Create datasets
-    train_dataset = ConnectionsDataset(train_data, tokenizer)
-    val_dataset = ConnectionsDataset(val_data, tokenizer)
-
+    train_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=True)
+    val_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=False)
     return train_dataset, val_dataset
 
 

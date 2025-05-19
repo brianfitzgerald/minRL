@@ -1,20 +1,25 @@
-import json
 import fire
-import litellm
 from dotenv import load_dotenv
-from typing import TypedDict
-import pandas as pd
+from torch.utils.data import DataLoader
+from tasks import TASK_DEFINITIONS, TaskChoice
 
-from tasks.connections import ConnectionsDataset
+"""
+Evaluate a series of OSS models against prompts and evals for a specific task.
+"""
 
-load_dotenv()
+load_dotenv(".env")
+
+INFERENCE_MODELS = ["gpt-4.1", "gpt-4.1-mini", "o4-mini"]
 
 
-def main():
-    prompts = json.load(open("data/eval_prompts.json"))
-    prompts_df = pd.DataFrame(prompts)
-    dataset = ConnectionsDataset(prompts_df)
-    print(prompts_df)
+def main(task: TaskChoice = "connections"):
+    task_definition = TASK_DEFINITIONS[task]
+    dataset, reward_function = task_definition["dataset"](), task_definition["reward_function"]
+    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+
+    for batch in loader:
+        print(batch)
+        break
 
 
 if __name__ == "__main__":

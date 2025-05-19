@@ -1,5 +1,24 @@
+from pathlib import Path
 import re
+import pandas as pd
 from typing import Any, List, TypedDict
+from torch.utils.data import Dataset
+
+from minrl.data_types import MiniBatch
+
+SYSTEM_MESSAGE = (
+    "You are a helpful assistant. You first think about the reasoning process "
+    "in your mind and then provide the user with the answer."
+)
+USER_TEMPLATE = (
+    "Using the numbers {numbers}, create an equation that equals {target}. "
+    "You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. "
+    "Show your work in <think> </think> tags. "
+    "And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>."
+)
+RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
+
+
 
 
 def format_reward_function(response: str) -> float:
@@ -87,3 +106,61 @@ def countdown_reward_function(response: str, sample: dict[str, Any]) -> float:
     total_reward = format_reward * 0.1 + answer_reward
 
     return total_reward
+
+
+class CountdownTasksDataset(Dataset):
+    """Prepare Countdown Tasks for training"""
+
+    def __init__(
+        self,
+        tokenizer,
+        data_path: str,
+        split: str = "train",
+        test_size: int = 100,
+    ):
+        data = pd.read_parquet(Path(data_path) / "data")
+        # use the last `test_size` examples for testing
+        self.data = (
+            data.iloc[:-test_size] if split == "train" else data.iloc[-test_size:]
+        )
+        self.tokenizer = tokenizer
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data.iloc[idx].to_dict()
+        item.update(self.encode_prefix(item["nums"], item["target"]))
+        return item
+
+    def encode_prefix(self, numbers: List[int], target: int):
+        """Prefix is the *actual* input to the model."""
+        user_message = USER_TEMPLATE.format(numbers=numbers, target=target)
+        prefix = self.tokenizer.encode_chat_with_response_prompt(
+            [
+                {"role": "system", "content": SYSTEM_MESSAGE},
+                {"role": "user", "content": user_message},
+            ],
+            RESPONSE_PROMPT,
+        )
+        tokens = self.tokenizer.tokenize(prefix)
+        return {
+            "prefix": prefix,
+            "prefix_tokens": tokens.tokens,
+            "prefix_token_ids": tokens.ids,
+        }
+
+    @staticmethod
+    def collate_fn(batch: List[dict[str, Any]]) -> MiniBatch:
+        """Collate examples into a batch."""
+        target = [item["target"] for item in batch]
+        prefix = [item["prefix"] for item in batch]
+        prefix_tokens = [item["prefix_tokens"] for item in batch]
+        prefix_token_ids = [item["prefix_token_ids"] for item in batch]
+        return MiniBatch(
+            answer_groups=target,
+            answers=target,
+            prefixes=prefix,
+            prefix_tokens=prefix_tokens,
+            prefix_token_ids=prefix_token_ids,
+        )
