@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
-from tasks.connections import ConnectionsDataset, connections_reward_func, create_connections_datasets, Tokenizer
+from tasks.connections import ConnectionsDataset, connections_reward_func, create_connections_datasets, postprocess_connections_sample
 from minrl.grpo import compute_metrics, rollout, update_policy
 from vllm_inference.client import VLLMClient
 from pydantic import BaseModel
@@ -85,9 +85,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         self.train_dataset, _ = create_connections_datasets(
-            cast(Tokenizer, self.tokenizer),
             jsonl_path="data/train_prompts.jsonl",
-            num_samples=1000
         )
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
@@ -126,11 +124,14 @@ class Trainer:
             4. Saves checkpoints periodically
             5. Logs metrics to TensorBoard
         """
+
         for step, batch in enumerate(self.train_dataloader, start=1):
             logger.info(f"Starting rollout for step {step}")
 
             assert self.model is not None
             assert self.tokenizer is not None
+
+            batch = postprocess_connections_sample(batch, self.tokenizer)
 
             episodes = rollout(
                 model=self.model,

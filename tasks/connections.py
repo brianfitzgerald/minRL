@@ -59,8 +59,13 @@ class ConnectionsItem(TypedDict):
     groups: list[dict[str, list[str]]]
 
 
+class ConnectionsSample(TypedDict):
+    answer_groups: list[dict[str, list[str]]]
+    prompt: list[dict[str, str]]
+    answer: str
 
-def _sample_to_conversation(sample: ConnectionsItem) -> dict:
+
+def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
     words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
@@ -81,10 +86,26 @@ def _sample_to_conversation(sample: ConnectionsItem) -> dict:
         "answer_groups": answer_groups,
     }
 
+
+def postprocess_connections_sample(
+    sample: ConnectionsSample, tokenizer: Tokenizer
+) -> dict:
+    prefix = tokenizer.apply_chat_template(  # type: ignore
+        sample["prompt"], tokenize=False, enable_thinking=False
+    )
+    tokens = tokenizer.encode(prefix)
+    return {
+        "prefix": prefix,
+        "prefix_tokens": tokens,
+        "prefix_token_ids": tokens,
+        "answer": sample["answer"],
+        "answer_groups": sample["answer_groups"],
+    }
+
+
 class ConnectionsDataset(Dataset):
     def __init__(
         self,
-        tokenizer: Tokenizer,
         jsonl_path: str = "data/connections_prompts.jsonl",
         num_samples: int = 10000,
         seed: int = 42,
@@ -109,32 +130,20 @@ class ConnectionsDataset(Dataset):
 
         # Create DataFrame and split
         groups_pd = pd.DataFrame(groups)
-        train_data, val_data = train_test_split(groups_pd, test_size=0.1, random_state=seed)
+        train_data, val_data = train_test_split(
+            groups_pd, test_size=0.1, random_state=seed
+        )
         logger.info("Splitting into train and val sets")
 
         # Select appropriate dataset
         self.dataframe = train_data if is_train else val_data
-        self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.dataframe)
 
-    def __getitem__(self, idx: int) -> dict:
+    def __getitem__(self, idx: int) -> ConnectionsSample:
         item: ConnectionsItem = self.dataframe.iloc[idx].to_dict()  # type: ignore
-        mapped = _sample_to_conversation(item)
-        if self.tokenizer is None:
-            return mapped
-        prefix = self.tokenizer.apply_chat_template(  # type: ignore
-            mapped["prompt"], tokenize=False, enable_thinking=False
-        )
-        tokens = self.tokenizer.encode(prefix)
-        return {
-            "prefix": prefix,
-            "prefix_tokens": tokens,
-            "prefix_token_ids": tokens,
-            "answer": mapped["answer"],
-            "answer_groups": mapped["answer_groups"],
-        }
+        return _sample_to_conversation(item)
 
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> MiniBatch:
@@ -142,26 +151,22 @@ class ConnectionsDataset(Dataset):
         prefix = [item["prefix"] for item in batch]
         prefix_tokens = [item["prefix_tokens"] for item in batch]
         prefix_token_ids = [item["prefix_token_ids"] for item in batch]
-        answer = [item["answer"] for item in batch]
-        answer_groups = [item["answer_groups"] for item in batch]
         return MiniBatch(
             prefixes=prefix,
             prefix_tokens=prefix_tokens,
             prefix_token_ids=prefix_token_ids,
-            answers=answer,
-            answer_groups=answer_groups,
+            samples=batch,
         )
 
 
 def create_connections_datasets(
-    tokenizer: Tokenizer,
-    jsonl_path: str = "data/connections_prompts.jsonl",
-    num_samples: int = 10000,
+    jsonl_path: str = "data/train_prompts.jsonl",
+    num_samples: int = 1000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     """Create connections datasets for training."""
-    train_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=True)
-    val_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=False)
+    train_dataset = ConnectionsDataset(jsonl_path, num_samples, seed, is_train=True)
+    val_dataset = ConnectionsDataset(jsonl_path, num_samples, seed, is_train=False)
     return train_dataset, val_dataset
 
 
@@ -246,8 +251,6 @@ def score_connections_hard(
     return float(hard_score) / len(submitted_groups)
 
 
-def connections_reward_func(
-    response: str, sample: dict[str, Any]
-) -> float:
+def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
     """Reward the number of correct groups."""
     return score_connections_hard(sample["answer_groups"], parse_groups(response))

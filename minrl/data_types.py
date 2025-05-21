@@ -28,5 +28,4 @@ class MiniBatch:
     prefixes: list[str]
     prefix_tokens: list[list[str]]
     prefix_token_ids: list[list[int]]
-    answers: list[dict[str, Any]]
-    answer_groups: list[list[str]]
+    samples: list[dict[str, Any]]

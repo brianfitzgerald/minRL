@@ -13,6 +13,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 from minrl.data_types import Episode, MiniBatch
+from tasks import RewardFunction
 from vllm_inference.client import GenerateResponse, VLLMClient
 
 
@@ -34,9 +35,6 @@ def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size:
     return torch.stack(all_probs)
 
 
-class RewardFunction(Protocol):
-    def __call__(self, response: str, sample: dict[str, Any]) -> float: ...
-
 
 @torch.no_grad()
 def rollout(
@@ -50,7 +48,6 @@ def rollout(
     client: VLLMClient | None = None,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
-    end_token = tokenizer.eos_token
     end_token_id = tokenizer.eos_token_id
     pad_token_id = tokenizer.pad_token_id
     using_vllm = client is not None
@@ -131,7 +128,7 @@ def rollout(
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
-                sample=batch.answers[i],
+                sample=batch.samples[i],
             )
             print("rewards", rewards)
 
