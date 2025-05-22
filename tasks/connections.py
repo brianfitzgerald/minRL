@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 import pandas as pd
 from loguru import logger
 from sklearn.model_selection import train_test_split
-from tokenizers import Tokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from minrl.data_types import MiniBatch
 
@@ -64,6 +64,11 @@ class ConnectionsSample(TypedDict):
     prompt: list[dict[str, str]]
     answer: str
 
+class ConnectionsSampleTokenized(TypedDict):
+    prefix: str
+    prefix_token_ids: list[int]
+    answer: str
+    answer_groups: list[dict[str, list[str]]]
 
 def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
     words = sample["words"]
@@ -87,16 +92,15 @@ def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
     }
 
 
-def postprocess_connections_sample(
-    sample: ConnectionsSample, tokenizer: Tokenizer
-) -> dict:
-    prefix = tokenizer.apply_chat_template(  # type: ignore
+def tokenize_connections_sample(
+    sample: ConnectionsSample, tokenizer: PreTrainedTokenizerBase
+) -> ConnectionsSampleTokenized:
+    prefix: str = tokenizer.apply_chat_template(  # type: ignore
         sample["prompt"], tokenize=False, enable_thinking=False
     )
     tokens = tokenizer.encode(prefix)
     return {
         "prefix": prefix,
-        "prefix_tokens": tokens,
         "prefix_token_ids": tokens,
         "answer": sample["answer"],
         "answer_groups": sample["answer_groups"],
@@ -106,6 +110,7 @@ def postprocess_connections_sample(
 class ConnectionsDataset(Dataset):
     def __init__(
         self,
+        tokenizer: PreTrainedTokenizerBase,
         jsonl_path: str = "data/connections_prompts.jsonl",
         num_samples: int = 10000,
         seed: int = 42,
@@ -115,6 +120,7 @@ class ConnectionsDataset(Dataset):
         logger.info(f"Loading data from {jsonl_path}")
         prompts_pd = pd.read_json(jsonl_path, lines=True)
         df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
+        self.tokenizer = tokenizer
 
         logger.info(f"Generating {num_samples} samples")
 
@@ -143,30 +149,30 @@ class ConnectionsDataset(Dataset):
 
     def __getitem__(self, idx: int) -> ConnectionsSample:
         item: ConnectionsItem = self.dataframe.iloc[idx].to_dict()  # type: ignore
-        return _sample_to_conversation(item)
+        sample = _sample_to_conversation(item)
+        return sample
 
-    @staticmethod
-    def collate_fn(batch: List[Dict[str, Any]]) -> MiniBatch:
+    def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
         """Collate examples into a batch."""
-        prefix = [item["prefix"] for item in batch]
-        prefix_tokens = [item["prefix_tokens"] for item in batch]
-        prefix_token_ids = [item["prefix_token_ids"] for item in batch]
+        tokenized = [tokenize_connections_sample(item, self.tokenizer) for item in batch]
+        prefixes = [item["prefix"] for item in tokenized]
+        prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
         return MiniBatch(
-            prefixes=prefix,
-            prefix_tokens=prefix_tokens,
+            prefixes=prefixes,
             prefix_token_ids=prefix_token_ids,
-            samples=batch,
+            samples=batch, # type: ignore
         )
 
 
 def create_connections_datasets(
+    tokenizer: PreTrainedTokenizerBase,
     jsonl_path: str = "data/train_prompts.jsonl",
     num_samples: int = 1000,
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     """Create connections datasets for training."""
-    train_dataset = ConnectionsDataset(jsonl_path, num_samples, seed, is_train=True)
-    val_dataset = ConnectionsDataset(jsonl_path, num_samples, seed, is_train=False)
+    train_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=True)
+    val_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=False)
     return train_dataset, val_dataset
 
 

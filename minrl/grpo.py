@@ -10,14 +10,16 @@ import torch
 import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
-from transformers.tokenization_utils import PreTrainedTokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from minrl.data_types import Episode, MiniBatch
 from tasks import RewardFunction
 from vllm_inference.client import GenerateResponse, VLLMClient
 
 
-def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size: int) -> torch.Tensor:
+def logprob_dict_to_logprobs(
+    logprobs: list[list[dict[int, float]]], vocab_size: int
+) -> torch.Tensor:
     """Convert from vLLM format to logprobs.
     vLLM returns a list of dicts, each containing a token and its logprob.
     We convert this to a tensor of shape (batch_size, seq_len, vocab_size)
@@ -28,18 +30,17 @@ def logprob_dict_to_logprobs(logprobs: list[list[dict[int, float]]], vocab_size:
         for token in seq:
             tokens_sorted = sorted(token.items(), key=lambda x: x[1], reverse=True)
             out_tensor = torch.zeros(vocab_size)
-            for (token_idx, prob) in tokens_sorted:
+            for token_idx, prob in tokens_sorted:
                 out_tensor[int(token_idx)] = prob
             seq_probs.append(out_tensor)
         all_probs.append(torch.stack(seq_probs))
     return torch.stack(all_probs)
 
 
-
 @torch.no_grad()
 def rollout(
     model: AutoModelForCausalLM,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     batch: MiniBatch,
     max_new_tokens: int,
     num_answer_per_question: int,
@@ -66,7 +67,6 @@ def rollout(
         ]
         outputs = client.generate(prompts=prefixes_batch, logprobs=10)
     else:
-
         # Prepare input_ids for generation
         input_ids: list[list[int]] = []
         for prefix_ids in batch.prefix_token_ids:
@@ -114,7 +114,9 @@ def rollout(
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
                 generated_token_ids = generated_token_ids[
-                    : generated_token_ids.index(pad_token_id) # type: ignore
+                    : generated_token_ids.index(
+                        pad_token_id
+                    )  # type: ignore
                 ]
             logger.info(
                 f"Generated token ids after removing padding: {len(generated_token_ids)}"
@@ -133,7 +135,9 @@ def rollout(
             print("rewards", rewards)
 
             # TODO why out of bounds?
-            logprobs = logprob_dict_to_logprobs([generated_logprobs], tokenizer.vocab_size + 1000)
+            logprobs = logprob_dict_to_logprobs(
+                [generated_logprobs], tokenizer.vocab_size + 1000
+            )  # type: ignore
 
             # Create episode
             episode = Episode(
@@ -280,7 +284,9 @@ def update_policy(
                 # Need to at least prune to top N logprobs and remove low probability tokens.
                 logits = torch.stack(all_logprobs).to(device=device, dtype=dtype)
             else:
-                out = model(input_ids=input_token_ids, attention_mask=batch_masks_tensor)
+                out = model(
+                    input_ids=input_token_ids, attention_mask=batch_masks_tensor
+                )
                 logits: torch.Tensor = out.logits
 
         # cross entropy, ignore padding tokens

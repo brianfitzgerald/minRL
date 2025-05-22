@@ -1,4 +1,4 @@
-from tasks.connections import ConnectionsDataset, connections_reward_func, postprocess_connections_sample
+from tasks.connections import ConnectionsDataset, connections_reward_func, tokenize_connections_sample
 from tasks.countdown import CountdownTasksDataset, countdown_reward_function
 from typing import Callable, Literal, TypedDict, Protocol, Any
 from torch.utils.data import Dataset
@@ -20,12 +20,12 @@ TASK_DEFINITIONS: dict[TaskChoice, TaskDefinition] = {
         "name": "connections",
         "reward_function": connections_reward_func,
         "dataset": ConnectionsDataset,
-        "postprocess_function": postprocess_connections_sample,
+        "postprocess_function": tokenize_connections_sample,
     },
     "countdown": {
         "name": "countdown",
         "reward_function": countdown_reward_function,
         "dataset": CountdownTasksDataset,
-        "postprocess_function": postprocess_connections_sample,
+        "postprocess_function": tokenize_connections_sample,
     },
 }

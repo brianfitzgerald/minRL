@@ -26,6 +26,5 @@ class MiniBatch:
     """Batch of data for each training step."""
 
     prefixes: list[str]
-    prefix_tokens: list[list[str]]
     prefix_token_ids: list[list[int]]
     samples: list[dict[str, Any]]

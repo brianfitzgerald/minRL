@@ -1,21 +1,24 @@
 import time
 from pathlib import Path
-from typing import Optional, cast, Any
+from typing import Any, Literal, Optional, cast
 
 import fire
 import torch
 import torch.nn as nn
 from loguru import logger
+from pydantic import BaseModel
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
-from transformers.tokenization_utils import PreTrainedTokenizer
-from tasks.connections import ConnectionsDataset, connections_reward_func, create_connections_datasets, postprocess_connections_sample
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
 from minrl.grpo import compute_metrics, rollout, update_policy
+from tasks.connections import (
+    connections_reward_func,
+    create_connections_datasets,
+)
 from vllm_inference.client import VLLMClient
-from pydantic import BaseModel
-from typing import Literal
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -31,7 +34,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -51,13 +56,10 @@ class TrainerConfig(BaseModel):
 
 
 class Trainer:
-
-    tokenizer: PreTrainedTokenizer | None = None
+    tokenizer: PreTrainedTokenizerBase | None = None
     model: AutoModelForCausalLM | None = None
 
-    def __init__(
-        self, config: Optional[TrainerConfig] = None
-    ) -> None:
+    def __init__(self, config: Optional[TrainerConfig] = None) -> None:
         """Initialize the trainer with configuration."""
         self.config = config or TrainerConfig()
         self.device = torch.device(get_available_device())
@@ -66,7 +68,9 @@ class Trainer:
     def init_model(self):
         """Initialize the model and tokenizer."""
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = "flash_attention_2" if self.device.type == "cuda" else "flex_attention"
+        attn_impl = (
+            "flash_attention_2" if self.device.type == "cuda" else "flex_attention"
+        )
         model = AutoModelForCausalLM.from_pretrained(
             self.config.model_id,
             device_map="auto",
@@ -85,13 +89,14 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         self.train_dataset, _ = create_connections_datasets(
+            tokenizer=self.tokenizer,
             jsonl_path="data/train_prompts.jsonl",
         )
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
-            collate_fn=ConnectionsDataset.collate_fn,
+            collate_fn=self.train_dataset.collate_fn,
             generator=generator,
             batch_size=1,
         )
@@ -130,8 +135,6 @@ class Trainer:
 
             assert self.model is not None
             assert self.tokenizer is not None
-
-            batch = postprocess_connections_sample(batch, self.tokenizer)
 
             episodes = rollout(
                 model=self.model,

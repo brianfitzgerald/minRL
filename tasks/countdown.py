@@ -154,11 +154,9 @@ class CountdownTasksDataset(Dataset):
     def collate_fn(batch: List[dict[str, Any]]) -> MiniBatch:
         """Collate examples into a batch."""
         prefix = [item["prefix"] for item in batch]
-        prefix_tokens = [item["prefix_tokens"] for item in batch]
         prefix_token_ids = [item["prefix_token_ids"] for item in batch]
         return MiniBatch(
             samples=batch,
             prefixes=prefix,
-            prefix_tokens=prefix_tokens,
             prefix_token_ids=prefix_token_ids,
         )
