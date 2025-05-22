@@ -2,7 +2,7 @@ import dataclasses
 import gc
 from collections import defaultdict
 from pydoc import html
-from typing import Any, Callable, Dict, List, TypedDict, Protocol
+from typing import Dict, List
 from tensorboardX import SummaryWriter
 
 import numpy as np
@@ -115,7 +115,7 @@ def rollout(
             if pad_token_id in generated_token_ids:
                 generated_token_ids = generated_token_ids[
                     : generated_token_ids.index(
-                        pad_token_id
+                        pad_token_id  # type: ignore
                     )  # type: ignore
                 ]
             logger.info(
@@ -136,8 +136,9 @@ def rollout(
 
             # TODO why out of bounds?
             logprobs = logprob_dict_to_logprobs(
-                [generated_logprobs], tokenizer.vocab_size + 1000
-            )  # type: ignore
+                [generated_logprobs],
+                tokenizer.vocab_size + 1000,  # type: ignore
+            )
 
             # Create episode
             episode = Episode(
@@ -333,17 +334,6 @@ def compute_metrics(
     step: int,
     optimizer: torch.optim.Optimizer,
 ) -> Dict[str, float]:
-    """
-    Compute and return important metrics from episodes and training results.
-
-    Args:
-        episodes: List of episodes from the current batch
-        results: Dictionary containing training results (loss, grad_norm, entropy)
-        optimizer: The optimizer used for training
-
-    Returns:
-        Dictionary containing all computed metrics
-    """
     reward = [episode.reward for episode in episodes]
     formatted_reward = [episode.reward_info["format_reward"] for episode in episodes]
     answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
