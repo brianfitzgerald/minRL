@@ -7,6 +7,7 @@ import pandas as pd
 from loguru import logger
 from sklearn.model_selection import train_test_split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from tasks.dataset import MinRLDataset, Split
 
 from minrl.data_types import MiniBatch
 
@@ -70,6 +71,17 @@ class ConnectionsSampleTokenized(TypedDict):
     answer: str
     answer_groups: list[dict[str, list[str]]]
 
+
+class ConnectionsEvalAnswer(TypedDict):
+    level: int
+    group: str
+    members: List[str]
+
+class ConnectionsEvalSample(TypedDict):
+    id: int
+    date: str
+    answers: List[ConnectionsEvalAnswer]
+
 def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
     words = sample["words"]
     words_formatted = ", ".join(words)
@@ -107,42 +119,39 @@ def tokenize_connections_sample(
     }
 
 
-class ConnectionsDataset(Dataset):
+class ConnectionsDataset(MinRLDataset):
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizerBase,
-        jsonl_path: str = "data/connections_prompts.jsonl",
-        num_samples: int = 10000,
-        seed: int = 42,
-        is_train: bool = True,
+        split: Split,
+        tokenizer: PreTrainedTokenizerBase | None = None,
     ):
-        # Load and process data
-        logger.info(f"Loading data from {jsonl_path}")
-        prompts_pd = pd.read_json(jsonl_path, lines=True)
-        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
-        self.tokenizer = tokenizer
+        if split in ("train", "test"):
+            prompts_pd = pd.read_json(f"data/{split}_prompts.jsonl", lines=True)
+            df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
+            self.tokenizer = tokenizer
+            num_samples = 10000
 
-        logger.info(f"Generating {num_samples} samples")
+            logger.info(f"Generating {num_samples} samples")
 
-        groups = [
-            {
-                "groups": (
-                    g := df_groups.sample(4, replace=False).reset_index(drop=True)
-                ).to_dict(orient="records"),
-                "words": list(itertools.chain.from_iterable(g["words"].dropna())),
-            }
-            for _ in range(num_samples)
-        ]
+            groups = [
+                {
+                    "groups": (
+                        g := df_groups.sample(4, replace=False).reset_index(drop=True)
+                    ).to_dict(orient="records"),
+                    "words": list(itertools.chain.from_iterable(g["words"].dropna())),
+                }
+                for _ in range(num_samples)
+            ]
 
-        # Create DataFrame and split
-        groups_pd = pd.DataFrame(groups)
-        train_data, val_data = train_test_split(
-            groups_pd, test_size=0.1, random_state=seed
-        )
-        logger.info("Splitting into train and val sets")
+            groups_pd = pd.DataFrame(groups)
+            train_data, val_data = train_test_split(
+                groups_pd, test_size=0.1, random_state=42
+            )
+            logger.info("Splitting into train and val sets")
 
-        # Select appropriate dataset
-        self.dataframe = train_data if is_train else val_data
+            self.dataframe = train_data if split == "train" else val_data
+        elif split == "eval":
+            self.dataframe = pd.read_json("data/eval_prompts.json")
 
     def __len__(self):
         return len(self.dataframe)
@@ -153,7 +162,12 @@ class ConnectionsDataset(Dataset):
         return sample
 
     def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
-        """Collate examples into a batch."""
+        """
+        Collate examples into a batch.
+        Used during training / evals, requires tokenization.
+        """
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer is not set")
         tokenized = [tokenize_connections_sample(item, self.tokenizer) for item in batch]
         prefixes = [item["prefix"] for item in tokenized]
         prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
@@ -171,8 +185,8 @@ def create_connections_datasets(
     seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     """Create connections datasets for training."""
-    train_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=True)
-    val_dataset = ConnectionsDataset(tokenizer, jsonl_path, num_samples, seed, is_train=False)
+    train_dataset = ConnectionsDataset(split="train", tokenizer=tokenizer)
+    val_dataset = ConnectionsDataset(split="eval", tokenizer=tokenizer)
     return train_dataset, val_dataset
 
 
