@@ -65,6 +65,7 @@ class ConnectionsSample(TypedDict):
     prompt: list[dict[str, str]]
     answer: str
 
+
 class ConnectionsSampleTokenized(TypedDict):
     prefix: str
     prefix_token_ids: list[int]
@@ -77,10 +78,12 @@ class ConnectionsEvalAnswer(TypedDict):
     group: str
     members: List[str]
 
+
 class ConnectionsEvalSample(TypedDict):
     id: int
     date: str
     answers: List[ConnectionsEvalAnswer]
+
 
 def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
     words = sample["words"]
@@ -168,13 +171,15 @@ class ConnectionsDataset(MinRLDataset):
         """
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
-        tokenized = [tokenize_connections_sample(item, self.tokenizer) for item in batch]
+        tokenized = [
+            tokenize_connections_sample(item, self.tokenizer) for item in batch
+        ]
         prefixes = [item["prefix"] for item in tokenized]
         prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
         return MiniBatch(
             prefixes=prefixes,
             prefix_token_ids=prefix_token_ids,
-            samples=batch, # type: ignore
+            samples=batch,  # type: ignore
         )
 
 

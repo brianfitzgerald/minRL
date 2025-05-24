@@ -1,11 +1,15 @@
-from tasks.connections import ConnectionsDataset, connections_reward_func, tokenize_connections_sample
-from tasks.countdown import CountdownTasksDataset, countdown_reward_function
+from tasks.connections import (
+    ConnectionsDataset,
+    connections_reward_func,
+    tokenize_connections_sample,
+)
 from typing import Callable, Literal, TypedDict, Protocol, Any
-from torch.utils.data import Dataset
 
 from tasks.dataset import MinRLDataset
 
 TaskChoice = Literal["connections", "countdown"]
+
+
 class RewardFunction(Protocol):
     def __call__(self, response: str, sample: dict[str, Any]) -> float: ...
 

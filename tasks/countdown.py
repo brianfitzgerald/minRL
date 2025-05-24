@@ -19,8 +19,6 @@ USER_TEMPLATE = (
 RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 
 
-
-
 def format_reward_function(response: str) -> float:
     """
     Checks if the response follows the format <think>...</think><answer>...</answer>

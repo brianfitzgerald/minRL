@@ -37,7 +37,9 @@ class WeightSyncWorkerExtension:
         self.device = torch.device("cuda")
         self.model_runner = None
 
-    def update_named_param(self, name: str, dtype: torch.dtype, shape: Sequence[int]) -> None:
+    def update_named_param(
+        self, name: str, dtype: torch.dtype, shape: Sequence[int]
+    ) -> None:
         """
         Receives updated weights and updates the named parameter in the model.
 
@@ -51,10 +53,10 @@ class WeightSyncWorkerExtension:
         """
         if self.model_runner is None:
             raise RuntimeError("Model runner not initialized")
-            
+
         # Allocate memory for the incoming weight tensor on the correct device
         weight = torch.empty(shape, dtype=dtype, device=self.device)
-        
+
         # Load the received weights into the model
         self.model_runner.model.load_weights(weights=[(name, weight)])
 
@@ -111,7 +113,9 @@ class ScriptArguments:
     )
     revision: Optional[str] = field(
         default=None,
-        metadata={"help": "Revision to use for the model. If not specified, the default branch will be used."},
+        metadata={
+            "help": "Revision to use for the model. If not specified, the default branch will be used."
+        },
     )
     tensor_parallel_size: int = field(
         default=1,
@@ -178,7 +182,10 @@ class ScriptArguments:
 
 
 def llm_worker(
-    script_args: ScriptArguments, data_parallel_rank: int, master_port: int, connection: Connection
+    script_args: ScriptArguments,
+    data_parallel_rank: int,
+    master_port: int,
+    connection: Connection,
 ) -> None:
     # Set required environment variables for DP to work with vLLM
     os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
@@ -267,7 +274,10 @@ def main(script_args: ScriptArguments):
 
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
-        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
+        process = Process(
+            target=llm_worker,
+            args=(script_args, data_parallel_rank, master_port, child_connection),
+        )
         process.start()
         connections.append(parent_connection)
         processes.append(process)
@@ -288,7 +298,9 @@ def main(script_args: ScriptArguments):
         for process in processes:
             process.join(timeout=10)  # Wait for 10 seconds for the process to terminate
             if process.is_alive():
-                logger.warning(f"Process {process} is still alive after 10 seconds, attempting to terminate...")
+                logger.warning(
+                    f"Process {process} is still alive after 10 seconds, attempting to terminate..."
+                )
                 process.terminate()
                 process.join()  # ensure process termination after calling terminate()
 
@@ -316,7 +328,10 @@ def main(script_args: ScriptArguments):
         {"world_size": 8}
         ```
         """
-        return {"world_size": script_args.tensor_parallel_size * script_args.data_parallel_size}
+        return {
+            "world_size": script_args.tensor_parallel_size
+            * script_args.data_parallel_size
+        }
 
     class GenerateRequest(BaseModel):
         prompts: list[str]
@@ -331,7 +346,6 @@ def main(script_args: ScriptArguments):
         logprobs: int | None = None
         prompt_logprobs: int | None = None
 
-
     class GenerateResponse(BaseModel):
         completion_ids: list[list[int]]
         generated_logprobs: list[list[dict[int, float]]] | None = None
@@ -340,7 +354,9 @@ def main(script_args: ScriptArguments):
     async def generate(request: GenerateRequest):
         # Guided decoding, if enabled
         if request.guided_decoding_regex is not None:
-            guided_decoding = GuidedDecodingParams(backend="outlines", regex=request.guided_decoding_regex)
+            guided_decoding = GuidedDecodingParams(
+                backend="outlines", regex=request.guided_decoding_regex
+            )
         else:
             guided_decoding = None
 
@@ -364,7 +380,11 @@ def main(script_args: ScriptArguments):
 
         # Receive results
         request_outputs: list[RequestOutput] = connections[0].recv()
-        completion_ids = [list(output.token_ids) for outputs in request_outputs for output in outputs.outputs]
+        completion_ids = [
+            list(output.token_ids)
+            for outputs in request_outputs
+            for output in outputs.outputs
+        ]
         out = {"completion_ids": completion_ids}
 
         if request.logprobs is not None:
@@ -398,8 +418,13 @@ def main(script_args: ScriptArguments):
                 - `shape` (list of `int`): Shape of the weight tensor.
         """
         dtype = getattr(torch, request.dtype.split(".")[-1])
-        kwargs = {"method": "update_named_param", "args": (request.name, dtype, tuple(request.shape))}
-        connections[0].send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+        kwargs = {
+            "method": "update_named_param",
+            "args": (request.name, dtype, tuple(request.shape)),
+        }
+        connections[0].send(
+            {"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs}
+        )
         return {"message": "Request received, updating named parameter"}
 
     @app.post("/reset_prefix_cache/")
@@ -409,7 +434,10 @@ def main(script_args: ScriptArguments):
         """
         connections[0].send({"type": "call", "method": "reset_prefix_cache"})
         success = connections[0].recv()
-        return {"message": "Request received, resetting prefix cache status: " + str(success)}
+        return {
+            "message": "Request received, resetting prefix cache status: "
+            + str(success)
+        }
 
     @app.post("/close_communicator/")
     async def close_communicator():
@@ -419,7 +447,12 @@ def main(script_args: ScriptArguments):
         return {"message": "Request received, closing communicator"}
 
     # Start the server
-    uvicorn.run(app, host=script_args.host, port=script_args.port, log_level=script_args.log_level)
+    uvicorn.run(
+        app,
+        host=script_args.host,
+        port=script_args.port,
+        log_level=script_args.log_level,
+    )
 
 
 if __name__ == "__main__":
