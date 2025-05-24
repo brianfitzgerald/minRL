@@ -3,8 +3,7 @@ import fire
 from dotenv import load_dotenv
 from torch.utils.data import DataLoader
 from tasks import TASK_DEFINITIONS, TaskChoice
-from litellm import batch_completion
-from litellm.types.utils import ModelResponse
+from openai import AsyncOpenAI
 from typing import TypedDict
 import pandas as pd
 from loguru import logger
@@ -27,7 +26,7 @@ class OutRow(TypedDict):
     score: float
 
 
-def main(task: TaskChoice = "connections"):
+async def main(task: TaskChoice = "connections"):
     task_definition = TASK_DEFINITIONS[task]
     dataset, reward_function = (
         task_definition["dataset"]("eval"),
@@ -38,31 +37,32 @@ def main(task: TaskChoice = "connections"):
     out_rows: list[OutRow] = []
 
     os.makedirs("eval_results", exist_ok=True)
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     for batch in loader:
         for model in INFERENCE_MODELS:
-            convs = [
-                [
+            logger.info(f"Evaluating {model} on {task}")
+            for prompt in batch["prompt"]:
+                conv = [
                     {
                         "role": "system",
                         "content": CONNECTIONS_PROMPT,
                     },
-                    {"role": "user", "content": p},
+                    {"role": "user", "content": prompt},
                 ]
-                for p in batch["prompt"]
-            ]
-            responses: list[ModelResponse] = batch_completion(
-                model=model,
-                messages=convs,
-            )  # type: ignore
-            for response in responses:
+
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=conv,
+                )
+
                 response_content: str = response.choices[0].message.content  # type: ignore
                 score = reward_function(response_content, batch)
                 logger.info(f"Response: {response_content}, Score: {score}")
                 out_rows.append(
                     {
                         "model": model,
-                        "prompt": batch["prompt"],
+                        "prompt": prompt,
                         "response": response_content,
                         "score": score,
                     }
@@ -75,4 +75,6 @@ def main(task: TaskChoice = "connections"):
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    import asyncio
+
+    asyncio.run(fire.Fire(main))
