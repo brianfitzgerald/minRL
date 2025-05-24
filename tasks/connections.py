@@ -55,14 +55,14 @@ Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves "
 """
 
 
-class ConnectionsItem(TypedDict):
+class ConnectionsTrainSample(TypedDict):
     words: list[str]
     groups: list[dict[str, list[str]]]
 
 
 class ConnectionsSample(TypedDict):
     answer_groups: list[dict[str, list[str]]]
-    prompt: list[dict[str, str]]
+    prompt: str
     answer: str
 
 
@@ -85,7 +85,7 @@ class ConnectionsEvalSample(TypedDict):
     answers: List[ConnectionsEvalAnswer]
 
 
-def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
+def _train_sample_to_conversation(sample: ConnectionsTrainSample) -> ConnectionsSample:
     words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
@@ -95,13 +95,21 @@ def _sample_to_conversation(sample: ConnectionsItem) -> ConnectionsSample:
         answer_groups.append(group["words"])
     answer_formatted = "\n".join([f"<group>{a}</group>" for a in answer])
     return {
-        "prompt": [
-            {
-                "role": "system",
-                "content": CONNECTIONS_PROMPT,
-            },
-            {"role": "user", "content": words_formatted},
-        ],
+        "prompt": words_formatted,
+        "answer": f"<answer>{answer_formatted}</answer>",
+        "answer_groups": answer_groups,
+    }
+
+
+def _eval_sample_to_conversation(sample: ConnectionsEvalSample) -> ConnectionsSample:
+    prompt = []
+    answer_groups = []
+    for answer in sample["answers"]:
+        prompt.append(", ".join(answer["members"]))
+        answer_groups.append(", ".join(answer["members"]))
+    answer_formatted = "\n".join([f"<group>{a}</group>" for a in prompt])
+    return {
+        "prompt": ", ".join(prompt),
         "answer": f"<answer>{answer_formatted}</answer>",
         "answer_groups": answer_groups,
     }
@@ -111,7 +119,15 @@ def tokenize_connections_sample(
     sample: ConnectionsSample, tokenizer: PreTrainedTokenizerBase
 ) -> ConnectionsSampleTokenized:
     prefix: str = tokenizer.apply_chat_template(  # type: ignore
-        sample["prompt"], tokenize=False, enable_thinking=False
+        [
+            {
+                "role": "system",
+                "content": CONNECTIONS_PROMPT,
+            },
+            {"role": "user", "content": sample["prompt"]},
+        ],
+        tokenize=False,
+        enable_thinking=False,
     )
     tokens = tokenizer.encode(prefix)
     return {
@@ -128,6 +144,7 @@ class ConnectionsDataset(MinRLDataset):
         split: Split,
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
+        super().__init__(split, tokenizer)
         if split in ("train", "test"):
             prompts_pd = pd.read_json(f"data/{split}_prompts.jsonl", lines=True)
             df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
@@ -160,8 +177,11 @@ class ConnectionsDataset(MinRLDataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx: int) -> ConnectionsSample:
-        item: ConnectionsItem = self.dataframe.iloc[idx].to_dict()  # type: ignore
-        sample = _sample_to_conversation(item)
+        item: Any = self.dataframe.iloc[idx].to_dict()
+        if self.split == "eval":
+            sample = _eval_sample_to_conversation(item)
+        else:
+            sample = _train_sample_to_conversation(item)
         return sample
 
     def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
