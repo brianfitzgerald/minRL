@@ -182,6 +182,7 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/b7/cb5ce4d1a382cf53c19ef06c5fc29e85f5e129b4da6527dd207d90a5b8ad/bitsandbytes-0.45.5-py3-none-manylinux_2_24_x86_64.whl", hash = "sha256:a5453f30cc6aab6ccaac364e6bf51a7808d3da5f71763dffeb6d9694c59136e4", size = 76059261 },
+    { url = "https://files.pythonhosted.org/packages/a6/4c/77b535e025ce780d2ada8271c1e481fb7337c1df2588a52fe1c9bd87d2e8/bitsandbytes-0.45.5-py3-none-win_amd64.whl", hash = "sha256:ed1c61b91d989d6a33fd05737d6edbf5086d8ebc89235ee632c7a19144085da2", size = 75430204 },
 ]
 
 [[package]]
@@ -1220,7 +1221,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
-    { name = "bitsandbytes", marker = "sys_platform == 'linux'" },
     { name = "datasets" },
     { name = "fire" },
     { name = "flash-attn", marker = "sys_platform == 'linux'" },
@@ -1245,10 +1245,15 @@ dependencies = [
     { name = "vllm" },
 ]
 
+[package.optional-dependencies]
+quantization = [
+    { name = "bitsandbytes", marker = "sys_platform != 'darwin'" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.6.0" },
-    { name = "bitsandbytes", marker = "sys_platform == 'linux'", specifier = ">=0.45.5" },
+    { name = "bitsandbytes", marker = "sys_platform != 'darwin' and extra == 'quantization'", specifier = ">=0.45.5" },
     { name = "datasets", specifier = ">=3.5.0" },
     { name = "fire", specifier = ">=0.7.0" },
     { name = "flash-attn", marker = "sys_platform == 'linux'" },
@@ -1272,6 +1277,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.2" },
     { name = "vllm", specifier = "==0.8.4" },
 ]
+provides-extras = ["quantization"]
 
 [[package]]
 name = "mistral-common"

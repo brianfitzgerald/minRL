@@ -1,15 +1,12 @@
 import itertools
 import re
 from typing import Any, Dict, List, TypedDict
-from torch.utils.data import Dataset
 
 import pandas as pd
 from loguru import logger
 from sklearn.model_selection import train_test_split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from tasks.dataset import MinRLDataset, Split
-
-from minrl.data_types import MiniBatch
+from tasks.dataset import MinRLDataset, MiniBatch, Split
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -187,7 +184,7 @@ class ConnectionsDataset(MinRLDataset):
     def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
         """
         Collate examples into a batch.
-        Used during training / evals, requires tokenization.
+        Used during training / only, requires a tokenizer.
         """
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
@@ -298,4 +295,5 @@ def score_connections_hard(
 
 def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
     """Reward the number of correct groups."""
-    return score_connections_hard(sample["answer_groups"], parse_groups(response))
+    groups = parse_groups(response)
+    return score_connections_hard(sample["answer_groups"], groups)

@@ -22,7 +22,7 @@ from vllm_inference.client import VLLMClient
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit
+    from bitsandbytes.optim import Adam8bit  # type: ignore
 
 
 def get_available_device() -> str:

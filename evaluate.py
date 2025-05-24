@@ -1,14 +1,20 @@
 import os
-import fire
-from dotenv import load_dotenv
-from torch.utils.data import DataLoader
-from tasks import TASK_DEFINITIONS, TaskChoice
-from openai import AsyncOpenAI
-from typing import TypedDict
-import pandas as pd
-from loguru import logger
+from typing import TypedDict, cast
 
-from tasks.connections import CONNECTIONS_PROMPT
+import fire
+import pandas as pd
+from dotenv import load_dotenv
+from loguru import logger
+from openai import AsyncOpenAI
+from openai.types.chat.chat_completion import ChatCompletion
+from torch.utils.data import DataLoader
+
+from tasks import TASK_DEFINITIONS, TaskChoice
+from tasks.connections import (
+    CONNECTIONS_PROMPT,
+    ConnectionsSample,
+)
+from tasks.dataset import batch_to_samples
 
 """
 Evaluate a series of OSS models against prompts and evals for a specific task.
@@ -40,29 +46,40 @@ async def main(task: TaskChoice = "connections"):
     client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     for batch in loader:
+        batch: list[ConnectionsSample] = batch_to_samples(batch)  # type: ignore
         for model in INFERENCE_MODELS:
             logger.info(f"Evaluating {model} on {task}")
-            for prompt in batch["prompt"]:
-                conv = [
-                    {
-                        "role": "system",
-                        "content": CONNECTIONS_PROMPT,
-                    },
-                    {"role": "user", "content": prompt},
-                ]
-
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=conv,
+            convs = []
+            for sample in batch:
+                convs.append(
+                    [
+                        {
+                            "role": "system",
+                            "content": CONNECTIONS_PROMPT,
+                        },
+                        {"role": "user", "content": sample["prompt"]},
+                    ]
                 )
 
+            responses = await asyncio.gather(
+                *[
+                    client.chat.completions.create(
+                        model=model,
+                        messages=conv,
+                    )
+                    for conv in convs
+                ]
+            )
+
+            for sample, response in zip(batch, responses):
                 response_content: str = response.choices[0].message.content  # type: ignore
-                score = reward_function(response_content, batch)
-                logger.info(f"Response: {response_content}, Score: {score}")
+                score = reward_function(response_content, cast(dict, sample))
+                logger.info(response_content)
+                logger.info(f"Score: {score}")
                 out_rows.append(
                     {
                         "model": model,
-                        "prompt": prompt,
+                        "prompt": sample["prompt"],
                         "response": response_content,
                         "score": score,
                     }

@@ -1,4 +1,4 @@
-from tasks.connections import parse_groups
+from tasks.connections import parse_groups, score_connections_hard
 
 
 FIRST_SAMPLE = {
@@ -76,3 +76,18 @@ def test_parse_groups_empty_group():
     input_str = "<group></group>"
     expected = [[]]
     assert parse_groups(input_str) == expected
+
+
+def test_uppercase():
+    input_str = "<think>\nFirst, identify groups of four words related by category or characteristics.\n\nGroup 1: Weather types - HAIL, RAIN, SLEET, SNOW (all types of precipitation)\nGroup 2: Palindromes - KAYAK, LEVEL, MOM, RACECAR (words spelled the same forward and backward)\nGroup 3: Basketball teams or related terms - BUCKS, HEAT, JAZZ, NETS (NBA teams)\nGroup 4: Keyboard-related terms - OPTION, RETURN, SHIFT, TAB (all keyboard keys/functions)\n</think>\n<answer>\n<group> HAIL, RAIN, SLEET, SNOW </group>\n<group> BUCKS, HEAT, JAZZ, NETS </group>\n<group> OPTION, RETURN, SHIFT, TAB </group>\n<group> KAYAK, LEVEL, MOM, RACECAR </group>\n</answer>"
+    groups = parse_groups(input_str)
+    score = score_connections_hard(
+        [
+            ["HAIL", "RAIN", "SLEET", "SNOW"],
+            ["BOOT", "LOAFER", "PUMP", "SNEAKER"],
+            ["CHEEK", "EYE", "MOUTH", "NOSE"],
+            ["ADIDAS", "NIKE", "PUMA", "REEBOK"],
+        ],
+        groups,
+    )
+    assert score == 0.25
