@@ -1,7 +1,5 @@
 from abc import abstractmethod
 from dataclasses import dataclass
-import torch
-
 from typing import Any, Literal
 
 from torch import Tensor

@@ -58,7 +58,7 @@ class ConnectionsTrainSample(TypedDict):
 
 
 class ConnectionsSample(TypedDict):
-    answer_groups: list[dict[str, list[str]]]
+    answer_groups: list[list[str]]
     prompt: str
     answer: str
 
@@ -67,7 +67,7 @@ class ConnectionsSampleTokenized(TypedDict):
     prefix: str
     prefix_token_ids: list[int]
     answer: str
-    answer_groups: list[dict[str, list[str]]]
+    answer_groups: list[list[str]]
 
 
 class ConnectionsEvalAnswer(TypedDict):
@@ -103,7 +103,7 @@ def _eval_sample_to_conversation(sample: ConnectionsEvalSample) -> ConnectionsSa
     answer_groups = []
     for answer in sample["answers"]:
         prompt.append(", ".join(answer["members"]))
-        answer_groups.append(", ".join(answer["members"]))
+        answer_groups.append(answer["members"])
     answer_formatted = "\n".join([f"<group>{a}</group>" for a in prompt])
     return {
         "prompt": ", ".join(prompt),
@@ -296,4 +296,7 @@ def score_connections_hard(
 def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
     """Reward the number of correct groups."""
     groups = parse_groups(response)
-    return score_connections_hard(sample["answer_groups"], groups)
+    hard_score = score_connections_hard(sample["answer_groups"], groups)
+    soft_score = score_connections_soft(sample["answer_groups"], groups)
+    logger.info(f"Hard: {hard_score}, Soft: {soft_score}")
+    return hard_score + soft_score

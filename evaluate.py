@@ -1,12 +1,12 @@
 import os
 from typing import TypedDict, cast
+from tqdm import tqdm
 
 import fire
 import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
 from openai import AsyncOpenAI
-from openai.types.chat.chat_completion import ChatCompletion
 from torch.utils.data import DataLoader
 
 from tasks import TASK_DEFINITIONS, TaskChoice
@@ -45,10 +45,9 @@ async def main(task: TaskChoice = "connections"):
     os.makedirs("eval_results", exist_ok=True)
     client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    for batch in loader:
+    for batch in tqdm(loader):
         batch: list[ConnectionsSample] = batch_to_samples(batch)  # type: ignore
         for model in INFERENCE_MODELS:
-            logger.info(f"Evaluating {model} on {task}")
             convs = []
             for sample in batch:
                 convs.append(
@@ -72,9 +71,11 @@ async def main(task: TaskChoice = "connections"):
             )
 
             for sample, response in zip(batch, responses):
-                response_content: str = response.choices[0].message.content  # type: ignore
+                assert response.choices[0].message.content is not None, (
+                    "No response content"
+                )
+                response_content = response.choices[0].message.content
                 score = reward_function(response_content, cast(dict, sample))
-                logger.info(response_content)
                 logger.info(f"Score: {score}")
                 out_rows.append(
                     {

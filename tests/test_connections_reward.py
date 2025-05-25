@@ -91,3 +91,38 @@ def test_uppercase():
         groups,
     )
     assert score == 0.25
+
+
+SAMPLE_OUTPUT = """
+<think>
+First, I notice four words that are types of precipitation or weather: HAIL, RAIN, SLEET, SNOW.
+
+Then I see BUCKS, HEAT, JAZZ, NETS — these are all names of sports teams (NBA or professional teams).
+
+Next, OPTION, RETURN, SHIFT, TAB — all relate to keyboard keys.
+
+Finally, KAYAK, LEVEL, MOM, RACECAR — these are all palindromes (words that read the same forwards and backwards).
+
+Each word fits neatly into one of these four groups.
+</think>
+<answer>
+<group> HAIL, RAIN, SLEET, SNOW </group>
+<group> BUCKS, HEAT, JAZZ, NETS </group>
+<group> OPTION, RETURN, SHIFT, TAB </group>
+<group> KAYAK, LEVEL, MOM, RACECAR </group>
+</answer>
+"""
+
+
+def test_sample_output():
+    groups = parse_groups(SAMPLE_OUTPUT)
+    score = score_connections_hard(
+        [
+            ["HAIL", "RAIN", "SLEET", "SNOW"],
+            ["BUCKS", "HEAT", "JAZZ", "NETS"],
+            ["OPTION", "RETURN", "SHIFT", "TAB"],
+            ["KAYAK", "LEVEL", "MOM", "RACECAR"],
+        ],
+        groups,
+    )
+    assert score == 1.0
