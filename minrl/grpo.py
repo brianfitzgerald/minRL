@@ -12,8 +12,8 @@ from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.data_types import Episode, MiniBatch
 from tasks import RewardFunction
+from tasks.dataset import Episode, MiniBatch
 from vllm_inference.client import GenerateResponse, VLLMClient
 
 
@@ -28,7 +28,7 @@ def logprob_dict_to_logprobs(
     for seq in logprobs:
         seq_probs = []
         for token in seq:
-            tokens_sorted = sorted(token.items(), key=lambda x: x[1], reverse=True)
+            tokens_sorted = sorted(token.items(), key=lambda x: int(x[1]), reverse=True)
             out_tensor = torch.zeros(vocab_size)
             for token_idx, prob in tokens_sorted:
                 out_tensor[int(token_idx)] = prob
@@ -109,8 +109,6 @@ def rollout(
                 # Get tokens generated
                 raise ValueError("Not implemented")
 
-            logger.info(f"Generated token ids: {len(generated_token_ids)}")
-
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
                 generated_token_ids = generated_token_ids[
@@ -118,26 +116,20 @@ def rollout(
                         pad_token_id  # type: ignore
                     )  # type: ignore
                 ]
-            logger.info(
-                f"Generated token ids after removing padding: {len(generated_token_ids)}"
-            )
 
             generated_text = tokenizer.decode(
                 generated_token_ids, skip_special_tokens=True
             )
-            logger.info(f"Generated text: {generated_text}")
 
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
                 sample=batch.samples[i],
             )
-            print("rewards", rewards)
 
-            # TODO why out of bounds?
             logprobs = logprob_dict_to_logprobs(
                 [generated_logprobs],
-                tokenizer.vocab_size + 1000,  # type: ignore
+                tokenizer.vocab_size + 1000,
             )
 
             # Create episode
@@ -149,7 +141,7 @@ def rollout(
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards,
                 reward_info={},
-                generated_logprobs=logprobs,
+                vllm_logprobs=logprobs,
             )
             episodes.append(episode)
 
@@ -275,11 +267,11 @@ def update_policy(
             target_token_ids = batch_token_ids_tensor[:, 1:]
             target_masks = batch_masks_tensor[:, 1:]
             # get the logits for the micro-batch
-            if episodes[0].generated_logprobs is not None:
+            if episodes[0].vllm_logprobs is not None:
                 all_logprobs = []
                 for episode in batch_episodes:
-                    assert episode.generated_logprobs is not None
-                    for logprobs in episode.generated_logprobs:
+                    assert episode.vllm_logprobs is not None
+                    for logprobs in episode.vllm_logprobs:
                         all_logprobs.append(logprobs)
                 # HACK: vllm returns logprobs, not logits - this is likely unstable and needs to be fixed.
                 # Need to at least prune to top N logprobs and remove low probability tokens.
@@ -291,15 +283,20 @@ def update_policy(
                 logits: torch.Tensor = out.logits
 
         # cross entropy, ignore padding tokens
-        logits = logits.reshape(-1, logits.size(-1))
-        target_token_ids = target_token_ids.reshape(-1)
+        n_logits = logits.shape[-2]
+        # truncate targets if logits are too short
+        if n_logits < target_token_ids.shape[-1]:
+            target_token_ids = target_token_ids[:, :n_logits]
+            target_masks = target_masks[:, :n_logits]
+
         log_probs = -torch.nn.functional.cross_entropy(
-            logits,
+            logits.transpose(1, 2),
             target_token_ids,
             ignore_index=pad_token_id,
             reduction="none",
         ).reshape(input_token_ids.shape[0], -1)
         with torch.no_grad():
+            logits = logits.reshape(-1, logits.size(-1))
             token_entropy = compute_entropy(logits)
             # single entropy value for the sequence
             entropy = entropy + (token_entropy * target_masks).sum() / n_target_tokens

@@ -34,9 +34,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -88,6 +86,7 @@ class Trainer:
 
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
+        assert self.tokenizer is not None, "Tokenizer not initialized"
         self.train_dataset, _ = create_connections_datasets(
             tokenizer=self.tokenizer,
             jsonl_path="data/train_prompts.jsonl",

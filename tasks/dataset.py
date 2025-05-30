@@ -24,7 +24,7 @@ class Episode:
     reward: float
     reward_info: dict[str, float]
     # Only populated with vllm
-    generated_logprobs: Tensor
+    vllm_logprobs: Tensor
 
 
 @dataclass
