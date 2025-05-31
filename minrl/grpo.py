@@ -266,40 +266,23 @@ def update_policy(
             input_token_ids = batch_token_ids_tensor[:, :-1]
             target_token_ids = batch_token_ids_tensor[:, 1:]
             target_masks = batch_masks_tensor[:, 1:]
-            # get the logits for the micro-batch
-            if episodes[0].vllm_logprobs is not None:
-                all_logprobs = []
-                for episode in batch_episodes:
-                    assert episode.vllm_logprobs is not None
-                    for logprobs in episode.vllm_logprobs:
-                        all_logprobs.append(logprobs)
-                # HACK: vllm returns logprobs, not logits - this is likely unstable and needs to be fixed.
-                # Need to at least prune to top N logprobs and remove low probability tokens.
-                logits = torch.stack(all_logprobs).to(device=device, dtype=dtype)
-            else:
-                out = model(
-                    input_ids=input_token_ids, attention_mask=batch_masks_tensor
-                )
-                logits: torch.Tensor = out.logits
-
-        # cross entropy, ignore padding tokens
-        n_logits = logits.shape[-2]
-        # truncate targets if logits are too short
-        if n_logits < target_token_ids.shape[-1]:
-            target_token_ids = target_token_ids[:, :n_logits]
-            target_masks = target_masks[:, :n_logits]
+            logits = model.forward(input_token_ids).logits.float()
 
         log_probs = -torch.nn.functional.cross_entropy(
-            logits.transpose(1, 2),
-            target_token_ids,
+            logits.reshape(-1, logits.size(-1)),
+            target_token_ids.reshape(-1),
             ignore_index=pad_token_id,
             reduction="none",
         ).reshape(input_token_ids.shape[0], -1)
+
         with torch.no_grad():
             logits = logits.reshape(-1, logits.size(-1))
             token_entropy = compute_entropy(logits)
             # single entropy value for the sequence
-            entropy = entropy + (token_entropy * target_masks).sum() / n_target_tokens
+            entropy = (
+                entropy
+                + (token_entropy * target_masks.reshape(-1)).sum() / n_target_tokens
+            )
 
         # multiply the log probs by the advantages
         obj = log_probs * batch_advantages_tensor[:, None]
