@@ -14,7 +14,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from tasks import RewardFunction
 from tasks.dataset import Episode, MiniBatch
-from vllm_inference.client import GenerateResponse, VLLMClient
+from vllm_inference.client import VLLMClient
 
 
 def logprob_dict_to_logprobs(
@@ -46,49 +46,23 @@ def rollout(
     num_answer_per_question: int,
     reward_function: RewardFunction,
     device: torch.device,
-    client: VLLMClient | None = None,
+    client: VLLMClient,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token_id = tokenizer.eos_token_id
     pad_token_id = tokenizer.pad_token_id
-    using_vllm = client is not None
 
     # Convert to tensor and move to device
 
     logger.info(
         f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}"
     )
-    if using_vllm:
-        # repeat each prompt num_answer_per_question times
-        prefixes_batch = [
-            batch.prefixes[i]
-            for i in range(len(batch.prefixes))
-            for _ in range(num_answer_per_question)
-        ]
-        outputs = client.generate(prompts=prefixes_batch, logprobs=10)
-    else:
-        # Prepare input_ids for generation
-        input_ids: list[list[int]] = []
-        for prefix_ids in batch.prefix_token_ids:
-            for _ in range(num_answer_per_question):
-                input_ids.append(prefix_ids)
-        input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
-        # Generate responses
-        outputs_transformers = model.generate(  # type: ignore
-            input_ids=input_ids_tensor,
-            max_new_tokens=max_new_tokens,
-            pad_token_id=pad_token_id,
-            eos_token_id=end_token_id,
-            do_sample=True,
-            use_cache=True,
-            top_k=20,
-            return_dict_in_generate=True,
-            output_scores=True,
-        )
-        outputs = GenerateResponse(
-            completion_ids=outputs_transformers.sequences,
-            generated_logprobs=outputs_transformers.logits,
-        )
+    prefixes_batch = [
+        batch.prefixes[i]
+        for i in range(len(batch.prefixes))
+        for _ in range(num_answer_per_question)
+    ]
+    outputs = client.generate(prompts=prefixes_batch, max_tokens=512)
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
@@ -100,14 +74,7 @@ def rollout(
             # idx of the j-th answer for the i-th prompt
             idx = i * num_answer_per_question + j
 
-            if using_vllm:
-                generated_token_ids = outputs.completion_ids[idx]
-                assert outputs.generated_logprobs is not None
-                # Get the generated logprobs for the batch
-                generated_logprobs = outputs.generated_logprobs[idx]
-            else:
-                # Get tokens generated
-                raise ValueError("Not implemented")
+            generated_token_ids = outputs.completion_ids[idx]
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
@@ -121,15 +88,12 @@ def rollout(
                 generated_token_ids, skip_special_tokens=True
             )
 
+            logger.info(generated_text)
+
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
                 sample=batch.samples[i],
-            )
-
-            logprobs = logprob_dict_to_logprobs(
-                [generated_logprobs],
-                tokenizer.vocab_size + 1000,
             )
 
             # Create episode
@@ -141,7 +105,6 @@ def rollout(
                 is_finished=end_token_id in generated_token_ids,
                 reward=rewards,
                 reward_info={},
-                vllm_logprobs=logprobs,
             )
             episodes.append(episode)
 
@@ -177,9 +140,6 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
         std = rewards.std()
         if torch.isnan(std):
             std = 0
-        print("rewards", rewards)
-        print("mean", mean)
-        print("std", std)
 
         # Handle case where std is 0 to avoid division by zero
         if std == 0:
@@ -315,13 +275,13 @@ def compute_metrics(
     optimizer: torch.optim.Optimizer,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
-    formatted_reward = [episode.reward_info["format_reward"] for episode in episodes]
-    answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
+    # formatted_reward = [episode.reward_info["format_reward"] for episode in episodes]
+    # answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
     num_finished_episodes = sum(episode.is_finished for episode in episodes)
     mean_reward = float(np.mean(reward))
     std_reward = float(np.std(reward))
-    success_rate = float(np.mean(answer_reward))
-    format_reward = float(np.mean(formatted_reward))
+    # success_rate = float(np.mean(answer_reward))
+    # format_reward = float(np.mean(formatted_reward))
     grad_norm = results["grad_norm"]
     entropy = results["entropy"]
     lr = optimizer.param_groups[0]["lr"]
@@ -333,8 +293,6 @@ def compute_metrics(
     tb_writer.add_scalar("loss", loss, step)
     tb_writer.add_scalar("mean_reward", mean_reward, step)
     tb_writer.add_scalar("std_reward", std_reward, step)
-    tb_writer.add_scalar("success_rate/train", success_rate, step)
-    tb_writer.add_scalar("format_reward", format_reward, step)
     tb_writer.add_scalar("grad_norm", grad_norm, step)
     tb_writer.add_scalar("num_finished_episodes", num_finished_episodes, step)
     tb_writer.add_scalar("learning_rate", lr, step)
@@ -346,7 +304,6 @@ def compute_metrics(
         tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
     print(
         f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
-        f"train success_rate: {success_rate:.2f}, "
         f"grad_norm: {grad_norm:.2f}, "
         f"num_finished_episodes: {num_finished_episodes}, "
         f"mean_response_len: {mean_response_len:.2f}, "
@@ -356,8 +313,6 @@ def compute_metrics(
     return {
         "mean_reward": mean_reward,
         "std_reward": std_reward,
-        "success_rate": success_rate,
-        "format_reward": format_reward,
         "grad_norm": grad_norm,
         "entropy": entropy,
         "learning_rate": lr,

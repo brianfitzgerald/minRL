@@ -164,10 +164,8 @@ class VLLMClient:
                 "prompt_logprobs": prompt_logprobs,
             },
         )
-        print(response.status_code)
         if response.status_code == 200:
             response_json = response.json()
-            print(response_json.keys())
             response = GenerateResponse(completion_ids=response_json["completion_ids"])
             if "generated_logprobs" in response_json:
                 response.generated_logprobs = response_json["generated_logprobs"]

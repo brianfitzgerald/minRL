@@ -71,9 +71,9 @@ async def main(task: TaskChoice = "connections"):
             )
 
             for sample, response in zip(batch, responses):
-                assert response.choices[0].message.content is not None, (
-                    "No response content"
-                )
+                assert (
+                    response.choices[0].message.content is not None
+                ), "No response content"
                 response_content = response.choices[0].message.content
                 score = reward_function(response_content, cast(dict, sample))
                 logger.info(f"Score: {score}")
@@ -88,7 +88,7 @@ async def main(task: TaskChoice = "connections"):
 
     out_rows_pd = pd.DataFrame(out_rows)
 
-    print(out_rows_pd)
+    logger.info(out_rows_pd)
     out_rows_pd.to_csv(f"eval_results/eval_{task}.csv", index=False)
 
 

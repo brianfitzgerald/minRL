@@ -23,8 +23,6 @@ class Episode:
     is_finished: bool
     reward: float
     reward_info: dict[str, float]
-    # Only populated with vllm
-    vllm_logprobs: Tensor
 
 
 @dataclass
