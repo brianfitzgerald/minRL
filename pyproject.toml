@@ -25,8 +25,8 @@ dependencies = [
     "tensorboard>=2.19.0",
     "tensorboardx>=2.6.2.2",
     "tokenizers>=0.21.1",
-    "torch>=2.6.0",
+    "torch>=2.7.0",
     "transformers>=4.51.3",
     "uvicorn>=0.34.2",
-    "vllm==0.8.4",
+    "vllm==0.9.0",
 ]
