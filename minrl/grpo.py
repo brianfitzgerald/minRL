@@ -14,7 +14,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from minrl.tasks import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
-from vllm_client import VLLMClient
+from vllm import LLM
 
 
 def logprob_dict_to_logprobs(
@@ -46,7 +46,7 @@ def rollout(
     num_answer_per_question: int,
     reward_function: RewardFunction,
     device: torch.device,
-    client: VLLMClient,
+    vllm_model: LLM,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token_id = tokenizer.eos_token_id
@@ -62,7 +62,7 @@ def rollout(
         for i in range(len(batch.prefixes))
         for _ in range(num_answer_per_question)
     ]
-    outputs = client.generate(prompts=prefixes_batch, max_tokens=max_new_tokens)
+    outputs = vllm_model.generate(prompts=prefixes_batch, max_tokens=max_new_tokens)
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
@@ -155,25 +155,8 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     return normalized_episodes
 
 
-def sync_params_to_vllm(
-    client: VLLMClient, module: nn.Module, prefix: str = "", visited=None
-):
-    if visited is None:
-        visited = set()
-
-    for child_name, child_module in module.named_children():
-        child_prefix = f"{prefix}.{child_name}" if prefix else child_name
-        sync_params_to_vllm(client, child_module, prefix=child_prefix, visited=visited)
-
-        for param_name, param in module.named_parameters():
-            full_name = f"{prefix}.{param_name}" if prefix else param_name
-
-            if full_name in visited:
-                continue  # skip FSDP subtrees already traversed
-            visited.add(full_name)
-
-            logger.info(f"Updating {full_name}: {param.data}")
-            client.update_named_param(full_name, param.data)
+def sync_params_to_vllm(vllm_model: LLM, model: nn.Module):
+    vllm_model.llm_engine.model_executor.model_loader.load_weights(model.state_dict())
 
 
 def update_policy(
@@ -185,7 +168,7 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     dtype: torch.dtype,
-    vllm_client: VLLMClient,
+    vllm_model: LLM,
     apply_loss: bool = True,
 ) -> dict[str, float]:
     print("episodes", [episode.reward for episode in episodes])
@@ -270,7 +253,9 @@ def update_policy(
             loss = -obj
             loss.backward()
 
-            # sync_params_to_vllm(vllm_client, model)
+            logger.info("Syncing params to vLLM...")
+            sync_params_to_vllm(vllm_model, model)
+            logger.info("Param update done")
 
     if apply_loss:
         # update the policy

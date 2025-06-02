@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from typing import Any, Optional, cast
+from vllm import LLM
 
 import fire
 import torch
@@ -18,7 +19,6 @@ from minrl.tasks.connections import (
     connections_reward_func,
     create_connections_datasets,
 )
-from vllm_client import VLLMClient
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -47,6 +47,13 @@ class Trainer:
         self.config = config or TrainerConfig()
         self.device = torch.device(get_available_device())
         self.dtype = torch.bfloat16
+        self.vllm_model = LLM(
+            model=self.config.model_id,
+            device=self.device,
+            gpu_memory_utilization=0.4,
+            enable_prefix_caching=True,
+            max_model_len=self.config.max_new_tokens,
+        )
 
     def init_model(self):
         """Initialize the model and tokenizer."""
@@ -100,8 +107,6 @@ class Trainer:
         self.ckpt_dir = Path("ckpts")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.tb_writer = SummaryWriter()
-        self.client = VLLMClient()
-        self.client.reset_prefix_cache()
 
     def train(self) -> None:
         """Run the main training loop.
@@ -128,7 +133,7 @@ class Trainer:
                 num_answer_per_question=self.config.num_answer_per_question,
                 reward_function=connections_reward_func,
                 device=self.device,
-                client=self.client,
+                vllm_model=self.vllm_model,
             )
             if self.config.skip_unfinished_episodes:
                 episodes = [episode for episode in episodes if episode.is_finished]
@@ -144,7 +149,7 @@ class Trainer:
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 dtype=self.dtype,
-                vllm_client=self.client,
+                vllm_model=self.vllm_model,
             )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
