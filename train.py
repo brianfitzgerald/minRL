@@ -34,9 +34,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -89,12 +87,12 @@ class Trainer:
 
         if self.config.optimizer == "adamw":
             self.optimizer = torch.optim.AdamW(
-                cast(nn.Module, self.model).parameters(), lr=1e-5
+                cast(nn.Module, self.model).parameters(), lr=self.config.lr
             )
         elif self.config.optimizer == "adamw_8bit":
             self.optimizer = Adam8bit(
                 cast(nn.Module, self.model).parameters(),
-                lr=1e-5,
+                lr=self.config.lr,
                 betas=(0.9, 0.999),
                 eps=1e-8,
             )
@@ -146,6 +144,7 @@ class Trainer:
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 dtype=self.dtype,
+                vllm_client=self.client,
             )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()

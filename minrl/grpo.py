@@ -155,6 +155,27 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     return normalized_episodes
 
 
+def sync_params_to_vllm(
+    client: VLLMClient, module: nn.Module, prefix: str = "", visited=None
+):
+    if visited is None:
+        visited = set()
+
+    for child_name, child_module in module.named_children():
+        child_prefix = f"{prefix}.{child_name}" if prefix else child_name
+        sync_params_to_vllm(client, child_module, prefix=child_prefix, visited=visited)
+
+        for param_name, param in module.named_parameters():
+            full_name = f"{prefix}.{param_name}" if prefix else param_name
+
+            if full_name in visited:
+                continue  # skip FSDP subtrees already traversed
+            visited.add(full_name)
+
+            logger.info(f"Updating {full_name}: {param.data}")
+            client.update_named_param(full_name, param.data)
+
+
 def update_policy(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -164,6 +185,7 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     dtype: torch.dtype,
+    vllm_client: VLLMClient,
     apply_loss: bool = True,
 ) -> dict[str, float]:
     print("episodes", [episode.reward for episode in episodes])
@@ -184,11 +206,7 @@ def update_policy(
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
-        logger.info(
-            f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}",
-            flush=True,
-            end="",
-        )
+        logger.info(f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}")
 
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
@@ -251,6 +269,8 @@ def update_policy(
         if apply_loss:
             loss = -obj
             loss.backward()
+
+            # sync_params_to_vllm(vllm_client, model)
 
     if apply_loss:
         # update the policy

@@ -3,7 +3,6 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from multiprocessing import Pipe, Process
@@ -41,9 +40,7 @@ class WeightSyncWorkerExtension:
         self.device = torch.device("cuda")
         self.model_runner = None
 
-    def update_named_param(
-        self, name: str, dtype: torch.dtype, shape: Sequence[int]
-    ) -> None:
+    def update_named_param(self, name: str, weights: torch.Tensor) -> None:
         """
         Receives updated weights and updates the named parameter in the model.
 
@@ -58,11 +55,9 @@ class WeightSyncWorkerExtension:
         if self.model_runner is None:
             raise RuntimeError("Model runner not initialized")
 
-        # Allocate memory for the incoming weight tensor on the correct device
-        weight = torch.empty(shape, dtype=dtype, device=self.device)
-
         # Load the received weights into the model
-        self.model_runner.model.load_weights(weights=[(name, weight)])
+        logger.info(f"Loading weights into model: {name}")
+        self.model_runner.model.load_weights(weights=[(name, weights)])
 
     def close_communicator(self) -> None:
         """
@@ -307,7 +302,7 @@ def main(script_args: ScriptArguments):
 
         # Wait for processes to terminate
         for process in processes:
-            process.join(timeout=10)  # Wait for 10 seconds for the process to terminate
+            process.join(timeout=1)  # Wait for 10 seconds for the process to terminate
             if process.is_alive():
                 logger.warning(
                     f"Process {process} is still alive after 10 seconds, attempting to terminate..."
@@ -420,28 +415,38 @@ def main(script_args: ScriptArguments):
 
     class UpdateWeightsRequest(BaseModel):
         name: str
-        dtype: str
-        shape: list[int]
+        weights: list[float]
 
     @app.post("/update_named_param/")
     async def update_named_param(request: UpdateWeightsRequest):
         """
         Updates the model weights with the provided tensor.
 
+        Once this endpoint is called, the client process should broadcast the updated weights to all server workers.
+
         Args:
             request (`UpdateWeightsRequest`):
                 - `name` (`str`): Name of the weight tensor being updated.
                 - `dtype` (`str`): Data type of the weight tensor (e.g., `"torch.float32"`).
-                - `shape` (list of `int`): Shape of the weight tensor.
+                - `shape` (list of `int`): Shape of the weight
+
         """
-        dtype = getattr(torch, request.dtype.split(".")[-1])
+        # The function update_named_param is called this way: update_named_param("name", torch.float32, (10, 10))
+        # So with collective_rpc we need to call it this way:
+        # llm.collective_rpc("update_named_param", args=("name", torch.float32, (10, 10)))
         kwargs = {
             "method": "update_named_param",
-            "args": (request.name, dtype, tuple(request.shape)),
+            "args": (request.name, request.weights),
         }
-        connections[0].send(
-            {"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs}
-        )
+        for connection in connections:
+            connection.send(
+                {
+                    "type": "fire_and_forget",
+                    "method": "collective_rpc",
+                    "kwargs": kwargs,
+                }
+            )
+
         return {"message": "Request received, updating named parameter"}
 
     @app.post("/reset_prefix_cache/")

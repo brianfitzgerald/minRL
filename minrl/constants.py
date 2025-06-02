@@ -17,3 +17,4 @@ class TrainerConfig(BaseModel):
     ckpt_save_interval: int = 100
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw"
+    lr: float = 0

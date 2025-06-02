@@ -179,7 +179,7 @@ class VLLMClient:
 
     def update_named_param(self, name: str, weights: torch.Tensor):
         """
-        Updates a specific named parameter in the model.
+        Updates a specific named parameter in the model and broadcasts it to other processes.
 
         Args:
             name (`str`):
