@@ -250,8 +250,9 @@ def update_policy(
         # scale by the mask, and normalize by token count
         obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
         if apply_loss:
-            loss = -obj
-            loss.backward()
+            with torch.autograd.detect_anomaly():
+                loss = -obj
+                loss.backward()
 
             logger.info("Syncing params to vLLM...")
             model_runner: ModelRunnerBase = (
