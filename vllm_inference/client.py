@@ -8,6 +8,9 @@ import requests
 import torch
 from requests import ConnectionError
 from torch import nn
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from fire import Fire
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ class VLLMClient:
                 if elapsed_time >= total_timeout:
                     raise ConnectionError(
                         f"The vLLM server can't be reached at {self.host}:{self.server_port} after {total_timeout} "
-                        "seconds. Make sure the server is running by running `trl vllm-serve`."
+                        "seconds."
                     ) from exc
             else:
                 if response.status_code == 200:
@@ -108,7 +111,7 @@ class VLLMClient:
 
     def generate(
         self,
-        prompts: list[str],
+        prompts: list[str | list[int]],
         n: int = 1,
         repetition_penalty: float = 1.0,
         temperature: float = 1.0,
@@ -213,22 +216,35 @@ class VLLMClient:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
 
-# Example usage
-if __name__ == "__main__":
+def main(use_token_ids: bool = False, update_params: bool = False):
     client = VLLMClient()
 
-    for i in range(10):
-        # Generate completions
-        responses = client.generate(
-            ["Hello, AI!", "Tell me a joke"], n=4, max_tokens=32, logprobs=10
-        )
-        print("Responses:", responses)  # noqa
+    for _ in range(10):
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
+        prompt: list[str | list[int]] = []
+        if use_token_ids:
+            prompt = [
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": "Hello, AI!"}],
+                    tokenize=True,
+                    add_generation_prompt=True,
+                    enable_thinking=False,
+                )
+            ]
+        else:
+            prompt = ["Hello, AI!"]
+        responses = client.generate(prompt, max_tokens=256)
+        for response in responses.completion_ids:
+            logger.info(tokenizer.decode(response))
 
-    # Update model weights
-    from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+    if update_params:
+        device = "cuda" if torch.cuda.is_available() else "mps"
+        logger.info(f"Loading model on device: {device}")
+        model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to(device)
+        logger.info("updating model params")
+        client.update_model_params(model)
+        logger.info("done")
 
-    device = "cuda" if torch.cuda.is_available() else "mps"
-    model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to(device)
-    print("updating model params")
-    client.update_model_params(model)
-    print("done")
+
+if __name__ == "__main__":
+    Fire(main)

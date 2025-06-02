@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # the 'spawn' start method
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
+if torch.cuda.is_available():
+    torch.cuda.set_per_process_memory_fraction(0.5, device=0)
+
 
 class WeightSyncWorkerExtension:
     """
@@ -231,22 +234,6 @@ def llm_worker(
             break
 
 
-def chunk_list(lst: list, n: int) -> list[list]:
-    """
-    Split list `lst` into `n` evenly distributed sublists.
-
-    Example:
-        >>> chunk_list([1, 2, 3, 4, 5, 6], 2)
-        [[1, 2, 3], [4, 5, 6]]
-        >>> chunk_list([1, 2, 3, 4, 5, 6], 4)
-        [[1, 2], [3, 4], [5], [6]]
-        >>> chunk_list([1, 2, 3, 4, 5, 6], 8)
-        [[1], [2], [3], [4], [5], [6], [], []]
-    """
-    k, r = divmod(len(lst), n)
-    return [lst[i * k + min(i, r) : (i + 1) * k + min(i + 1, r)] for i in range(n)]
-
-
 def main(script_args: ScriptArguments):
     # Spawn dp workers, and setup pipes for communication
     master_port = get_open_port()
@@ -334,7 +321,7 @@ def main(script_args: ScriptArguments):
         }
 
     class GenerateRequest(BaseModel):
-        prompts: list[str]
+        prompts: list[str | list[int]]
         n: int = 1
         repetition_penalty: float = 1.0
         temperature: float = 1.0
@@ -375,7 +362,13 @@ def main(script_args: ScriptArguments):
         )
 
         # Send the prompts to the worker
-        kwargs = {"prompts": request.prompts, "sampling_params": sampling_params}
+        prompts = request.prompts
+        if isinstance(prompts, list):
+            prompts = [
+                {"prompt_token_ids": prompt} if isinstance(prompt, list) else prompt
+                for prompt in prompts
+            ]
+        kwargs = {"prompts": prompts, "sampling_params": sampling_params}
         connections[0].send({"type": "call", "method": "generate", "kwargs": kwargs})
 
         # Receive results

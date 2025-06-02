@@ -190,6 +190,9 @@ def main(model_id: str = "Qwen/Qwen3-0.6B") -> None:
     Args:
         model_id: The HuggingFace model ID to use for training
     """
+    if torch.cuda.is_available():
+        logger.info("Setting per process memory fraction to 0.5")
+        torch.cuda.set_per_process_memory_fraction(0.5, device=0)
     config = TrainerConfig(model_id=model_id)
     trainer = Trainer(config)
     trainer.init_model()
