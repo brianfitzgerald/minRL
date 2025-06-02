@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Any, List, TypedDict
 from torch.utils.data import Dataset
 
-from minrl.data_types import MiniBatch
+from minrl.tasks.dataset import MiniBatch
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "

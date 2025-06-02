@@ -11,6 +11,7 @@ from torch import nn
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from fire import Fire
+from minrl.constants import QWEN_25_05B
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class VLLMClient:
 
     def generate(
         self,
-        prompts: list[str | list[int]],
+        prompts: list[str] | list[list[int]],
         n: int = 1,
         repetition_penalty: float = 1.0,
         temperature: float = 1.0,
@@ -216,12 +217,16 @@ class VLLMClient:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
 
-def main(use_token_ids: bool = False, update_params: bool = False):
+def main(
+    use_token_ids: bool = False,
+    update_params: bool = False,
+    model_id: str = QWEN_25_05B,
+):
     client = VLLMClient()
 
     for _ in range(10):
-        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
-        prompt: list[str | list[int]] = []
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        prompt: list[str] | list[list[int]] = []
         if use_token_ids:
             prompt = [
                 tokenizer.apply_chat_template(
@@ -240,7 +245,7 @@ def main(use_token_ids: bool = False, update_params: bool = False):
     if update_params:
         device = "cuda" if torch.cuda.is_available() else "mps"
         logger.info(f"Loading model on device: {device}")
-        model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B").to(device)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
         logger.info("updating model params")
         client.update_model_params(model)
         logger.info("done")

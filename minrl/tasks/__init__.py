@@ -1,11 +1,11 @@
-from tasks.connections import (
+from minrl.tasks.connections import (
     ConnectionsDataset,
     connections_reward_func,
     tokenize_connections_sample,
 )
 from typing import Callable, Literal, TypedDict, Protocol, Any
 
-from tasks.dataset import MinRLDataset
+from minrl.tasks.dataset import MinRLDataset
 
 TaskChoice = Literal["connections", "countdown"]
 

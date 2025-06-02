@@ -8,16 +8,16 @@ from dataclasses import dataclass, field
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from typing import Optional
-from pydantic import BaseModel
-import uvicorn
 
 import torch
-
+import uvicorn
 from fastapi import FastAPI
-
+from pydantic import BaseModel
+from vllm import LLM, RequestOutput, SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
-from vllm import LLM, RequestOutput, SamplingParams
+
+from minrl.constants import QWEN_25_05B
 
 logger = logging.getLogger(__name__)
 
@@ -432,13 +432,6 @@ def main(script_args: ScriptArguments):
             + str(success)
         }
 
-    @app.post("/close_communicator/")
-    async def close_communicator():
-        """
-        Closes the weight update mechanism. In single GPU mode, this is a no-op.
-        """
-        return {"message": "Request received, closing communicator"}
-
     # Start the server
     uvicorn.run(
         app,
@@ -449,4 +442,4 @@ def main(script_args: ScriptArguments):
 
 
 if __name__ == "__main__":
-    main(ScriptArguments(model="Qwen/Qwen3-0.6B"))
+    main(ScriptArguments(model=QWEN_25_05B))

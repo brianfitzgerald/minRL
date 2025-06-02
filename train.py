@@ -12,13 +12,14 @@ from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from minrl.constants import QWEN_25_05B
 
 from minrl.grpo import compute_metrics, rollout, update_policy
-from tasks.connections import (
+from minrl.tasks.connections import (
     connections_reward_func,
     create_connections_datasets,
 )
-from vllm_inference.client import VLLMClient
+from minrl.inference.client import VLLMClient
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -42,7 +43,7 @@ OptimizerChoice = Literal["adamw", "adamw_8bit"]
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = "Qwen/Qwen3-0.6B"
+    model_id: str = QWEN_25_05B
     eval_interval: int = 100
     num_answer_per_question: int = 2
     max_new_tokens: int = 256
@@ -184,7 +185,7 @@ class Trainer:
         return 0.0
 
 
-def main(model_id: str = "Qwen/Qwen3-0.6B") -> None:
+def main() -> None:
     """Main entry point for training.
 
     Args:
@@ -193,7 +194,7 @@ def main(model_id: str = "Qwen/Qwen3-0.6B") -> None:
     if torch.cuda.is_available():
         logger.info("Setting per process memory fraction to 0.5")
         torch.cuda.set_per_process_memory_fraction(0.5, device=0)
-    config = TrainerConfig(model_id=model_id)
+    config = TrainerConfig()
     trainer = Trainer(config)
     trainer.init_model()
     trainer.init_training()

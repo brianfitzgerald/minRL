@@ -14,7 +14,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from tasks import RewardFunction
 from tasks.dataset import Episode, MiniBatch
-from vllm_inference.client import VLLMClient
+from vllm_client import VLLMClient
 
 
 def logprob_dict_to_logprobs(
@@ -62,7 +62,7 @@ def rollout(
         for i in range(len(batch.prefixes))
         for _ in range(num_answer_per_question)
     ]
-    outputs = client.generate(prompts=prefixes_batch, max_tokens=512)
+    outputs = client.generate(prompts=prefixes_batch, max_tokens=max_new_tokens)
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()

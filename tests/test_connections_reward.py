@@ -1,4 +1,4 @@
-from tasks.connections import parse_groups, score_connections_hard
+from minrl.tasks.connections import parse_groups, score_connections_hard
 
 
 FIRST_SAMPLE = {
