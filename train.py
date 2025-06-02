@@ -1,25 +1,24 @@
 import time
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Optional, cast
 
 import fire
 import torch
 import torch.nn as nn
 from loguru import logger
-from pydantic import BaseModel
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.constants import QWEN_25_05B
+from minrl.constants import TrainerConfig
 
 from minrl.grpo import compute_metrics, rollout, update_policy
 from minrl.tasks.connections import (
     connections_reward_func,
     create_connections_datasets,
 )
-from minrl.inference.client import VLLMClient
+from vllm_client import VLLMClient
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -35,23 +34,10 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
-
-
-OptimizerChoice = Literal["adamw", "adamw_8bit"]
-
-
-class TrainerConfig(BaseModel):
-    model_id: str = QWEN_25_05B
-    eval_interval: int = 100
-    num_answer_per_question: int = 2
-    max_new_tokens: int = 256
-    micro_batch_size: int = 2
-    max_grad_norm: float = 1.0
-    ckpt_save_interval: int = 100
-    skip_unfinished_episodes: bool = False
-    optimizer: OptimizerChoice = "adamw"
 
 
 class Trainer:

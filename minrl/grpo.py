@@ -12,8 +12,8 @@ from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from tasks import RewardFunction
-from tasks.dataset import Episode, MiniBatch
+from minrl.tasks import RewardFunction
+from minrl.tasks.dataset import Episode, MiniBatch
 from vllm_client import VLLMClient
 
 

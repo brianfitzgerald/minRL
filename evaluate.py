@@ -71,9 +71,9 @@ async def main(task: TaskChoice = "connections"):
             )
 
             for sample, response in zip(batch, responses):
-                assert (
-                    response.choices[0].message.content is not None
-                ), "No response content"
+                assert response.choices[0].message.content is not None, (
+                    "No response content"
+                )
                 response_content = response.choices[0].message.content
                 score = reward_function(response_content, cast(dict, sample))
                 logger.info(f"Score: {score}")

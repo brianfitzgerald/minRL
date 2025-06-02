@@ -2,6 +2,7 @@
 import logging
 import os
 import signal
+import sys
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from vllm import LLM, RequestOutput, SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
 
-from minrl.constants import QWEN_25_05B
+from minrl.constants import TrainerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,21 @@ def llm_worker(
     os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
     os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
 
+    def signal_handler(signum, frame):
+        logger.info(
+            f"Worker {data_parallel_rank} received interrupt signal. Shutting down..."
+        )
+        try:
+            llm.collective_rpc(method="close_communicator")
+        except Exception as e:
+            logger.error(f"Error closing communicator: {e}")
+            pass
+        os._exit(0)
+
+    # Register signal handler for worker
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     llm = LLM(
         model=script_args.model,
         revision=script_args.revision,
@@ -203,9 +219,6 @@ def llm_worker(
         gpu_memory_utilization=script_args.gpu_memory_utilization,
         enforce_eager=script_args.enforce_eager,
         dtype=script_args.dtype,
-        # Automatic Prefix Caching caches the KV cache of existing queries, so that a new query can
-        # directly reuse the KV cache if it shares the same prefix with one of the existing queries.
-        # This is particularly useful here because we generate completions from the same prompts.
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
         worker_extension_cls="server.WeightSyncWorkerExtension",
@@ -214,24 +227,31 @@ def llm_worker(
     # Send ready signal to parent process
     connection.send({"status": "ready"})
 
-    while True:
-        # Wait for commands from the parent process
-        try:
-            command = connection.recv()
-        except KeyboardInterrupt:
-            llm.collective_rpc(method="close_communicator")
-            break
+    try:
+        while True:
+            # Wait for commands from the parent process
+            try:
+                command = connection.recv()
+            except (EOFError, ConnectionError):
+                break
 
-        # Handle commands
-        if command["type"] in ["call", "fire_and_forget"]:
-            method_name = command["method"]
-            args, kwargs = command.get("args", ()), command.get("kwargs", {})
-            method = getattr(llm, method_name)
-            result = method(*args, **kwargs)
-            if command["type"] == "call":
-                connection.send(result)
-        elif command["type"] == "shutdown":
-            break
+            # Handle commands
+            if command["type"] in ["call", "fire_and_forget"]:
+                method_name = command["method"]
+                args, kwargs = command.get("args", ()), command.get("kwargs", {})
+                method = getattr(llm, method_name)
+                result = method(*args, **kwargs)
+                if command["type"] == "call":
+                    connection.send(result)
+            elif command["type"] == "shutdown":
+                break
+    finally:
+        try:
+            llm.collective_rpc(method="close_communicator")
+        except Exception as e:
+            logger.error(f"Error closing communicator: {e}")
+            pass
+        connection.close()
 
 
 def main(script_args: ScriptArguments):
@@ -246,14 +266,18 @@ def main(script_args: ScriptArguments):
         for connection in connections:
             try:
                 connection.send({"type": "shutdown"})
-            except:  # noqa: E722
+            except Exception as e:
+                logger.error(f"Error sending shutdown command: {e}")
                 pass
         # Terminate all processes
         for process in processes:
             if process.is_alive():
                 process.terminate()
+        # Wait for processes to terminate
+        for process in processes:
+            process.join(timeout=5)
         # Exit the main process
-        os._exit(0)
+        sys.exit(0)
 
     # Register signal handler
     signal.signal(signal.SIGINT, signal_handler)
@@ -442,4 +466,5 @@ def main(script_args: ScriptArguments):
 
 
 if __name__ == "__main__":
-    main(ScriptArguments(model=QWEN_25_05B))
+    config = TrainerConfig()
+    main(ScriptArguments(model=config.model_id))
