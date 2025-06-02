@@ -77,6 +77,7 @@ def rollout(
             idx = i * num_answer_per_question + j
 
             generated_token_ids = outputs[idx].prompt_token_ids
+            assert generated_token_ids is not None, "Generated token ids are None"
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
@@ -254,13 +255,6 @@ def update_policy(
                 loss = -obj
                 loss.backward()
 
-            logger.info("Syncing params to vLLM...")
-            model_runner: ModelRunnerBase = (
-                vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
-            )
-            model_runner.model.load_weights(model.state_dict().items())  # type: ignore
-            logger.info("Param update done")
-
     if apply_loss:
         # update the policy
         grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -268,6 +262,13 @@ def update_policy(
         )
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
+
+        logger.info("Syncing params to vLLM...")
+        model_runner: ModelRunnerBase = (
+            vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
+        )
+        model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+        logger.info("Param update done")
 
     return {
         "loss": float(loss),
@@ -311,7 +312,7 @@ def compute_metrics(
         # TensorBoard treats text as markdown.
         text = html.escape(episode.text)
         tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
-    print(
+    logger.info(
         f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
         f"grad_norm: {grad_norm:.2f}, "
         f"num_finished_episodes: {num_finished_episodes}, "
