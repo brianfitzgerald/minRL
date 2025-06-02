@@ -9,12 +9,12 @@ from loguru import logger
 from openai import AsyncOpenAI
 from torch.utils.data import DataLoader
 
-from tasks import TASK_DEFINITIONS, TaskChoice
-from tasks.connections import (
+from minrl.tasks import TASK_DEFINITIONS, TaskChoice
+from minrl.tasks.connections import (
     CONNECTIONS_PROMPT,
     ConnectionsSample,
 )
-from tasks.dataset import batch_to_samples
+from minrl.tasks.dataset import batch_to_samples
 
 """
 Evaluate a series of OSS models against prompts and evals for a specific task.

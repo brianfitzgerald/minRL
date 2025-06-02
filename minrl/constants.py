@@ -11,7 +11,7 @@ class TrainerConfig(BaseModel):
     model_id: str = QWEN_3_06B
     eval_interval: int = 100
     num_answer_per_question: int = 2
-    max_new_tokens: int = 256
+    max_new_tokens: int = 4096
     micro_batch_size: int = 2
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 100

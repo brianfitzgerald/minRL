@@ -11,6 +11,7 @@ import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from vllm.worker.model_runner_base import ModelRunnerBase
 
 from minrl.tasks import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
@@ -57,12 +58,13 @@ def rollout(
     logger.info(
         f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}"
     )
-    prefixes_batch = [
+    prefixes_batch: list[str] = [
         batch.prefixes[i]
         for i in range(len(batch.prefixes))
         for _ in range(num_answer_per_question)
     ]
-    outputs = vllm_model.generate(prompts=prefixes_batch, max_tokens=max_new_tokens)
+
+    outputs = vllm_model.generate(prefixes_batch)
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
@@ -74,7 +76,7 @@ def rollout(
             # idx of the j-th answer for the i-th prompt
             idx = i * num_answer_per_question + j
 
-            generated_token_ids = outputs.completion_ids[idx]
+            generated_token_ids = outputs[idx].prompt_token_ids
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
@@ -155,10 +157,6 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     return normalized_episodes
 
 
-def sync_params_to_vllm(vllm_model: LLM, model: nn.Module):
-    vllm_model.llm_engine.model_executor.model_loader.load_weights(model.state_dict())
-
-
 def update_policy(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -227,7 +225,9 @@ def update_policy(
             input_token_ids = batch_token_ids_tensor[:, :-1]
             target_token_ids = batch_token_ids_tensor[:, 1:]
             target_masks = batch_masks_tensor[:, 1:]
+            logger.info("Computing logits...")
             logits = model.forward(input_token_ids).logits.float()
+            logger.info("Logits computed")
 
         log_probs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
@@ -254,7 +254,10 @@ def update_policy(
             loss.backward()
 
             logger.info("Syncing params to vLLM...")
-            sync_params_to_vllm(vllm_model, model)
+            model_runner: ModelRunnerBase = (
+                vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
+            )
+            model_runner.model.load_weights(model.state_dict().items())  # type: ignore
             logger.info("Param update done")
 
     if apply_loss:

@@ -15,19 +15,5 @@
             "program": "evaluate.py",
             "console": "integratedTerminal"
         },
-        {
-            "name": "vLLM Server",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "vllm_inference/server.py",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "vLLM Client",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "vllm_inference/client.py",
-            "console": "integratedTerminal"
-        }
     ]
 }

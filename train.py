@@ -34,7 +34,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -46,21 +48,23 @@ class Trainer:
         """Initialize the trainer with configuration."""
         self.config = config or TrainerConfig()
         self.device = torch.device(get_available_device())
+        vllm_device = self.device.type
+        if self.device.type == "mps":
+            logger.warning("vLLM does not support MPS backend, falling back to CPU.")
+            vllm_device = "cpu"
         self.dtype = torch.bfloat16
         self.vllm_model = LLM(
             model=self.config.model_id,
-            device=self.device,
+            device=vllm_device,
             gpu_memory_utilization=0.4,
-            enable_prefix_caching=True,
             max_model_len=self.config.max_new_tokens,
+            max_seq_len_to_capture=self.config.max_new_tokens,
         )
 
     def init_model(self):
         """Initialize the model and tokenizer."""
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = (
-            "flash_attention_2" if self.device.type == "cuda" else "flex_attention"
-        )
+        attn_impl = "flash_attention_2" if self.device.type == "cuda" else "sdpa"
         model = AutoModelForCausalLM.from_pretrained(
             self.config.model_id,
             device_map="auto",
