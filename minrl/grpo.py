@@ -5,9 +5,6 @@ from pydoc import html
 from typing import Dict, List
 from tensorboardX import SummaryWriter
 from vllm.sampling_params import (
-    BeamSearchParams,
-    GuidedDecodingParams,
-    RequestOutputKind,
     SamplingParams,
 )
 
@@ -15,7 +12,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
-from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm.worker.model_runner_base import ModelRunnerBase
