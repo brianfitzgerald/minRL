@@ -4,18 +4,30 @@ from collections import defaultdict
 from pydoc import html
 from typing import Dict, List
 from tensorboardX import SummaryWriter
+from vllm.sampling_params import (
+    BeamSearchParams,
+    GuidedDecodingParams,
+    RequestOutputKind,
+    SamplingParams,
+)
 
 import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm.worker.model_runner_base import ModelRunnerBase
 
 from minrl.tasks import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
+from minrl.constants import TrainerConfig
 from vllm import LLM
+
+debug_tokenizer = AutoTokenizer.from_pretrained(
+    TrainerConfig().model_id, use_fast=False
+)
 
 
 def logprob_dict_to_logprobs(
@@ -40,13 +52,11 @@ def logprob_dict_to_logprobs(
 
 @torch.no_grad()
 def rollout(
-    model: AutoModelForCausalLM,
     tokenizer: PreTrainedTokenizerBase,
     batch: MiniBatch,
     max_new_tokens: int,
     num_answer_per_question: int,
     reward_function: RewardFunction,
-    device: torch.device,
     vllm_model: LLM,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
@@ -64,7 +74,9 @@ def rollout(
         for _ in range(num_answer_per_question)
     ]
 
-    outputs = vllm_model.generate(prefixes_batch)
+    outputs = vllm_model.generate(
+        prefixes_batch, sampling_params=SamplingParams(max_tokens=max_new_tokens)
+    )
     # Clear CUDA cache
     gc.collect()
     torch.cuda.empty_cache()
@@ -76,8 +88,7 @@ def rollout(
             # idx of the j-th answer for the i-th prompt
             idx = i * num_answer_per_question + j
 
-            generated_token_ids = outputs[idx].prompt_token_ids
-            assert generated_token_ids is not None, "Generated token ids are None"
+            generated_token_ids: list[int] = outputs[idx].outputs[0].token_ids  # type: ignore
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
@@ -170,7 +181,6 @@ def update_policy(
     vllm_model: LLM,
     apply_loss: bool = True,
 ) -> dict[str, float]:
-    print("episodes", [episode.reward for episode in episodes])
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
     episodes.sort(
@@ -188,7 +198,7 @@ def update_policy(
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
-        logger.info(f"\r* Computing policy gradient: {i:>2d}/{len(episodes):>2d}")
+        logger.info(f"* Computing policy gradient: {i:>2d}/{len(episodes):>2d}")
 
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))

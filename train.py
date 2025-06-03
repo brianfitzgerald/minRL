@@ -130,13 +130,11 @@ class Trainer:
             assert self.tokenizer is not None
 
             episodes = rollout(
-                model=self.model,
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answer_per_question=self.config.num_answer_per_question,
                 reward_function=connections_reward_func,
-                device=self.device,
                 vllm_model=self.vllm_model,
             )
             if self.config.skip_unfinished_episodes:
