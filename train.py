@@ -133,7 +133,7 @@ class Trainer:
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
-                num_answer_per_question=self.config.num_answer_per_question,
+                num_answer_per_question=self.config.num_answers_per_question,
                 reward_function=connections_reward_func,
                 vllm_model=self.vllm_model,
             )
@@ -150,7 +150,6 @@ class Trainer:
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
-                dtype=self.dtype,
                 vllm_model=self.vllm_model,
             )
             if torch.cuda.is_available():

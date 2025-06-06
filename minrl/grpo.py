@@ -84,7 +84,7 @@ def rollout(
             # idx of the j-th answer for the i-th prompt
             idx = i * num_answer_per_question + j
 
-            generated_token_ids: list[int] = outputs[idx].outputs[0].token_ids  # type: ignore
+            generated_token_ids: list[int] = list(outputs[idx].outputs[0].token_ids)
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
@@ -173,9 +173,8 @@ def update_policy(
     pad_token_id: int,
     max_grad_norm: float,
     device: torch.device,
-    dtype: torch.dtype,
     vllm_model: LLM,
-    apply_loss: bool = True,
+    apply_loss: bool = False,
 ) -> dict[str, float]:
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
@@ -228,13 +227,12 @@ def update_policy(
             batch_advantages, device=device, dtype=torch.float32
         )
 
-        with torch.autocast(device_type=device.type, dtype=dtype):
-            input_token_ids = batch_token_ids_tensor[:, :-1]
-            target_token_ids = batch_token_ids_tensor[:, 1:]
-            target_masks = batch_masks_tensor[:, 1:]
-            logger.info("Computing logits...")
-            logits = model.forward(input_token_ids).logits.float()
-            logger.info("Logits computed")
+        input_token_ids = batch_token_ids_tensor[:, :-1]
+        target_token_ids = batch_token_ids_tensor[:, 1:]
+        target_masks = batch_masks_tensor[:, 1:]
+        logger.info("Computing logits...")
+        logits: torch.Tensor = model.forward(input_token_ids).logits.float()
+        logger.info("Logits computed")
 
         log_probs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
@@ -269,12 +267,28 @@ def update_policy(
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 
-        logger.info("Syncing params to vLLM...")
-        model_runner: ModelRunnerBase = (
-            vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
-        )
-        model_runner.model.load_weights(model.state_dict().items())  # type: ignore
-        logger.info("Param update done")
+    logger.info("Syncing params to vLLM...")
+
+    state_dict = model.state_dict()
+    state_dict = {k: v.to(dtype=torch.float16) for k, v in state_dict.items()}
+    state_dict = {
+        k.removeprefix("base_model.model.").replace(".base_layer", ""): v
+        for k, v in state_dict.items()
+    }
+    # Remove values with adapter prefix (example: "_lora")
+    state_dict = {k: v for k, v in state_dict.items() if "_lora" not in k}
+    # When module to save, remove its prefix and discard the original module
+    state_dict = {
+        k.replace("modules_to_save.default.", ""): v
+        for k, v in state_dict.items()
+        if "original_module" not in k
+    }
+
+    model_runner: ModelRunnerBase = (
+        vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
+    )
+    model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+    logger.info("Param update done")
 
     return {
         "loss": float(loss),
@@ -318,15 +332,8 @@ def compute_metrics(
         # TensorBoard treats text as markdown.
         text = html.escape(episode.text)
         tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
-    logger.info(
-        f"\rStep {step}, mean_reward: {mean_reward:.2f}, "
-        f"grad_norm: {grad_norm:.2f}, "
-        f"num_finished_episodes: {num_finished_episodes}, "
-        f"mean_response_len: {mean_response_len:.2f}, "
-        f"entropy: {entropy:.2f}"
-    )
 
-    return {
+    log_dict = {
         "mean_reward": mean_reward,
         "std_reward": std_reward,
         "grad_norm": grad_norm,
@@ -336,3 +343,5 @@ def compute_metrics(
         "mean_response_len": mean_response_len,
         "num_finished_episodes": float(num_finished_episodes),
     }
+    logger.info(log_dict)
+    return log_dict
