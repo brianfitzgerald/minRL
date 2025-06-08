@@ -106,7 +106,7 @@ class Trainer:
         self.start_time = time.time()
         self.ckpt_dir = Path("ckpts")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-        self.tb_writer = SummaryWriter()
+        self.tb_writer = SummaryWriter(log_dir="runs")
 
     def train(self) -> None:
         """Run the main training loop.
