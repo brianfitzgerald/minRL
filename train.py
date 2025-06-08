@@ -13,6 +13,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import TrainerConfig
+from vllm.envs import set_vllm_use_v1
 
 from minrl.grpo import compute_metrics, rollout, update_policy
 from minrl.tasks.connections import (
@@ -26,17 +27,10 @@ if not USING_MPS:
 
 
 def get_available_device() -> str:
-    """Get the best available device for training.
-
-    Returns:
-        str: Device string ('cuda:0', 'mps', or 'cpu')
-    """
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -48,21 +42,23 @@ class Trainer:
         """Initialize the trainer with configuration."""
         self.config = config or TrainerConfig()
         self.device = torch.device(get_available_device())
+        self.dtype = torch.bfloat16
+
+    def init_model(self):
+        """Initialize the model and tokenizer."""
+        set_vllm_use_v1(False)
         vllm_device = self.device.type
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
             vllm_device = "cpu"
-        self.dtype = torch.bfloat16
         self.vllm_model = LLM(
             model=self.config.model_id,
             device=vllm_device,
-            gpu_memory_utilization=0.4,
+            gpu_memory_utilization=0.2,
             max_model_len=self.config.max_new_tokens,
             max_seq_len_to_capture=self.config.max_new_tokens,
+            enforce_eager=True,
         )
-
-    def init_model(self):
-        """Initialize the model and tokenizer."""
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "flash_attention_2" if self.device.type == "cuda" else "sdpa"
         model = AutoModelForCausalLM.from_pretrained(
@@ -74,8 +70,8 @@ class Trainer:
 
         logger.info("Model loaded.")
         model.to(self.device)
-        logger.info(f"Using device {self.device}")
         torch.set_default_device(self.device)
+        logger.info(f"Using device {self.device}, attn impl {attn_impl}")
         torch.random.manual_seed(42)
         self.tokenizer = tokenizer
         self.model = model
@@ -182,9 +178,6 @@ def main() -> None:
     Args:
         model_id: The HuggingFace model ID to use for training
     """
-    if torch.cuda.is_available():
-        logger.info("Setting per process memory fraction to 0.5")
-        torch.cuda.set_per_process_memory_fraction(0.5, device=0)
     config = TrainerConfig()
     trainer = Trainer(config)
     trainer.init_model()

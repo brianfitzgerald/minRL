@@ -231,7 +231,8 @@ def update_policy(
         target_token_ids = batch_token_ids_tensor[:, 1:]
         target_masks = batch_masks_tensor[:, 1:]
         logger.info("Computing logits...")
-        logits: torch.Tensor = model.forward(input_token_ids).logits.float()
+        # TODO only compute logits for the target tokens, not the input tokens
+        logits: torch.Tensor = model(input_token_ids).logits.float()
         logger.info("Logits computed")
 
         log_probs = -torch.nn.functional.cross_entropy(
@@ -274,14 +275,6 @@ def update_policy(
     state_dict = {
         k.removeprefix("base_model.model.").replace(".base_layer", ""): v
         for k, v in state_dict.items()
-    }
-    # Remove values with adapter prefix (example: "_lora")
-    state_dict = {k: v for k, v in state_dict.items() if "_lora" not in k}
-    # When module to save, remove its prefix and discard the original module
-    state_dict = {
-        k.replace("modules_to_save.default.", ""): v
-        for k, v in state_dict.items()
-        if "original_module" not in k
     }
 
     model_runner: ModelRunnerBase = (
