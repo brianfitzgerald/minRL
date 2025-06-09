@@ -174,7 +174,7 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     vllm_model: LLM,
-    apply_loss: bool = False,
+    apply_loss: bool = True
 ) -> dict[str, float]:
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching

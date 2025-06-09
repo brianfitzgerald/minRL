@@ -104,9 +104,9 @@ class Trainer:
                 eps=1e-8,
             )
         self.start_time = time.time()
-        self.ckpt_dir = Path("ckpts")
+        self.ckpt_dir = Path("checkpoints")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-        self.tb_writer = SummaryWriter(log_dir="runs")
+        self.tb_writer = SummaryWriter()
 
     def train(self) -> None:
         """Run the main training loop.
@@ -158,7 +158,7 @@ class Trainer:
             compute_metrics(episodes, results, self.tb_writer, step, self.optimizer)
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
-                output_file = self.ckpt_dir / f"ckpt_{step:06d}.pt"
+                output_file = self.ckpt_dir / f"checkpoint_{step:06d}.pt"
                 torch.save(cast(nn.Module, self.model).state_dict(), output_file)
                 print(f"Saved checkpoint to {output_file}")
 
