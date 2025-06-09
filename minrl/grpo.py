@@ -174,7 +174,7 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     vllm_model: LLM,
-    apply_loss: bool = True
+    apply_loss: bool = True,
 ) -> dict[str, float]:
     episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
@@ -230,10 +230,8 @@ def update_policy(
         input_token_ids = batch_token_ids_tensor[:, :-1]
         target_token_ids = batch_token_ids_tensor[:, 1:]
         target_masks = batch_masks_tensor[:, 1:]
-        logger.info("Computing logits...")
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
-        logger.info("Logits computed")
 
         log_probs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
