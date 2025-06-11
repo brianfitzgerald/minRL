@@ -15,7 +15,7 @@ class TrainerConfig(BaseModel):
     max_new_tokens: int = 1024
     micro_batch_size: int = 2
     max_grad_norm: float = 0.01
-    ckpt_save_interval: int = 100
+    ckpt_save_interval: int = 50
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw"
     lr: float = 1e-5

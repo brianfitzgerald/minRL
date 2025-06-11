@@ -1,5 +1,5 @@
 import os
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 from tqdm import tqdm
 
 import fire
@@ -14,15 +14,29 @@ from minrl.tasks.connections import (
     CONNECTIONS_PROMPT,
     ConnectionsSample,
 )
+from minrl.constants import QWEN_3_0_6B
 from minrl.tasks.dataset import batch_to_samples
 
 """
-Evaluate a series of OSS models against prompts and evals for a specific task.
+Evaluate against any task in the minrl.tasks module.
 """
 
 load_dotenv(".env")
 
-INFERENCE_MODELS = ["gpt-4.1-mini"]
+ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
+
+
+class EvalModel(TypedDict):
+    type: ModelType
+    model_id: str
+
+
+EVAL_MODELS: list[EvalModel] = [
+    {"type": "openrouter", "model_id": "google/gemini-2.0-flash-001"},
+    {"type": "openai", "model_id": "gpt-4o-mini"},
+    {"type": "huggingface", "model_id": QWEN_3_0_6B},
+    {"type": "finetuned", "model_id": "checkpoints/checkpoint_000005"},
+]
 
 
 class OutRow(TypedDict):
@@ -47,7 +61,7 @@ async def main(task: TaskChoice = "connections"):
 
     for batch in tqdm(loader):
         batch: list[ConnectionsSample] = batch_to_samples(batch)  # type: ignore
-        for model in INFERENCE_MODELS:
+        for model in EVAL_MODELS:
             convs = []
             for sample in batch:
                 convs.append(
@@ -63,7 +77,7 @@ async def main(task: TaskChoice = "connections"):
             responses = await asyncio.gather(
                 *[
                     client.chat.completions.create(
-                        model=model,
+                        model=model["model_id"],
                         messages=conv,
                     )
                     for conv in convs
@@ -71,15 +85,15 @@ async def main(task: TaskChoice = "connections"):
             )
 
             for sample, response in zip(batch, responses):
-                assert response.choices[0].message.content is not None, (
-                    "No response content"
-                )
+                assert (
+                    response.choices[0].message.content is not None
+                ), "No response content"
                 response_content = response.choices[0].message.content
                 score = reward_function(response_content, cast(dict, sample))
                 logger.info(f"Score: {score}")
                 out_rows.append(
                     {
-                        "model": model,
+                        "model": model["type"],
                         "prompt": sample["prompt"],
                         "response": response_content,
                         "score": score,

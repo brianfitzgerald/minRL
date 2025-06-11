@@ -158,9 +158,10 @@ class Trainer:
             compute_metrics(episodes, results, self.tb_writer, step, self.optimizer)
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
-                output_file = self.ckpt_dir / f"checkpoint_{step:06d}.pt"
-                torch.save(cast(nn.Module, self.model).state_dict(), output_file)
-                print(f"Saved checkpoint to {output_file}")
+                logger.info(f"Saving checkpoint for step {step}")
+                output_file = self.ckpt_dir / f"checkpoint_{step:06d}"
+                self.model.save_pretrained(output_file)  # type: ignore
+                logger.info(f"Saved checkpoint to {output_file}")
 
     def evaluate(self) -> float:
         """Evaluate the current model.
