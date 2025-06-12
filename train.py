@@ -15,7 +15,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import TrainerConfig
 from vllm.envs import set_vllm_use_v1
 
-from minrl.grpo import compute_metrics, rollout, update_policy
+from minrl.algorithms import compute_metrics, rollout, update_policy
 from minrl.tasks.connections import (
     connections_reward_func,
     create_connections_datasets,

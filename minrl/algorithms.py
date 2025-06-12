@@ -197,19 +197,22 @@ def update_policy(
 
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
+
         batch_episodes = episodes[i:j]
         batch_lengths = [
             len(episode.prefix_token_ids) + len(episode.generated_token_ids)
             for episode in batch_episodes
         ]
         batch_max_length = max(batch_lengths)
-        # get the token ids for the micro-batch
+
+        # pad all token ids (prefix + generated) to the same length
         batch_token_ids = [
             episode.prefix_token_ids
             + episode.generated_token_ids
             + [pad_token_id] * (batch_max_length - batch_lengths[i])
             for i, episode in enumerate(batch_episodes)
         ]
+        # Mask out the input tokens, and the padding tokens
         batch_masks = [
             [0] * len(episode.prefix_token_ids)
             + [1] * len(episode.generated_token_ids)
@@ -217,7 +220,7 @@ def update_policy(
             for i, episode in enumerate(batch_episodes)
         ]
 
-        # advantage is just reward, once normalized
+        # advantage is just normalized reward
         batch_advantages = [episode.reward for episode in batch_episodes]
         batch_token_ids_tensor = torch.tensor(
             batch_token_ids, device=device, dtype=torch.long
