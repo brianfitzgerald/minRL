@@ -159,7 +159,10 @@ class Trainer:
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
                 logger.info(f"Saving checkpoint for step {step}")
-                output_file = self.ckpt_dir / f"checkpoint_{step:06d}"
+                simple_timestamp = time.strftime("%Y%m%d_%H%M%S")
+                output_file = (
+                    self.ckpt_dir / f"checkpoint_{simple_timestamp}_step_{step:06d}"
+                )
                 self.model.save_pretrained(output_file)  # type: ignore
                 logger.info(f"Saved checkpoint to {output_file}")
 
