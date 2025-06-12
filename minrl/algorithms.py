@@ -18,7 +18,7 @@ from vllm.worker.model_runner_base import ModelRunnerBase
 
 from minrl.tasks import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
-from minrl.constants import TrainerConfig
+from minrl.constants import AlgorithmChoice, TrainerConfig
 from vllm import LLM
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
@@ -174,9 +174,11 @@ def update_policy(
     max_grad_norm: float,
     device: torch.device,
     vllm_model: LLM,
+    algorithm: AlgorithmChoice,
     apply_loss: bool = True,
 ) -> dict[str, float]:
-    episodes = normalize_rewards_per_group(episodes)
+    if algorithm == "grpo":
+        episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
     episodes.sort(
         key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True
@@ -221,13 +223,13 @@ def update_policy(
         ]
 
         # advantage is just normalized reward
-        batch_advantages = [episode.reward for episode in batch_episodes]
+        batch_rewards = [episode.reward for episode in batch_episodes]
         batch_token_ids_tensor = torch.tensor(
             batch_token_ids, device=device, dtype=torch.long
         )
         batch_masks_tensor = torch.tensor(batch_masks, device=device, dtype=torch.bool)
-        batch_advantages_tensor = torch.tensor(
-            batch_advantages, device=device, dtype=torch.float32
+        batch_rewards_tensor = torch.tensor(
+            batch_rewards, device=device, dtype=torch.float32
         )
 
         input_token_ids = batch_token_ids_tensor[:, :-1]
@@ -236,7 +238,7 @@ def update_policy(
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
 
-        log_probs = -torch.nn.functional.cross_entropy(
+        logprobs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             target_token_ids.reshape(-1),
             ignore_index=pad_token_id,
@@ -253,12 +255,13 @@ def update_policy(
             )
 
         # multiply the log probs by the advantages
-        obj = log_probs * batch_advantages_tensor[:, None]
+        objective = logprobs * batch_rewards_tensor[:, None]
+
         # scale by the mask, and normalize by token count
-        obj: torch.Tensor = (obj * target_masks).sum() / n_target_tokens
+        objective = (objective * target_masks).sum() / n_target_tokens
         if apply_loss:
             with torch.autograd.detect_anomaly():
-                loss = -obj
+                loss = -objective
                 loss.backward()
 
     if apply_loss:

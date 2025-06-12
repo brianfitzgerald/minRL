@@ -30,7 +30,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -147,6 +149,7 @@ class Trainer:
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 vllm_model=self.vllm_model,
+                algorithm=self.config.algorithm,
             )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()

@@ -7,6 +7,8 @@ QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
 
+AlgorithmChoice = Literal["reinforce", "grpo"]
+
 
 class TrainerConfig(BaseModel):
     model_id: str = QWEN_3_0_6B
@@ -18,4 +20,5 @@ class TrainerConfig(BaseModel):
     ckpt_save_interval: int = 50
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw"
+    algorithm: AlgorithmChoice = "reinforce"
     lr: float = 1e-5
