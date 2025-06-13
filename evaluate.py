@@ -9,7 +9,7 @@ from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from torch.utils.data import DataLoader
-from vllm import LLM, RequestOutput
+from vllm import LLM, RequestOutput, SamplingParams
 
 from minrl.tasks import TASK_DEFINITIONS, TaskChoice
 from minrl.tasks.connections import (
@@ -17,7 +17,6 @@ from minrl.tasks.connections import (
     ConnectionsSample,
 )
 from minrl.constants import QWEN_3_0_6B
-from minrl.tasks.dataset import batch_to_samples
 
 """
 Evaluate against any task in the minrl.tasks module.
@@ -76,7 +75,9 @@ async def main(
         task_definition["dataset"]("eval"),
         task_definition["reward_function"],
     )
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
+    )
 
     model = EVAL_MODELS[model_name]
     vllm_model: LLM | None = None
@@ -103,7 +104,7 @@ async def main(
     os.makedirs("eval_results", exist_ok=True)
 
     for batch in tqdm(loader):
-        batch: list[ConnectionsSample] = batch_to_samples(batch)  # type: ignore
+        batch: list[ConnectionsSample] = batch  # type: ignore
         convs = []
         for sample in batch:
             convs.append(
@@ -117,7 +118,8 @@ async def main(
             )
 
         if vllm_model is not None:
-            responses = vllm_model.chat(convs)
+            sampling_params = SamplingParams(max_tokens=1024)
+            responses = vllm_model.chat(convs, sampling_params=sampling_params)
         else:
             responses = await asyncio.gather(
                 *[

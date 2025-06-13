@@ -41,10 +41,3 @@ class MinRLDataset(Dataset):
     @abstractmethod
     def collate_fn(self, batch: list[dict]) -> MiniBatch:
         pass
-
-
-def batch_to_samples(batch: dict) -> list:
-    """Convert a batch of data to a list of samples."""
-    first_key = next(iter(batch.values()))
-    batch_size = len(first_key)
-    return [{k: v[i] for k, v in batch.items()} for i in range(batch_size)]
