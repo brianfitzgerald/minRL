@@ -30,10 +30,12 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
+
+
+def simple_timestamp() -> str:
+    return time.strftime("%Y%m%d_%H%M%S")
 
 
 class Trainer:
@@ -108,7 +110,8 @@ class Trainer:
         self.start_time = time.time()
         self.ckpt_dir = Path("checkpoints")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-        self.tb_writer = SummaryWriter()
+        self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{simple_timestamp()}"
+        self.tb_writer = SummaryWriter(f"runs/{self.run_name}")
 
     def train(self) -> None:
         """Run the main training loop.
@@ -162,10 +165,7 @@ class Trainer:
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
                 logger.info(f"Saving checkpoint for step {step}")
-                simple_timestamp = time.strftime("%Y%m%d_%H%M%S")
-                output_file = (
-                    self.ckpt_dir / f"checkpoint_{simple_timestamp}_step_{step:06d}"
-                )
+                output_file = self.ckpt_dir / f"{self.run_name}_step_{step:06d}"
                 self.model.save_pretrained(output_file)  # type: ignore
                 logger.info(f"Saved checkpoint to {output_file}")
 

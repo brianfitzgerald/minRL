@@ -227,14 +227,14 @@ def update_policy(
         batch_token_ids_tensor = torch.tensor(
             batch_token_ids, device=device, dtype=torch.long
         )
-        batch_masks_tensor = torch.tensor(batch_masks, device=device, dtype=torch.bool)
-        batch_rewards_tensor = torch.tensor(
+        batch_masks_t = torch.tensor(batch_masks, device=device, dtype=torch.bool)
+        batch_rewards_t = torch.tensor(
             batch_rewards, device=device, dtype=torch.float32
         )
 
         input_token_ids = batch_token_ids_tensor[:, :-1]
         target_token_ids = batch_token_ids_tensor[:, 1:]
-        target_masks = batch_masks_tensor[:, 1:]
+        target_masks = batch_masks_t[:, 1:]
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
 
@@ -255,7 +255,12 @@ def update_policy(
             )
 
         # multiply the log probs by the advantages
-        objective = logprobs * batch_rewards_tensor[:, None]
+        if algorithm == "grpo":
+            objective = logprobs * batch_rewards_t[:, None]
+        else:
+            # subtract baseline, which is the mean of the rewards
+            advantages = batch_rewards_t - batch_rewards_t.mean()
+            objective = logprobs * advantages[:, None]
 
         # scale by the mask, and normalize by token count
         objective = (objective * target_masks).sum() / n_target_tokens
