@@ -12,7 +12,7 @@ AlgorithmChoice = Literal["reinforce", "grpo"]
 class TrainerConfig(BaseModel):
     model_id: str = QWEN_3_0_6B
     eval_interval: int = 100
-    num_answers_per_question: int = 8
+    num_answers_per_question: int = 4
     max_new_tokens: int = 1024
     micro_batch_size: int = 2
     max_grad_norm: float = 0.01
