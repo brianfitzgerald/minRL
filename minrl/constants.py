@@ -6,7 +6,7 @@ QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"
 QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
-AlgorithmChoice = Literal["reinforce", "grpo"]
+AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 
 
 class TrainerConfig(BaseModel):

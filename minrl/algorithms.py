@@ -257,10 +257,12 @@ def update_policy(
         # multiply the log probs by the advantages
         if algorithm == "grpo":
             objective = logprobs * batch_rewards_t[:, None]
-        else:
+        elif algorithm == "gpg":
             # subtract baseline, which is the mean of the rewards
             advantages = batch_rewards_t - batch_rewards_t.mean()
             objective = logprobs * advantages[:, None]
+        elif algorithm == "reinforce":
+            objective = logprobs * batch_rewards_t[:, None]
 
         # scale by the mask, and normalize by token count
         objective = (objective * target_masks).sum() / n_target_tokens
