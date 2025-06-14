@@ -19,7 +19,7 @@ class TrainerConfig(BaseModel):
     ckpt_save_interval: int = 50
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw_8bit"
-    algorithm: AlgorithmChoice = "reinforce"
+    algorithm: AlgorithmChoice = "grpo"
     lr: float = 1e-5
 
     @property
