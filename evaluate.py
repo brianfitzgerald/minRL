@@ -1,5 +1,5 @@
 import os
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 from tqdm import tqdm
 
 import fire
@@ -30,22 +30,22 @@ class EvalModel(TypedDict):
 
 
 ModelName = Literal[
-    "gemini-2.0-flash", "gpt-4o-mini", "Qwen3.0-6B", "qwen-grpo", "qwen-reinforce"
+    "gemini_2_flash", "gpt_4.1_mini", "Qwen3.0-6B", "qwen_grpo", "qwen_reinforce"
 ]
 
 EVAL_MODELS: dict[ModelName, EvalModel] = {
-    "gemini-2.0-flash": {
+    "gemini_2_flash": {
         "type": "openrouter",
         "model_id": "google/gemini-2.0-flash-001",
     },
-    "gpt-4o-mini": {"type": "openai", "model_id": "gpt-4o-mini"},
+    "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
     "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
-    "qwen-grpo": {
+    "qwen_grpo": {
         "type": "finetuned",
         "model_id": "Qwen3_0.6B-grpo-20250612_211716_step_000050",
         "base_model_id": QWEN_3_0_6B,
     },
-    "qwen-reinforce": {
+    "qwen_reinforce": {
         "type": "finetuned",
         "model_id": "Qwen3_0.6B-reinforce-20250612_213402_step_000900",
         "base_model_id": QWEN_3_0_6B,
@@ -55,14 +55,14 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
 
 class OutRow(TypedDict):
     model: str
-    prompt: str
     response: str
     score: float
+    sample: dict[str, Any]
 
 
 async def main(
     task: TaskChoice = "hanoi",
-    model_name: ModelName = "gemini-2.0-flash",
+    model_name: ModelName = "gpt_4.1_mini",
     batch_size: int = 8,
 ):
 
@@ -139,16 +139,16 @@ async def main(
             out_rows.append(
                 {
                     "model": model_name,
-                    "prompt": sample["prompt"],
                     "response": response_content,
                     "score": score,
+                    "sample": sample,
                 }
             )
 
     out_rows_pd = pd.DataFrame(out_rows)
 
     logger.info(out_rows_pd)
-    out_rows_pd.to_csv(f"eval_results/eval_{task}.csv", index=False)
+    out_rows_pd.to_parquet(f"eval_results/eval_{task}_{model_name}.parquet")
 
 
 if __name__ == "__main__":

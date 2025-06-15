@@ -2,6 +2,7 @@ from typing import Any, List, Dict, Tuple, Union, TypedDict
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import random
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+from loguru import logger
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -147,12 +148,13 @@ class HanoiDataset(MinRLDataset):
         self.tokenizer = tokenizer
 
     def __getitem__(self, _: int) -> HanoiSample:
-        n_disks = random.randint(1, 240)
+        # TODO should use 240 total
+        n_disks = random.randint(1, 10)
         return {"n_disks": n_disks}
 
     def __len__(self) -> int:
         # mock value to satisfy dataloader
-        return 10**8
+        return 10**6
 
     def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
         return [
@@ -166,7 +168,7 @@ class HanoiDataset(MinRLDataset):
     def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
         """
         Collate examples into a batch.
-        Used during training / only, requires a tokenizer.
+        Used during training only, requires a tokenizer.
         """
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
@@ -181,14 +183,18 @@ class HanoiDataset(MinRLDataset):
 
 
 def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
-    game = TowerOfHanoi(sample["n_disks"])
-    for move in response.split("\n"):
-        if move == "":
-            continue  # skip empty lines
-        from_stack, to_stack = map(int, move.split(" "))
-        game.make_move(from_stack, to_stack)
-    if game.is_solved():
-        return 1.0
-    if game.moves_count > game.get_minimum_moves():
+    try:
+        game = TowerOfHanoi(sample["n_disks"])
+        for move in response.split("\n"):
+            if move == "":
+                continue  # skip empty lines
+            from_stack, to_stack = map(int, move.split(" "))
+            game.make_move(from_stack, to_stack)
+        if game.is_solved():
+            return 1.0
+        if game.moves_count > game.get_minimum_moves():
+            return -1.0
+    except Exception as e:
+        logger.error(f"Error in hanoi_reward_func: {e}")
         return -1.0
     return 0.0

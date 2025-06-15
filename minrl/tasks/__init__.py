@@ -2,7 +2,7 @@ from minrl.tasks.connections import (
     ConnectionsDataset,
     connections_reward_func,
 )
-from typing import Callable, Literal, TypedDict, Protocol, Any
+from typing import Literal, TypedDict, Protocol, Any
 
 from minrl.tasks.dataset import MinRLDataset
 from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func, tokenize_hanoi_sample
