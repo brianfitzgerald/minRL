@@ -202,9 +202,6 @@ class ConnectionsDataset(MinRLDataset):
 
 def create_connections_datasets(
     tokenizer: PreTrainedTokenizerBase,
-    jsonl_path: str = "data/train_prompts.jsonl",
-    num_samples: int = 1000,
-    seed: int = 42,
 ) -> tuple[ConnectionsDataset, ConnectionsDataset]:
     """Create connections datasets for training."""
     train_dataset = ConnectionsDataset(split="train", tokenizer=tokenizer)

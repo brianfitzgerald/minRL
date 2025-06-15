@@ -1,4 +1,48 @@
-from typing import List, Dict, Tuple, Union
+from typing import Any, List, Dict, Tuple, Union, TypedDict
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+import random
+from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+
+SYSTEM_PROMPT = """
+You are a helpful assistant. Solve this puzzle for me.
+There are three pegs and n disks of different sizes stacked on the first peg. The disks are
+numbered from 1 (smallest) to n (largest). Disk moves in this puzzle should follow:
+1. Only one disk can be moved at a time.
+2. Each move consists of taking the upper disk from one stack and placing it on top of
+another stack.
+3. A larger disk may not be placed on top of a smaller disk.
+The goal is to move the entire stack to the third peg.
+Example: With 3 disks numbered 1 (smallest), 2, and 3 (largest), the initial state is [[3, 2, 1],
+[], []], and a solution might be:
+moves = [[1 , 0 , 2] , [2 , 0 , 1] , [1 , 2 , 1] , [3 , 0 , 2] ,
+[1 , 1 , 0] , [2 , 1 , 2] , [1 , 0 , 2]]
+This means: Move disk 1 from peg 0 to peg 2, then move disk 2 from peg 0 to peg 1, and so on.
+Requirements:
+• When exploring potential solutions in your thinking process, always include the corresponding complete list of moves.
+• The positions are 0-indexed (the leftmost peg is 0).
+• Ensure your final answer includes the complete list of moves in the format:
+moves = [[disk id, from peg, to peg], ...]
+"""
+
+
+def user_prompt(num_disks: int) -> str:
+    return f"""
+I have a puzzle with {num_disks} disks of different sizes with
+Initial configuration:
+• Peg 0: {num_disks} (bottom), . . . 2, 1 (top)
+• Peg 1: (empty)
+• Peg 2: (empty)
+17
+Goal configuration:
+• Peg 0: (empty)
+• Peg 1: (empty)
+• Peg 2: {num_disks} (bottom), . . . 2, 1 (top)
+Rules:
+• Only one disk can be moved at a time.
+• Only the top disk from any stack can be moved.
+• A larger disk may not be placed on top of a smaller disk.
+Find the sequence of moves to transform the initial configuration into the goal configuration.
+"""
 
 
 class TowerOfHanoi:
@@ -24,9 +68,6 @@ class TowerOfHanoi:
             "stacks": [stack.copy() for stack in self.stacks],
             "moves_count": self.moves_count,
         }
-
-    def display(self) -> None:
-        pass
 
     def is_valid_move(self, from_stack: int, to_stack: int) -> Tuple[bool, str]:
         if from_stack not in [0, 1, 2]:
@@ -69,30 +110,52 @@ class TowerOfHanoi:
     def get_minimum_moves(self) -> int:
         return (2**self.num_disks) - 1
 
-    def play(self) -> None:
-        while True:
-            if self.is_solved():
-                break
 
-            try:
-                user_input = input().strip().lower()
+class HanoiSampleTokenized(TypedDict):
+    prefix: str
+    prefix_token_ids: list[int]
 
-                if user_input == "quit":
-                    break
-                elif user_input == "reset":
-                    self.reset()
-                    continue
 
-                parts = user_input.split()
-                if len(parts) != 2:
-                    continue
+def tokenize_hanoi_sample(
+    sample: dict[str, Any], tokenizer: PreTrainedTokenizerBase
+) -> HanoiSampleTokenized:
+    prefix: str = tokenizer.apply_chat_template(  # type: ignore
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt(sample["n_disks"])},
+        ],
+    )
+    return {
+        "prefix": prefix,
+        "prefix_token_ids": tokenizer.encode(prefix),
+    }
 
-                from_stack = int(parts[0])
-                to_stack = int(parts[1])
 
-                self.make_move(from_stack, to_stack)
+class HanoiDataset(MinRLDataset):
+    def __init__(
+        self,
+        split: Split,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+    ):
+        super().__init__(split, tokenizer)
+        self.tokenizer = tokenizer
 
-            except ValueError:
-                pass
-            except KeyboardInterrupt:
-                break
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        n_disks = random.randint(1, 10)
+        return {"n_disks": n_disks}
+
+    def collate_fn(self, batch: List[dict[str, Any]]) -> MiniBatch:
+        """
+        Collate examples into a batch.
+        Used during training / only, requires a tokenizer.
+        """
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer is not set")
+        tokenized = [tokenize_hanoi_sample(item, self.tokenizer) for item in batch]
+        prefixes = [item["prefix"] for item in tokenized]
+        prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
+        return MiniBatch(
+            prefixes=prefixes,
+            prefix_token_ids=prefix_token_ids,
+            samples=batch,  # type: ignore
+        )

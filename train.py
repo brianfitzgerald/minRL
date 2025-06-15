@@ -83,10 +83,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        self.train_dataset, _ = create_connections_datasets(
-            tokenizer=self.tokenizer,
-            jsonl_path="data/train_prompts.jsonl",
-        )
+        self.train_dataset, _ = create_connections_datasets(tokenizer=self.tokenizer)
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
             self.train_dataset,
