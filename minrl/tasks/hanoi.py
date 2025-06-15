@@ -116,8 +116,12 @@ class HanoiSampleTokenized(TypedDict):
     prefix_token_ids: list[int]
 
 
+class HanoiSample(TypedDict):
+    n_disks: int
+
+
 def tokenize_hanoi_sample(
-    sample: dict[str, Any], tokenizer: PreTrainedTokenizerBase
+    sample: HanoiSample, tokenizer: PreTrainedTokenizerBase
 ) -> HanoiSampleTokenized:
     prefix: str = tokenizer.apply_chat_template(  # type: ignore
         [
@@ -140,11 +144,11 @@ class HanoiDataset(MinRLDataset):
         super().__init__(split, tokenizer)
         self.tokenizer = tokenizer
 
-    def __getitem__(self, idx: int) -> dict[str, Any]:
+    def __getitem__(self, _: int) -> HanoiSample:
         n_disks = random.randint(1, 10)
         return {"n_disks": n_disks}
 
-    def collate_fn(self, batch: List[dict[str, Any]]) -> MiniBatch:
+    def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
         """
         Collate examples into a batch.
         Used during training / only, requires a tokenizer.
@@ -157,5 +161,10 @@ class HanoiDataset(MinRLDataset):
         return MiniBatch(
             prefixes=prefixes,
             prefix_token_ids=prefix_token_ids,
-            samples=batch,  # type: ignore
+            samples=batch,
         )
+
+
+def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
+    # TODO: Implement reward function
+    return 1.0

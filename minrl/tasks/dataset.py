@@ -30,7 +30,7 @@ class MiniBatch:
 
     prefixes: list[str]
     prefix_token_ids: list[list[int]]
-    samples: list[dict[str, Any]]
+    samples: list[Any]
 
 
 class MinRLDataset(Dataset):

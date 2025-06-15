@@ -13,13 +13,10 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import TrainerConfig
-from vllm.envs import set_vllm_use_v1
+from minrl.tasks import TASK_DEFINITIONS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.connections import (
-    connections_reward_func,
-    create_connections_datasets,
-)
+from minrl.tasks.dataset import MinRLDataset
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -50,7 +47,6 @@ class Trainer:
 
     def init_model(self):
         """Initialize the model and tokenizer."""
-        set_vllm_use_v1(False)
         vllm_device = self.device.type
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
@@ -83,7 +79,9 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        self.train_dataset, _ = create_connections_datasets(tokenizer=self.tokenizer)
+        dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]["dataset"]
+        self.train_dataset = dataset_cls(split="train", tokenizer=self.tokenizer)
+        self.eval_dataset = dataset_cls(split="eval", tokenizer=self.tokenizer)
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
             self.train_dataset,
@@ -132,7 +130,7 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answer_per_question=self.config.num_answers_per_question,
-                reward_function=connections_reward_func,
+                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
                 vllm_model=self.vllm_model,
             )
             if self.config.skip_unfinished_episodes:

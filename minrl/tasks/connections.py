@@ -200,15 +200,6 @@ class ConnectionsDataset(MinRLDataset):
         )
 
 
-def create_connections_datasets(
-    tokenizer: PreTrainedTokenizerBase,
-) -> tuple[ConnectionsDataset, ConnectionsDataset]:
-    """Create connections datasets for training."""
-    train_dataset = ConnectionsDataset(split="train", tokenizer=tokenizer)
-    val_dataset = ConnectionsDataset(split="eval", tokenizer=tokenizer)
-    return train_dataset, val_dataset
-
-
 def strict_format_reward_func(
     response: str, samples: dict[str, Any]
 ) -> Dict[str, float]:
