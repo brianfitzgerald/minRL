@@ -30,7 +30,12 @@ class EvalModel(TypedDict):
 
 
 ModelName = Literal[
-    "gemini_2_flash", "gpt_4.1_mini", "Qwen3.0-6B", "qwen_grpo", "qwen_reinforce"
+    "gemini_2_flash",
+    "gpt_4.1_mini",
+    "Qwen3.0-6B",
+    "qwen_grpo",
+    "qwen_reinforce",
+    "magistral_medium",
 ]
 
 EVAL_MODELS: dict[ModelName, EvalModel] = {
@@ -50,6 +55,10 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
         "model_id": "Qwen3_0.6B-reinforce-20250612_213402_step_000900",
         "base_model_id": QWEN_3_0_6B,
     },
+    "magistral_medium": {
+        "type": "openrouter",
+        "model_id": "mistralai/magistral-medium-2506:thinking",
+    },
 }
 
 
@@ -62,7 +71,7 @@ class OutRow(TypedDict):
 
 async def main(
     task: TaskChoice = "hanoi",
-    model_name: ModelName = "gpt_4.1_mini",
+    model_name: ModelName = "gemini_2_flash",
     batch_size: int = 8,
 ):
 
@@ -106,11 +115,12 @@ async def main(
 
     os.makedirs("eval_results", exist_ok=True)
 
-    for batch in tqdm(loader):
+    for i, batch in enumerate(tqdm(loader)):
         conversations = []
         for sample in batch:
             conversations.append(dataset.conversation(sample))
 
+        logger.info(f"Requesting batch {i} of {len(conversations)} completions")
         if vllm_model is not None:
             sampling_params = SamplingParams(max_tokens=1024)
             responses = vllm_model.chat(conversations, sampling_params=sampling_params)

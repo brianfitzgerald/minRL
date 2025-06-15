@@ -5,7 +5,7 @@ from minrl.tasks.connections import (
 from typing import Literal, TypedDict, Protocol, Any
 
 from minrl.tasks.dataset import MinRLDataset
-from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func, tokenize_hanoi_sample
+from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func
 
 TaskChoice = Literal["connections", "hanoi"]
 

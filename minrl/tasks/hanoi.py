@@ -3,6 +3,8 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import random
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
 from loguru import logger
+import re
+import ast
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -13,36 +15,19 @@ numbered from 1 (smallest) to n (largest). Disk moves in this puzzle should foll
 another stack.
 3. A larger disk may not be placed on top of a smaller disk.
 The goal is to move the entire stack to the third peg.
-Example: With 3 disks numbered 1 (smallest), 2, and 3 (largest), the initial state is [[3, 2, 1],
-[], []], and a solution might be:
-moves = [[1 , 0 , 2] , [2 , 0 , 1] , [1 , 2 , 1] , [3 , 0 , 2] ,
-[1 , 1 , 0] , [2 , 1 , 2] , [1 , 0 , 2]]
-This means: Move disk 1 from peg 0 to peg 2, then move disk 2 from peg 0 to peg 1, and so on.
 Requirements:
 • When exploring potential solutions in your thinking process, always include the corresponding complete list of moves.
 • The positions are 0-indexed (the leftmost peg is 0).
 • Ensure your final answer includes the complete list of moves in the format:
 moves = [[disk id, from peg, to peg], ...]
-"""
 
+DO NOT write any code. Just return the list of moves.
+Always format your response within <result> tags.
 
-def user_prompt(num_disks: int) -> str:
-    return f"""
-I have a puzzle with {num_disks} disks of different sizes with
-Initial configuration:
-• Peg 0: {num_disks} (bottom), . . . 2, 1 (top)
-• Peg 1: (empty)
-• Peg 2: (empty)
-17
-Goal configuration:
-• Peg 0: (empty)
-• Peg 1: (empty)
-• Peg 2: {num_disks} (bottom), . . . 2, 1 (top)
-Rules:
-• Only one disk can be moved at a time.
-• Only the top disk from any stack can be moved.
-• A larger disk may not be placed on top of a smaller disk.
-Find the sequence of moves to transform the initial configuration into the goal configuration.
+### Example 
+Initial state: <state>[[3, 2, 1], [], []]</state>
+Response: <result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2]]</result>
+This means: Move disk 1 from peg 0 to peg 2, then move disk 2 from peg 0 to peg 1, and so on.
 """
 
 
@@ -121,21 +106,12 @@ class HanoiSample(TypedDict):
     n_disks: int
 
 
-def tokenize_hanoi_sample(
-    sample: HanoiSample, tokenizer: PreTrainedTokenizerBase
-) -> HanoiSampleTokenized:
-    prefix: str = tokenizer.apply_chat_template(  # type: ignore
-        [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt(sample["n_disks"])},
-        ],
-        tokenize=False,
-        enable_thinking=False,
-    )
-    return {
-        "prefix": prefix,
-        "prefix_token_ids": tokenizer.encode(prefix),
-    }
+def create_hanoi_state(n: int) -> list[list[int]]:
+    return [
+        list(range(n, 0, -1)),
+        [],
+        [],
+    ]
 
 
 class HanoiDataset(MinRLDataset):
@@ -149,20 +125,27 @@ class HanoiDataset(MinRLDataset):
 
     def __getitem__(self, _: int) -> HanoiSample:
         # TODO should use 240 total
-        n_disks = random.randint(1, 10)
+        n_disks = random.choices(
+            range(1, 10),
+            k=1,
+            weights=[2, 2, 2, 2, 2, 1, 1, 1, 1],
+        )[0]
         return {"n_disks": n_disks}
 
     def __len__(self) -> int:
         # mock value to satisfy dataloader
         return 10**6
 
-    def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
+    def conversation(self, sample: HanoiSample) -> list[dict[str, Any]]:
         return [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT,
             },
-            {"role": "user", "content": user_prompt(sample["n_disks"])},
+            {
+                "role": "user",
+                "content": f"Initial state: {create_hanoi_state(sample['n_disks'])}",
+            },
         ]
 
     def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
@@ -172,9 +155,17 @@ class HanoiDataset(MinRLDataset):
         """
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
-        tokenized = [tokenize_hanoi_sample(item, self.tokenizer) for item in batch]
-        prefixes = [item["prefix"] for item in tokenized]
-        prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
+        prefixes = []
+        prefix_token_ids = []
+        for item in batch:
+            prefix: str = self.tokenizer.apply_chat_template(  # type: ignore
+                self.conversation(item),
+                tokenize=False,
+                enable_thinking=False,
+            )
+            prefixes.append(prefix)
+            prefix_token_ids.append(self.tokenizer.encode(prefix))
+
         return MiniBatch(
             prefixes=prefixes,
             prefix_token_ids=prefix_token_ids,
@@ -182,13 +173,19 @@ class HanoiDataset(MinRLDataset):
         )
 
 
+def extract_result_list(s: str) -> list[list[int]]:
+    m = re.search(r"<result>(.*?)</result>", s, re.DOTALL)
+    if not m:
+        return []
+    return ast.literal_eval(m.group(1))
+
+
 def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
     try:
         game = TowerOfHanoi(sample["n_disks"])
-        for move in response.split("\n"):
-            if move == "":
-                continue  # skip empty lines
-            from_stack, to_stack = map(int, move.split(" "))
+        moves = extract_result_list(response)
+        for move in moves:
+            from_stack, to_stack = move[1], move[2]
             game.make_move(from_stack, to_stack)
         if game.is_solved():
             return 1.0

@@ -1,6 +1,12 @@
 import pytest
 
-from minrl.tasks.hanoi import TowerOfHanoi
+from minrl.tasks.hanoi import (
+    SYSTEM_PROMPT,
+    HanoiDataset,
+    TowerOfHanoi,
+    create_hanoi_state,
+    hanoi_reward_func,
+)
 
 
 class TestTowerOfHanoi:
@@ -208,3 +214,29 @@ def test_solved_game_state(solved_2_disk_game):
     assert solved_2_disk_game.stacks[1] == []
     assert solved_2_disk_game.stacks[2] == [2, 1]
     assert solved_2_disk_game.moves_count == 3
+
+
+def test_initial_state_creation():
+    """Test that initial state is created correctly."""
+    assert create_hanoi_state(1) == [[1], [], []]
+    assert create_hanoi_state(2) == [[2, 1], [], []]
+    assert create_hanoi_state(3) == [[3, 2, 1], [], []]
+
+
+def test_dataset_conversation():
+    """Test that dataset conversation is created correctly."""
+    dataset = HanoiDataset(split="train")
+    assert dataset.conversation({"n_disks": 1}) == [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": "Initial state: [[1], [], []]"},
+    ]
+
+
+FAKE_RESULT = """
+<result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [4, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [3, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 1, 2], [1, 0, 2], [2, 0, 1], [1, 2, 1], [6, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 2, 1], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0]]</result>
+"""
+
+
+def test_extract_result_list():
+    """Test that result list is extracted correctly."""
+    assert hanoi_reward_func(FAKE_RESULT, {"n_disks": 3}) == -1
