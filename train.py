@@ -17,6 +17,7 @@ from minrl.tasks import TASK_DEFINITIONS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
 from minrl.tasks.dataset import MinRLDataset
+from vllm.envs import set_vllm_use_v1
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
@@ -48,6 +49,7 @@ class Trainer:
     def init_model(self):
         """Initialize the model and tokenizer."""
         vllm_device = self.device.type
+        set_vllm_use_v1(False)
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
             vllm_device = "cpu"

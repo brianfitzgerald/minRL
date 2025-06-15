@@ -128,6 +128,8 @@ def tokenize_hanoi_sample(
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt(sample["n_disks"])},
         ],
+        tokenize=False,
+        enable_thinking=False,
     )
     return {
         "prefix": prefix,
@@ -145,8 +147,12 @@ class HanoiDataset(MinRLDataset):
         self.tokenizer = tokenizer
 
     def __getitem__(self, _: int) -> HanoiSample:
-        n_disks = random.randint(1, 10)
+        n_disks = random.randint(1, 240)
         return {"n_disks": n_disks}
+
+    def __len__(self) -> int:
+        # mock value to satisfy dataloader
+        return 10**8
 
     def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
         """
