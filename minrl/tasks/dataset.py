@@ -41,3 +41,8 @@ class MinRLDataset(Dataset):
     @abstractmethod
     def collate_fn(self, batch: list[dict]) -> MiniBatch:
         pass
+
+    @abstractmethod
+    def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
+        """Conversation used to generate the prefix, or the prompt for evals."""
+        pass

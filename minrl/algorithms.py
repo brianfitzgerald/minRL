@@ -267,9 +267,8 @@ def update_policy(
         # scale by the mask, and normalize by token count
         objective = (objective * target_masks).sum() / n_target_tokens
         if apply_loss:
-            with torch.autograd.detect_anomaly():
-                loss = -objective
-                loss.backward()
+            loss = -objective
+            loss.backward()
 
     if apply_loss:
         # update the policy

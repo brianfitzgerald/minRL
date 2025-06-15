@@ -82,7 +82,7 @@ class ConnectionsEvalSample(TypedDict):
     answers: List[ConnectionsEvalAnswer]
 
 
-def _train_sample_to_conversation(sample: ConnectionsTrainSample) -> ConnectionsSample:
+def _map_train_sample(sample: ConnectionsTrainSample) -> ConnectionsSample:
     words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
@@ -98,7 +98,8 @@ def _train_sample_to_conversation(sample: ConnectionsTrainSample) -> Connections
     }
 
 
-def _eval_sample_to_conversation(sample: ConnectionsEvalSample) -> ConnectionsSample:
+def _map_eval_sample(sample: ConnectionsEvalSample) -> ConnectionsSample:
+    """Eval samples are from a different dataset, so we need to map them to the same format as train samples."""
     prompt = []
     answer_groups = []
     for answer in sample["answers"]:
@@ -109,29 +110,6 @@ def _eval_sample_to_conversation(sample: ConnectionsEvalSample) -> ConnectionsSa
         "prompt": ", ".join(prompt),
         "answer": f"<answer>{answer_formatted}</answer>",
         "answer_groups": answer_groups,
-    }
-
-
-def tokenize_connections_sample(
-    sample: ConnectionsSample, tokenizer: PreTrainedTokenizerBase
-) -> ConnectionsSampleTokenized:
-    prefix: str = tokenizer.apply_chat_template(  # type: ignore
-        [
-            {
-                "role": "system",
-                "content": CONNECTIONS_PROMPT,
-            },
-            {"role": "user", "content": sample["prompt"]},
-        ],
-        tokenize=False,
-        enable_thinking=False,
-    )
-    tokens = tokenizer.encode(prefix)
-    return {
-        "prefix": prefix,
-        "prefix_token_ids": tokens,
-        "answer": sample["answer"],
-        "answer_groups": sample["answer_groups"],
     }
 
 
@@ -176,10 +154,19 @@ class ConnectionsDataset(MinRLDataset):
     def __getitem__(self, idx: int) -> ConnectionsSample:
         item: Any = self.dataframe.iloc[idx].to_dict()
         if self.split == "eval":
-            sample = _eval_sample_to_conversation(item)
+            sample = _map_eval_sample(item)
         else:
-            sample = _train_sample_to_conversation(item)
+            sample = _map_train_sample(item)
         return sample
+
+    def conversation(self, sample: dict[str, Any]) -> List[dict[str, Any]]:
+        return [
+            {
+                "role": "system",
+                "content": CONNECTIONS_PROMPT,
+            },
+            {"role": "user", "content": sample["prompt"]},
+        ]
 
     def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
         """
@@ -188,15 +175,20 @@ class ConnectionsDataset(MinRLDataset):
         """
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
-        tokenized = [
-            tokenize_connections_sample(item, self.tokenizer) for item in batch
-        ]
-        prefixes = [item["prefix"] for item in tokenized]
-        prefix_token_ids = [item["prefix_token_ids"] for item in tokenized]
+        prefixes, prefix_token_ids = [], []
+        for sample in batch:
+            prefix: str = self.tokenizer.apply_chat_template(
+                self.conversation(sample),  # type: ignore
+                tokenize=False,
+                enable_thinking=False,
+            )  # type: ignore
+            tokens = self.tokenizer.encode(prefix)
+            prefixes.append(prefix)
+            prefix_token_ids.append(tokens)
         return MiniBatch(
             prefixes=prefixes,
             prefix_token_ids=prefix_token_ids,
-            samples=batch,  # type: ignore
+            samples=batch,
         )
 
 

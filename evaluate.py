@@ -12,10 +12,6 @@ from torch.utils.data import DataLoader
 from vllm import LLM, RequestOutput, SamplingParams
 
 from minrl.tasks import TASK_DEFINITIONS, TaskChoice
-from minrl.tasks.connections import (
-    CONNECTIONS_PROMPT,
-    ConnectionsSample,
-)
 from minrl.constants import QWEN_3_0_6B
 
 """
@@ -65,8 +61,8 @@ class OutRow(TypedDict):
 
 
 async def main(
-    task: TaskChoice = "connections",
-    model_name: ModelName = "qwen-grpo",
+    task: TaskChoice = "hanoi",
+    model_name: ModelName = "gemini-2.0-flash",
     batch_size: int = 8,
 ):
 
@@ -81,8 +77,8 @@ async def main(
 
     model = EVAL_MODELS[model_name]
     vllm_model: LLM | None = None
-    using_vllm = model["type"] == "finetuned"
-    if using_vllm:
+    model_type = model["type"]
+    if model_type == "finetuned":
         model_path = os.path.join(".", "checkpoints", model["model_id"])
         logger.info(f"Loading finetuned model from {model_path}")
         assert (
@@ -96,30 +92,28 @@ async def main(
             max_model_len=1024,
             enforce_eager=True,
         )
-    else:
+    elif model_type == "openai":
         openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    elif model_type == "openrouter":
+        openai_client = AsyncOpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url="https://openrouter.ai/api/v1",
+        )
+    else:
+        raise ValueError(f"Invalid model type: {model_type}")
 
     out_rows: list[OutRow] = []
 
     os.makedirs("eval_results", exist_ok=True)
 
     for batch in tqdm(loader):
-        batch: list[ConnectionsSample] = batch  # type: ignore
-        convs = []
+        conversations = []
         for sample in batch:
-            convs.append(
-                [
-                    {
-                        "role": "system",
-                        "content": CONNECTIONS_PROMPT,
-                    },
-                    {"role": "user", "content": sample["prompt"]},
-                ]
-            )
+            conversations.append(dataset.conversation(sample))
 
         if vllm_model is not None:
             sampling_params = SamplingParams(max_tokens=1024)
-            responses = vllm_model.chat(convs, sampling_params=sampling_params)
+            responses = vllm_model.chat(conversations, sampling_params=sampling_params)
         else:
             responses = await asyncio.gather(
                 *[
@@ -127,13 +121,13 @@ async def main(
                         model=model["model_id"],
                         messages=conv,
                     )
-                    for conv in convs
+                    for conv in conversations
                 ]
             )
 
         for sample, response in zip(batch, responses):
             response_content = ""
-            if using_vllm:
+            if model_type == "finetuned":
                 assert isinstance(response, RequestOutput)
                 response_content = response.outputs[0].text
             else:

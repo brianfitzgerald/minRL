@@ -154,6 +154,15 @@ class HanoiDataset(MinRLDataset):
         # mock value to satisfy dataloader
         return 10**8
 
+    def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            },
+            {"role": "user", "content": user_prompt(sample["n_disks"])},
+        ]
+
     def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
         """
         Collate examples into a batch.
@@ -172,5 +181,14 @@ class HanoiDataset(MinRLDataset):
 
 
 def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
-    # TODO: Implement reward function
-    return 1.0
+    game = TowerOfHanoi(sample["n_disks"])
+    for move in response.split("\n"):
+        if move == "":
+            continue  # skip empty lines
+        from_stack, to_stack = map(int, move.split(" "))
+        game.make_move(from_stack, to_stack)
+    if game.is_solved():
+        return 1.0
+    if game.moves_count > game.get_minimum_moves():
+        return -1.0
+    return 0.0
