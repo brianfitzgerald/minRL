@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from minrl.constants import TrainerConfig
-from train import Trainer
+from minrl.trainer import Trainer
 
 APP_NAME = "minRL"
 MODELS_FOLDER = "model-weights"
@@ -24,8 +24,8 @@ FLAVOR = "devel"  #  includes full CUDA toolkit
 OPERATING_SYS = "ubuntu22.04"
 TAG = f"{CUDA_VERSION}-{FLAVOR}-{OPERATING_SYS}"
 
-SMOLMODELS_IMAGE = (
-    Image.from_registry(f"nvidia/cuda:{TAG}", add_python="3.11")
+MODAL_IMAGE = (
+    Image.from_registry(f"nvidia/cuda:{TAG}", add_python="3.12")
     .pip_install("uv")
     .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
     .add_local_file("uv.lock", "/uv.lock", copy=True)
@@ -40,13 +40,14 @@ SMOLMODELS_IMAGE = (
     )
     .run_commands(
         [
-            "uv sync",
+            "uv sync --no-group training",
+            "uv sync --group training --no-build-isolation",
         ]
     )
     .add_local_python_source(
         "minrl",
     )
-    .add_local_file(".env", "/.env", copy=False)
+    .add_local_file(".env", "/.env")
 )
 
 
@@ -58,13 +59,13 @@ MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(MODELS_FOLDER, create_if_missing=T
 
 
 @app.function(
-    image=SMOLMODELS_IMAGE,
-    gpu="A100-80GB:2",
+    image=MODAL_IMAGE,
+    gpu="A100-40GB:1",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
 )
-def run():
+def training():
     config = TrainerConfig()
     trainer = Trainer(config)
     trainer.init_model()
