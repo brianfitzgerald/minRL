@@ -20,3 +20,8 @@ Logs:
 ```bash
 tensorboard --logdir runs
 ```
+
+Modal:
+```bash
+uv run modal run -d modal_train.py::run
+```

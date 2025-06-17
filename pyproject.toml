@@ -13,6 +13,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "jinja2>=3.1.6",
     "loguru>=0.7.3",
+    "modal>=1.0.4",
     "numpy>=2.2.5",
     "openai>=1.75.0",
     "pandas>=2.2.3",
