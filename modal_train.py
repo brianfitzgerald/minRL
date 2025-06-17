@@ -7,7 +7,7 @@ from minrl.constants import TrainerConfig
 from minrl.trainer import Trainer
 
 APP_NAME = "minRL"
-MODELS_FOLDER = "model-weights"
+MODELS_FOLDER = "minrl-models"
 MODELS_VOLUME_PATH = Path(f"/{MODELS_FOLDER}")
 DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
 
@@ -35,7 +35,6 @@ MODAL_IMAGE = (
         {
             "CUDA_HOME": "/usr/local/cuda",
             "HF_HOME": MODELS_VOLUME_PATH.as_posix(),
-            "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
     .run_commands(
