@@ -13,7 +13,7 @@ AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = SMOL_LM_360M
+    model_id: str = QWEN_3_1_7_B
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024

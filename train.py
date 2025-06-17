@@ -33,7 +33,7 @@ def get_available_device() -> str:
 
 
 def simple_timestamp() -> str:
-    return time.strftime("%Y%m%d_%H%M%S")
+    return time.strftime("%m%d_%H%M%S")
 
 
 class Trainer:
@@ -107,7 +107,7 @@ class Trainer:
         self.start_time = time.time()
         self.ckpt_dir = Path("checkpoints")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
-        self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{simple_timestamp()}"
+        self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
         self.tb_writer = SummaryWriter(f"runs/{self.run_name}")
 
     def train(self) -> None:
