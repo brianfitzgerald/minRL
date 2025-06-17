@@ -5,6 +5,7 @@ from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
 from loguru import logger
 import re
 import ast
+import numpy as np
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -114,6 +115,18 @@ def create_hanoi_state(n: int) -> list[list[int]]:
     ]
 
 
+def make_distributions(n: int) -> tuple[list[float], list[float]]:
+    x = np.linspace(0, 1, n)
+    w1 = 1 - x
+    w2 = x
+    return (w1 / w1.sum()).tolist(), (w2 / w2.sum()).tolist()
+
+
+def blend(w1: list[float], w2: list[float], alpha: float) -> list[float]:
+    arr = (1 - alpha) * np.array(w1) + alpha * np.array(w2)
+    return (arr / arr.sum()).tolist()
+
+
 class HanoiDataset(MinRLDataset):
     def __init__(
         self,
@@ -122,19 +135,20 @@ class HanoiDataset(MinRLDataset):
     ):
         super().__init__(split, tokenizer)
         self.tokenizer = tokenizer
+        self.n_samples = 10**3
+        self.seed = 42
+        random.seed(self.seed)
 
-    def __getitem__(self, _: int) -> HanoiSample:
-        # TODO should use 240 total
-        n_disks = random.choices(
-            range(1, 10),
-            k=1,
-            weights=[2, 2, 2, 2, 2, 1, 1, 1, 1],
-        )[0]
+    def __getitem__(self, i: int) -> HanoiSample:
+        w1, w2 = make_distributions(9)
+        w = blend(w1, w2, i / self.n_samples)
+        n_disks = random.choices(range(1, 10), k=1, weights=w)[0]
         return {"n_disks": n_disks}
 
     def __len__(self) -> int:
         # mock value to satisfy dataloader
-        return 10**6
+        # 10k samples
+        return self.n_samples
 
     def conversation(self, sample: HanoiSample) -> list[dict[str, Any]]:
         return [
@@ -184,13 +198,25 @@ def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
     try:
         game = TowerOfHanoi(sample["n_disks"])
         moves = extract_result_list(response)
-        for move in moves:
+        n_valid_moves, required_moves, solved = 0, game.get_minimum_moves(), False
+        for i, move in enumerate(moves):
             from_stack, to_stack = move[1], move[2]
-            game.make_move(from_stack, to_stack)
-        if game.is_solved():
+            valid = game.make_move(from_stack, to_stack)
+            if valid:
+                n_valid_moves += 1
+            if not valid:
+                break
+            if game.is_solved():
+                solved = True
+                break
+            if i > required_moves:
+                return -1.0
+        if not solved and n_valid_moves > 0:
+            return round(n_valid_moves / required_moves, 2)
+        if solved:
             return 1.0
-        if game.moves_count > game.get_minimum_moves():
-            return -1.0
+        else:
+            return 0.0
     except Exception as e:
         logger.error(f"Error in hanoi_reward_func: {e}")
         return -1.0

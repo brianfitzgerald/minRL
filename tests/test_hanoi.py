@@ -9,7 +9,7 @@ from minrl.tasks.hanoi import (
 )
 
 
-class TestTowerOfHanoi:
+class TestTowerOfHanoiGame:
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -232,11 +232,28 @@ def test_dataset_conversation():
     ]
 
 
-FAKE_RESULT = """
+MOCK_RESULT_TEXT = """
 <result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [4, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [3, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 1, 2], [1, 0, 2], [2, 0, 1], [1, 2, 1], [6, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 2, 1], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0]]</result>
 """
 
 
 def test_extract_result_list():
     """Test that result list is extracted correctly."""
-    assert hanoi_reward_func(FAKE_RESULT, {"n_disks": 3}) == -1
+    assert hanoi_reward_func(MOCK_RESULT_TEXT, {"n_disks": 3}) == -1
+
+
+MOCK_PARTIAL_RESULT_TEXT = """
+<result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2]]</result>
+"""
+
+
+def test_partial_result_text():
+    """Test that partial result returns partial reward."""
+    assert hanoi_reward_func(MOCK_PARTIAL_RESULT_TEXT, {"n_disks": 3}) == 0.57
+
+
+def test_dataset_getitem():
+    """Test that dataset getitem is working."""
+    dataset = HanoiDataset(split="train")
+    assert len(dataset) == 10**3
+    assert dataset[0]["n_disks"] == 4
