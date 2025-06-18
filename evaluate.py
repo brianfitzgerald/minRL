@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Any, Literal, NotRequired, TypedDict, cast
 from tqdm import tqdm
@@ -72,11 +73,11 @@ class OutRow(TypedDict):
 async def main(
     task: TaskChoice = "hanoi",
     model_name: ModelName = "gemini_2_flash",
-    batch_size: int = 8,
+    batch_size: int = 128,
 ):
     task_definition = TASK_DEFINITIONS[task]
     dataset, reward_function = (
-        task_definition["dataset"]("eval"),
+        task_definition["dataset"]("eval", host="local"),
         task_definition["reward_function"],
     )
     loader = DataLoader(
@@ -161,6 +162,4 @@ async def main(
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(fire.Fire(main))
+    fire.Fire(main)

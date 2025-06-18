@@ -15,5 +15,12 @@
             "program": "evaluate.py",
             "console": "integratedTerminal"
         },
+        {
+            "name": "Visualize Results",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "visualize_results.py",
+            "console": "integratedTerminal"
+        }
     ]
 }

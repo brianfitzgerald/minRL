@@ -140,10 +140,14 @@ class HanoiDataset(MinRLDataset):
         self.n_samples = 10**3
         self.seed = 42
         random.seed(self.seed)
+        self.interpolate_weights = False
 
     def __getitem__(self, i: int) -> HanoiSample:
-        w1, w2 = make_distributions(9)
-        w = blend(w1, w2, i / self.n_samples)
+        if self.interpolate_weights:
+            w1, w2 = make_distributions(9)
+            w = blend(w1, w2, i / self.n_samples)
+        else:
+            w = [1.0] * 9
         n_disks = random.choices(range(1, 10), k=1, weights=w)[0]
         return {"n_disks": n_disks}
 
@@ -221,5 +225,5 @@ def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
             return 0.0
     except Exception as e:
         logger.error(f"Error in hanoi_reward_func: {e}")
-        return -1.0
+        return 0.0
     return 0.0

@@ -21,14 +21,14 @@ class TrainerConfig(BaseModel):
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024
-    micro_batch_size: int = 8
+    micro_batch_size: int = 32
     max_grad_norm: float = 0.01
-    ckpt_save_interval: int = 250
+    ckpt_save_interval: int = 500
     lr: float = 1e-5
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "connections"
+    task: TaskChoice = "hanoi"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     logger_choice: LoggerChoice = "wandb"

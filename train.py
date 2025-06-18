@@ -1,5 +1,4 @@
 import fire
-from minrl.constants import TrainerConfig
 from minrl.trainer import Trainer
 
 
@@ -9,8 +8,7 @@ def main() -> None:
     Args:
         model_id: The HuggingFace model ID to use for training
     """
-    config = TrainerConfig()
-    trainer = Trainer(config)
+    trainer = Trainer("local")
     trainer.init_model()
     trainer.init_training()
     trainer.train()
