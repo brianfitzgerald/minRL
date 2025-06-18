@@ -26,7 +26,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -47,7 +49,7 @@ class Trainer:
         """Initialize the trainer with configuration."""
         self.config = TrainerConfig()
         self.device = torch.device(get_available_device())
-        self.host_type = host_type
+        self.host_type: HostType = host_type
         self.dtype = torch.bfloat16
 
     def init_model(self):
@@ -86,8 +88,12 @@ class Trainer:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
         dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]["dataset"]
-        self.train_dataset = dataset_cls(split="train", tokenizer=self.tokenizer)
-        self.eval_dataset = dataset_cls(split="eval", tokenizer=self.tokenizer)
+        self.train_dataset = dataset_cls(
+            split="train", host=self.host_type, tokenizer=self.tokenizer
+        )
+        self.eval_dataset = dataset_cls(
+            split="eval", host=self.host_type, tokenizer=self.tokenizer
+        )
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
             self.train_dataset,

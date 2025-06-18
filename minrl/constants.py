@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import Literal
-from minrl.tasks import TaskChoice
 
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
@@ -14,13 +13,15 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
 
+TaskChoice = Literal["connections", "hanoi"]
+
 
 class TrainerConfig(BaseModel):
-    model_id: str = QWEN_3_0_6B
+    model_id: str = QWEN_3_1_7_B
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024
-    micro_batch_size: int = 2
+    micro_batch_size: int = 8
     max_grad_norm: float = 0.01
     ckpt_save_interval: int = 250
     lr: float = 1e-5

@@ -6,6 +6,7 @@ from loguru import logger
 import re
 import ast
 import numpy as np
+from minrl.constants import HostType
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -131,9 +132,10 @@ class HanoiDataset(MinRLDataset):
     def __init__(
         self,
         split: Split,
+        host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
-        super().__init__(split, tokenizer)
+        super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
         self.n_samples = 10**3
         self.seed = 42

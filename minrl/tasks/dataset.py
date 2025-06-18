@@ -5,6 +5,8 @@ from typing import Any, Literal
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
+from minrl.constants import HostType
+
 
 Split = Literal["train", "test", "eval"]
 
@@ -34,9 +36,15 @@ class MiniBatch:
 
 
 class MinRLDataset(Dataset):
-    def __init__(self, split: Split, tokenizer: PreTrainedTokenizerBase | None = None):
+    def __init__(
+        self,
+        split: Split,
+        host: HostType,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+    ):
         self.split = split
         self.tokenizer = tokenizer
+        self.host = host
 
     @abstractmethod
     def collate_fn(self, batch: list[dict]) -> MiniBatch:

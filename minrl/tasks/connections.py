@@ -1,5 +1,6 @@
 import itertools
 import re
+import os
 from typing import Any, Dict, List, TypedDict
 
 import pandas as pd
@@ -7,6 +8,7 @@ from loguru import logger
 from sklearn.model_selection import train_test_split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+from minrl.constants import HostType
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -117,11 +119,18 @@ class ConnectionsDataset(MinRLDataset):
     def __init__(
         self,
         split: Split,
+        host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
-        super().__init__(split, tokenizer)
+        super().__init__(split, host, tokenizer)
         if split in ("train", "test"):
-            prompts_pd = pd.read_json(f"data/{split}_prompts.jsonl", lines=True)
+            dataset_path = (
+                f"/data/{split}_prompts.jsonl"
+                if host == "modal"
+                else f"data/{split}_prompts.jsonl"
+            )
+            logger.info(f"Loading dataset from {dataset_path}")
+            prompts_pd = pd.read_json(dataset_path, lines=True)
             df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
             self.tokenizer = tokenizer
             num_samples = 1000
@@ -146,7 +155,12 @@ class ConnectionsDataset(MinRLDataset):
 
             self.dataframe = train_data if split == "train" else val_data
         elif split == "eval":
-            self.dataframe = pd.read_json("data/eval_prompts.json")
+            eval_path = (
+                "/data/eval_prompts.json"
+                if host == "modal"
+                else "data/eval_prompts.json"
+            )
+            self.dataframe = pd.read_json(eval_path)
 
     def __len__(self):
         return len(self.dataframe)

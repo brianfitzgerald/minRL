@@ -1,4 +1,4 @@
-from modal import Image, App, Secret
+from modal import Image, App
 import modal
 import os
 from pathlib import Path
@@ -10,12 +10,7 @@ MODELS_FOLDER = "minrl-models"
 MODELS_VOLUME_PATH = Path(f"/{MODELS_FOLDER}")
 DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
 
-app = App(
-    APP_NAME,
-    secrets=[
-        Secret.from_dict({"ALLOW_WANDB": os.environ.get("ALLOW_WANDB", "false")}),
-    ],
-)
+app = App(APP_NAME)
 
 
 CUDA_VERSION = "12.4.0"  # should be no greater than host CUDA version
@@ -47,6 +42,7 @@ MODAL_IMAGE = (
         "minrl",
     )
     .add_local_file(".env", "/.env")
+    .add_local_dir("data", "/data")
 )
 
 
@@ -62,7 +58,6 @@ MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(MODELS_FOLDER, create_if_missing=T
     gpu="A100-40GB:1",
     secrets=[
         modal.Secret.from_name("smolmodels"),
-        modal.Secret.from_name("wandb"),
     ],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),

@@ -1,13 +1,12 @@
+from minrl.constants import TaskChoice
 from minrl.tasks.connections import (
     ConnectionsDataset,
     connections_reward_func,
 )
-from typing import Literal, TypedDict, Protocol, Any
+from typing import TypedDict, Protocol, Any
 
 from minrl.tasks.dataset import MinRLDataset
 from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func
-
-TaskChoice = Literal["connections", "hanoi"]
 
 
 class RewardFunction(Protocol):
