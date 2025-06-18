@@ -10,6 +10,9 @@ SMOL_LM_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
 AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
+LoggerChoice = Literal["tensorboard", "wandb"]
+
+HostType = Literal["modal", "local"]
 
 
 class TrainerConfig(BaseModel):
@@ -24,7 +27,10 @@ class TrainerConfig(BaseModel):
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "hanoi"
+    task: TaskChoice = "connections"
+    wandb_project: str = "minrl"
+    wandb_entity: str | None = None
+    logger_choice: LoggerChoice = "wandb"
 
     @property
     def model_display_name(self) -> str:

@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, cast, TYPE_CHECKING
 from vllm import LLM
 
 import torch
@@ -11,12 +11,15 @@ from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.constants import TrainerConfig
+from minrl.constants import LoggerChoice, HostType, TrainerConfig
+from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DEFINITIONS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
 from minrl.tasks.dataset import MinRLDataset
 from vllm.envs import set_vllm_use_v1
+
+import wandb
 
 
 def get_available_device() -> str:
@@ -40,10 +43,11 @@ class Trainer:
     tokenizer: PreTrainedTokenizerBase | None = None
     model: AutoModelForCausalLM | None = None
 
-    def __init__(self, config: Optional[TrainerConfig] = None) -> None:
+    def __init__(self, host_type: HostType) -> None:
         """Initialize the trainer with configuration."""
-        self.config = config or TrainerConfig()
+        self.config = TrainerConfig()
         self.device = torch.device(get_available_device())
+        self.host_type = host_type
         self.dtype = torch.bfloat16
 
     def init_model(self):
@@ -108,7 +112,11 @@ class Trainer:
         self.ckpt_dir = Path("checkpoints")
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        self.tb_writer = SummaryWriter(f"runs/{self.run_name}")
+        logger_choice: LoggerChoice = (
+            "wandb" if self.host_type == "modal" else self.config.logger_choice
+        )
+        logger.info(f"Logging to: {logger_choice}")
+        self.metrics_wrapper = MetricsWrapper(logger_choice, self.run_name)
 
     def train(self) -> None:
         """Run the main training loop.
@@ -118,7 +126,7 @@ class Trainer:
             2. Updates policy using GRPO
             3. Evaluates model periodically
             4. Saves checkpoints periodically
-            5. Logs metrics to TensorBoard
+            5. Logs metrics to TensorBoard or Weights & Biases
         """
 
         for step, batch in enumerate(self.train_dataloader, start=1):
@@ -155,16 +163,22 @@ class Trainer:
                 torch.cuda.synchronize()
             if step % self.config.eval_interval == 0:
                 eval_success_rate = self.evaluate()
-                print(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
-                self.tb_writer.add_scalar("success_rate/eval", eval_success_rate, step)
+                logger.info(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
+                self.metrics_wrapper.add_scalar(
+                    "success_rate/eval", eval_success_rate, step
+                )
 
-            compute_metrics(episodes, results, self.tb_writer, step, self.optimizer)
+            compute_metrics(
+                episodes, results, self.metrics_wrapper, step, self.optimizer
+            )
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
                 logger.info(f"Saving checkpoint for step {step}")
                 output_file = self.ckpt_dir / f"{self.run_name}_step_{step:06d}"
                 self.model.save_pretrained(output_file)  # type: ignore
                 logger.info(f"Saved checkpoint to {output_file}")
+
+        self.metrics_wrapper.close()
 
     def evaluate(self) -> float:
         """Evaluate the current model.

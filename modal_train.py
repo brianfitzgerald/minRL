@@ -3,7 +3,6 @@ import modal
 import os
 from pathlib import Path
 
-from minrl.constants import TrainerConfig
 from minrl.trainer import Trainer
 
 APP_NAME = "minRL"
@@ -35,6 +34,7 @@ MODAL_IMAGE = (
         {
             "CUDA_HOME": "/usr/local/cuda",
             "HF_HOME": MODELS_VOLUME_PATH.as_posix(),
+            "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
     .run_commands(
@@ -60,13 +60,15 @@ MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(MODELS_FOLDER, create_if_missing=T
 @app.function(
     image=MODAL_IMAGE,
     gpu="A100-40GB:1",
-    secrets=[modal.Secret.from_name("smolmodels")],
+    secrets=[
+        modal.Secret.from_name("smolmodels"),
+        modal.Secret.from_name("wandb"),
+    ],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
 )
 def training():
-    config = TrainerConfig()
-    trainer = Trainer(config)
+    trainer = Trainer("modal")
     trainer.init_model()
     trainer.init_training()
     trainer.train()

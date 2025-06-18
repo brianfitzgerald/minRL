@@ -10,7 +10,6 @@ from minrl.tasks.hanoi import (
 
 
 class TestTowerOfHanoiGame:
-
     def setup_method(self):
         """Set up test fixtures."""
         self.game = TowerOfHanoi(3)
@@ -140,9 +139,9 @@ class TestTowerOfHanoiGame:
         ]
 
         for i, (from_stack, to_stack) in enumerate(moves):
-            assert self.game.make_move(
-                from_stack, to_stack
-            ), f"Move {i+1} failed: {from_stack} -> {to_stack}"
+            assert self.game.make_move(from_stack, to_stack), (
+                f"Move {i + 1} failed: {from_stack} -> {to_stack}"
+            )
 
         assert self.game.is_solved()
         assert self.game.moves_count == 7

@@ -14,3 +14,4 @@ runs/
 
 checkpoints/
 eval_results/
+wandb/

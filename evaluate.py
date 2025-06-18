@@ -74,7 +74,6 @@ async def main(
     model_name: ModelName = "gemini_2_flash",
     batch_size: int = 8,
 ):
-
     task_definition = TASK_DEFINITIONS[task]
     dataset, reward_function = (
         task_definition["dataset"]("eval"),
@@ -90,9 +89,9 @@ async def main(
     if model_type == "finetuned":
         model_path = os.path.join(".", "checkpoints", model["model_id"])
         logger.info(f"Loading finetuned model from {model_path}")
-        assert (
-            "base_model_id" in model
-        ), "Base model ID is required for finetuned models"
+        assert "base_model_id" in model, (
+            "Base model ID is required for finetuned models"
+        )
         vllm_model = LLM(
             model=model_path,
             tokenizer=model["base_model_id"],

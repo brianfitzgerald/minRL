@@ -3,10 +3,6 @@ import gc
 from collections import defaultdict
 from pydoc import html
 from typing import Dict, List
-from tensorboardX import SummaryWriter
-from vllm.sampling_params import (
-    SamplingParams,
-)
 
 import numpy as np
 import torch
@@ -14,12 +10,16 @@ import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from vllm import LLM
+from vllm.sampling_params import (
+    SamplingParams,
+)
 from vllm.worker.model_runner_base import ModelRunnerBase
 
+from minrl.constants import AlgorithmChoice, TrainerConfig
 from minrl.tasks import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
-from minrl.constants import AlgorithmChoice, TrainerConfig
-from vllm import LLM
+from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -303,18 +303,14 @@ def update_policy(
 def compute_metrics(
     episodes: List[Episode],
     results: Dict[str, float],
-    tb_writer: SummaryWriter,
+    metrics_wrapper: MetricsWrapper,
     step: int,
     optimizer: torch.optim.Optimizer,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
-    # formatted_reward = [episode.reward_info["format_reward"] for episode in episodes]
-    # answer_reward = [episode.reward_info["answer_reward"] for episode in episodes]
     num_finished_episodes = sum(episode.is_finished for episode in episodes)
     mean_reward = float(np.mean(reward))
     std_reward = float(np.std(reward))
-    # success_rate = float(np.mean(answer_reward))
-    # format_reward = float(np.mean(formatted_reward))
     grad_norm = results["grad_norm"]
     entropy = results["entropy"]
     lr = optimizer.param_groups[0]["lr"]
@@ -323,18 +319,17 @@ def compute_metrics(
         np.mean([len(episode.generated_token_ids) for episode in episodes])
     )
 
-    tb_writer.add_scalar("loss", loss, step)
-    tb_writer.add_scalar("mean_reward", mean_reward, step)
-    tb_writer.add_scalar("std_reward", std_reward, step)
-    tb_writer.add_scalar("grad_norm", grad_norm, step)
-    tb_writer.add_scalar("num_finished_episodes", num_finished_episodes, step)
-    tb_writer.add_scalar("learning_rate", lr, step)
-    tb_writer.add_scalar("mean_response_len", mean_response_len, step)
-    tb_writer.add_scalar("entropy", entropy, step)
+    metrics_wrapper.add_scalar("loss", loss, step)
+    metrics_wrapper.add_scalar("mean_reward", mean_reward, step)
+    metrics_wrapper.add_scalar("std_reward", std_reward, step)
+    metrics_wrapper.add_scalar("grad_norm", grad_norm, step)
+    metrics_wrapper.add_scalar("num_finished_episodes", num_finished_episodes, step)
+    metrics_wrapper.add_scalar("learning_rate", lr, step)
+    metrics_wrapper.add_scalar("mean_response_len", mean_response_len, step)
+    metrics_wrapper.add_scalar("entropy", entropy, step)
     for i, episode in enumerate(episodes):
-        # TensorBoard treats text as markdown.
         text = html.escape(episode.text)
-        tb_writer.add_text(f"text_{i}", f"<pre>{text}</pre>", step)
+        metrics_wrapper.add_text(f"sample_{i}", text, step)
 
     log_dict = {
         "mean_reward": mean_reward,
@@ -346,5 +341,5 @@ def compute_metrics(
         "mean_response_len": mean_response_len,
         "num_finished_episodes": float(num_finished_episodes),
     }
-    logger.info(log_dict)
+    logger.info(f"Metrics: {log_dict}")
     return log_dict
