@@ -37,6 +37,7 @@ ModelName = Literal[
     "qwen_grpo",
     "qwen_reinforce",
     "magistral_medium",
+    "gpt_4o",
 ]
 
 EVAL_MODELS: dict[ModelName, EvalModel] = {
@@ -45,6 +46,7 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
         "model_id": "google/gemini-2.0-flash-001",
     },
     "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
+    "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},
     "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
     "qwen_grpo": {
         "type": "finetuned",
@@ -71,9 +73,9 @@ class OutRow(TypedDict):
 
 
 async def main(
-    task: TaskChoice = "hanoi",
+    task: TaskChoice = "connections",
     model_name: ModelName = "gemini_2_flash",
-    batch_size: int = 128,
+    batch_size: int = 32,
 ):
     task_definition = TASK_DEFINITIONS[task]
     dataset, reward_function = (
@@ -84,15 +86,17 @@ async def main(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
 
+    if model_name not in EVAL_MODELS:
+        raise ValueError(f"Invalid model name: {model_name}")
     model = EVAL_MODELS[model_name]
     vllm_model: LLM | None = None
     model_type = model["type"]
     if model_type == "finetuned":
         model_path = os.path.join(".", "checkpoints", model["model_id"])
         logger.info(f"Loading finetuned model from {model_path}")
-        assert "base_model_id" in model, (
-            "Base model ID is required for finetuned models"
-        )
+        assert (
+            "base_model_id" in model
+        ), "Base model ID is required for finetuned models"
         vllm_model = LLM(
             model=model_path,
             tokenizer=model["base_model_id"],

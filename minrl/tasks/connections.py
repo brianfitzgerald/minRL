@@ -1,6 +1,5 @@
 import itertools
 import re
-import os
 from typing import Any, Dict, List, TypedDict
 
 import pandas as pd
@@ -292,5 +291,4 @@ def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
     groups = parse_groups(response)
     hard_score = score_connections_hard(sample["answer_groups"], groups)
     soft_score = score_connections_soft(sample["answer_groups"], groups)
-    logger.info(f"Hard reward: {hard_score}, Soft reward: {soft_score}")
     return hard_score + soft_score
