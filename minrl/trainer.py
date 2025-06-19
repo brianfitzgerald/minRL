@@ -1,12 +1,11 @@
 import time
 from pathlib import Path
-from typing import Any, Optional, cast, TYPE_CHECKING
+from typing import Any, cast
 from vllm import LLM
 
 import torch
 import torch.nn as nn
 from loguru import logger
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
@@ -26,9 +25,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -115,8 +112,7 @@ class Trainer:
                 eps=1e-8,
             )
         self.start_time = time.time()
-        self.ckpt_dir = Path("checkpoints")
-        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
         logger_choice: LoggerChoice = (
             "wandb" if self.host_type == "modal" else self.config.logger_choice
@@ -180,7 +176,7 @@ class Trainer:
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
                 logger.info(f"Saving checkpoint for step {step}")
-                output_file = self.ckpt_dir / f"{self.run_name}_step_{step:06d}"
+                output_file = self.checkpoint_dir / f"{self.run_name}_step_{step:06d}"
                 self.model.save_pretrained(output_file)  # type: ignore
                 logger.info(f"Saved checkpoint to {output_file}")
 
@@ -194,3 +190,9 @@ class Trainer:
         """
         # TODO: Implement evaluation logic
         return 0.0
+
+    @property
+    def checkpoint_dir(self) -> Path:
+        if self.host_type == "modal":
+            return Path("/minrl-models/checkpoints")
+        return Path("checkpoints")
