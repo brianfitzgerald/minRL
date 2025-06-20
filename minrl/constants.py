@@ -21,8 +21,8 @@ class TrainerConfig(BaseModel):
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024
-    micro_batch_size: int = 2
-    max_grad_norm: float = 0.01
+    micro_batch_size: int = 32
+    max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
     lr: float = 1e-5
     skip_unfinished_episodes: bool = True

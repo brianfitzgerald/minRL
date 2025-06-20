@@ -1,6 +1,7 @@
 import itertools
 import re
 from typing import Any, Dict, List, TypedDict
+import math
 
 import pandas as pd
 from loguru import logger
@@ -286,4 +287,7 @@ def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
     groups = parse_groups(response)
     hard_score = score_connections_hard(sample["answer_groups"], groups)
     soft_score = score_connections_soft(sample["answer_groups"], groups)
-    return hard_score + soft_score
+    score = (hard_score + soft_score) / 2
+    if math.isnan(score):
+        return 0.0
+    return score
