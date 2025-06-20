@@ -48,6 +48,7 @@ def logprob_dict_to_logprobs(
 
 @torch.no_grad()
 def rollout(
+    config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
     batch: MiniBatch,
     max_new_tokens: int,
@@ -71,7 +72,10 @@ def rollout(
     ]
 
     outputs = vllm_model.generate(
-        prefixes_batch, sampling_params=SamplingParams(max_tokens=max_new_tokens)
+        prefixes_batch,
+        sampling_params=SamplingParams(
+            max_tokens=max_new_tokens, temperature=config.temperature
+        ),
     )
     # Clear CUDA cache
     gc.collect()
@@ -235,6 +239,9 @@ def update_policy(
         input_token_ids = batch_token_ids_tensor[:, :-1]
         target_token_ids = batch_token_ids_tensor[:, 1:]
         target_masks = batch_masks_t[:, 1:]
+        # Often OOMs here, so clear cache
+        gc.collect()
+        torch.cuda.empty_cache()
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
 

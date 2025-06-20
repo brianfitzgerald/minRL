@@ -21,17 +21,18 @@ class TrainerConfig(BaseModel):
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024
-    micro_batch_size: int = 32
+    micro_batch_size: int = 16
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
-    lr: float = 1e-5
-    skip_unfinished_episodes: bool = True
+    lr: float = 5e-6
+    skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "connections"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     logger_choice: LoggerChoice = "wandb"
+    temperature: float = 1.2
 
     @property
     def model_display_name(self) -> str:

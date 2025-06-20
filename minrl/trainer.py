@@ -138,6 +138,7 @@ class Trainer:
             assert self.tokenizer is not None
 
             episodes = rollout(
+                config=self.config,
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
