@@ -83,7 +83,7 @@ class ConnectionsEvalSample(TypedDict):
     answers: List[ConnectionsEvalAnswer]
 
 
-def _map_train_sample(sample: ConnectionsTrainSample) -> ConnectionsSample:
+def _map_generated_sample(sample: ConnectionsTrainSample) -> ConnectionsSample:
     words = sample["words"]
     words_formatted = ", ".join(words)
     answer = []
@@ -99,7 +99,7 @@ def _map_train_sample(sample: ConnectionsTrainSample) -> ConnectionsSample:
     }
 
 
-def _map_eval_sample(sample: ConnectionsEvalSample) -> ConnectionsSample:
+def _map_canonical_sample(sample: ConnectionsEvalSample) -> ConnectionsSample:
     """Eval samples are from a different dataset, so we need to map them to the same format as train samples."""
     prompt = []
     answer_groups = []
@@ -122,55 +122,47 @@ class ConnectionsDataset(MinRLDataset):
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
         super().__init__(split, host, tokenizer)
-        if split in ("train", "test"):
-            dataset_path = (
-                f"/data/{split}_prompts.jsonl"
-                if host == "modal"
-                else f"data/{split}_prompts.jsonl"
-            )
-            logger.info(f"Loading dataset from {dataset_path}")
-            prompts_pd = pd.read_json(dataset_path, lines=True)
-            df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
-            self.tokenizer = tokenizer
-            num_samples = 1000
+        dataset_path = (
+            f"/data/{split}_prompts.jsonl"
+            if host == "modal"
+            else f"data/{split}_prompts.jsonl"
+        )
+        logger.info(f"Loading dataset from {dataset_path}")
+        prompts_pd = pd.read_json(dataset_path, lines=True)
+        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
+        self.tokenizer = tokenizer
+        num_samples = 10000
 
-            logger.info(f"Generating {num_samples} samples")
+        logger.info(f"Generating {num_samples} samples")
 
-            groups = [
-                {
-                    "groups": (
-                        g := df_groups.sample(4, replace=False).reset_index(drop=True)
-                    ).to_dict(orient="records"),
-                    "words": list(itertools.chain.from_iterable(g["words"].dropna())),
-                }
-                for _ in range(num_samples)
-            ]
+        groups = [
+            {
+                "groups": (
+                    g := df_groups.sample(4, replace=False).reset_index(drop=True)
+                ).to_dict(orient="records"),
+                "words": list(itertools.chain.from_iterable(g["words"].dropna())),
+            }
+            for _ in range(num_samples)
+        ]
 
-            groups_pd = pd.DataFrame(groups)
-            train_data, val_data = train_test_split(
-                groups_pd, test_size=0.1, random_state=42
-            )
-            logger.info("Splitting into train and val sets")
-
-            self.dataframe = train_data if split == "train" else val_data
-        elif split == "eval":
-            eval_path = (
-                "/data/eval_prompts.json"
-                if host == "modal"
-                else "data/eval_prompts.json"
-            )
-            self.dataframe = pd.read_json(eval_path)
+        samples_generated = pd.DataFrame(groups)
+        samples_generated = samples_generated.apply(_map_generated_sample, axis=1)
+        canonical_path = (
+            "/data/eval_prompts.json" if host == "modal" else "data/eval_prompts.json"
+        )
+        samples_canonical = pd.read_json(canonical_path)
+        samples_canonical = samples_canonical.apply(_map_canonical_sample, axis=1)
+        train_data, val_data = train_test_split(
+            samples_generated, test_size=0.1, random_state=42
+        )
+        self.dataframe: pd.DataFrame = train_data if split == "train" else val_data
 
     def __len__(self):
         return len(self.dataframe)
 
-    def __getitem__(self, idx: int) -> ConnectionsSample:
-        item: Any = self.dataframe.iloc[idx].to_dict()
-        if self.split == "eval":
-            sample = _map_eval_sample(item)
-        else:
-            sample = _map_train_sample(item)
-        return sample
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        item = self.dataframe.iloc[idx].to_dict()
+        return item
 
     def conversation(self, sample: dict[str, Any]) -> List[dict[str, Any]]:
         return [

@@ -17,11 +17,11 @@ TaskChoice = Literal["connections", "hanoi"]
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = QWEN_3_0_6B
+    model_id: str = SMOL_LM_360M
     eval_interval: int = 100
     num_answers_per_question: int = 4
     max_new_tokens: int = 1024
-    micro_batch_size: int = 64
+    micro_batch_size: int = 2
     max_grad_norm: float = 0.01
     ckpt_save_interval: int = 500
     lr: float = 1e-5

@@ -18,14 +18,14 @@ from minrl.algorithms import compute_metrics, rollout, update_policy
 from minrl.tasks.dataset import MinRLDataset
 from vllm.envs import set_vllm_use_v1
 
-import wandb
-
 
 def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 

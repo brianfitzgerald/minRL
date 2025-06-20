@@ -1557,7 +1557,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 training = [
     { name = "flash-attn", marker = "sys_platform == 'linux'" },
-    { name = "vllm", specifier = ">=0.8.5" },
+    { name = "vllm", specifier = ">=0.8.4" },
 ]
 
 [[package]]
