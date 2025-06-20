@@ -122,13 +122,13 @@ class ConnectionsDataset(MinRLDataset):
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
         super().__init__(split, host, tokenizer)
-        dataset_path = (
-            f"/data/{split}_prompts.jsonl"
+        generated_prompts_path = (
+            "/data/connections_generated.jsonl"
             if host == "modal"
-            else f"data/{split}_prompts.jsonl"
+            else "data/connections_generated.jsonl"
         )
-        logger.info(f"Loading dataset from {dataset_path}")
-        prompts_pd = pd.read_json(dataset_path, lines=True)
+        logger.info(f"Loading generated prompts from {generated_prompts_path}")
+        prompts_pd = pd.read_json(generated_prompts_path, lines=True)
         df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
         self.tokenizer = tokenizer
         num_samples = 10000
@@ -147,10 +147,13 @@ class ConnectionsDataset(MinRLDataset):
 
         samples_generated = pd.DataFrame(groups)
         samples_generated = samples_generated.apply(_map_generated_sample, axis=1)
-        canonical_path = (
-            "/data/eval_prompts.json" if host == "modal" else "data/eval_prompts.json"
+        canonical_prompts_path = (
+            "/data/connections_canonical.json"
+            if host == "modal"
+            else "data/connections_canonical.json"
         )
-        samples_canonical = pd.read_json(canonical_path)
+        logger.info(f"Loading canonical prompts from {canonical_prompts_path}")
+        samples_canonical = pd.read_json(canonical_prompts_path)
         samples_canonical = samples_canonical.apply(_map_canonical_sample, axis=1)
         train_data, val_data = train_test_split(
             samples_generated, test_size=0.1, random_state=42
@@ -161,8 +164,8 @@ class ConnectionsDataset(MinRLDataset):
         return len(self.dataframe)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        item = self.dataframe.iloc[idx].to_dict()
-        return item
+        item = self.dataframe.iloc[idx]
+        return item  # type: ignore
 
     def conversation(self, sample: dict[str, Any]) -> List[dict[str, Any]]:
         return [
