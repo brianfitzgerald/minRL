@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Literal
 
+MODAL_MODELS_VOLUME_NAME = "minrl-models"
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"

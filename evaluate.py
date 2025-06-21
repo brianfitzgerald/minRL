@@ -11,9 +11,12 @@ from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from torch.utils.data import DataLoader
 from vllm import LLM, RequestOutput, SamplingParams
+import modal
+from modal.volume import FileEntryType
+from pathlib import Path
 
 from minrl.tasks import TASK_DEFINITIONS, TaskChoice
-from minrl.constants import QWEN_3_0_6B
+from minrl.constants import MODAL_MODELS_VOLUME_NAME, QWEN_3_0_6B
 
 """
 Evaluate against any task in the minrl.tasks module.
@@ -50,7 +53,7 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
     "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
     "qwen_grpo": {
         "type": "finetuned",
-        "model_id": "Qwen3_0.6B-grpo-20250612_211716_step_000050",
+        "model_id": "Qwen3_0.6B-grpo-connections-0620_221447_step_003500",
         "base_model_id": QWEN_3_0_6B,
     },
     "qwen_reinforce": {
@@ -70,6 +73,26 @@ class OutRow(TypedDict):
     response: str
     score: float
     sample: dict[str, Any]
+
+
+def _download_checkpoint_from_modal(checkpoint_name: str):
+    vol = modal.Volume.from_name(MODAL_MODELS_VOLUME_NAME)
+    for file in vol.iterdir(f"checkpoints/{checkpoint_name}"):
+        if file.type == FileEntryType.FILE:
+            # remove checkpoints/ from the path as it's already in the path
+            local_path = os.path.join(".", file.path)
+            if os.path.exists(local_path):
+                logger.info(f"Skipping {file.path} as it already exists locally.")
+                continue
+            logger.info(f"Downloading {file.path} to {local_path}")
+            Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(local_path, "wb") as file_obj:
+                    for chunk in tqdm(vol.read_file(file.path), desc="Downloading"):
+                        file_obj.write(chunk)
+            except Exception as e:
+                logger.error(f"Error downloading {file.path}: {e}")
+                raise e
 
 
 async def main(
@@ -97,6 +120,11 @@ async def main(
         assert (
             "base_model_id" in model
         ), "Base model ID is required for finetuned models"
+        if not os.path.exists(model_path):
+            logger.info(
+                f"{model['model_id']} not found locally, downloading from modal"
+            )
+            _download_checkpoint_from_modal(model["model_id"])
         vllm_model = LLM(
             model=model_path,
             tokenizer=model["base_model_id"],
@@ -161,8 +189,9 @@ async def main(
 
     out_rows_pd = pd.DataFrame(out_rows)
 
-    logger.info(out_rows_pd)
-    out_rows_pd.to_parquet(f"eval_results/eval_{task}_{model_name}.parquet")
+    file_path = f"eval_results/eval_{task}_{model_name}.parquet"
+    logger.info(f"Saving results to {file_path}")
+    out_rows_pd.to_parquet(file_path)
 
 
 if __name__ == "__main__":
