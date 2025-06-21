@@ -94,6 +94,8 @@ def rollout(
 
             generated_text = outputs[i].outputs[j].text
 
+            logger.info(f"\nText for response {i}.{j}: {generated_text}")
+
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
