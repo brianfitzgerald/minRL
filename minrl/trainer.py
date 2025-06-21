@@ -23,9 +23,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -52,6 +50,7 @@ class Trainer:
     def init_model(self):
         """Initialize the model and tokenizer."""
         vllm_device = self.device.type
+        # disable to allow updating weights
         set_vllm_use_v1(False)
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
@@ -63,6 +62,7 @@ class Trainer:
             max_model_len=self.config.max_new_tokens,
             max_seq_len_to_capture=self.config.max_new_tokens,
             enforce_eager=True,
+            dtype="bfloat16",
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "flash_attention_2" if self.device.type == "cuda" else "sdpa"
@@ -115,7 +115,7 @@ class Trainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
         logger_choice: LoggerChoice = (
-            "wandb" if self.host_type == "modal" else self.config.logger_choice
+            "wandb" if self.host_type == "modal" else "tensorboard"
         )
         logger.info(f"Logging to: {logger_choice}")
         self.metrics_wrapper = MetricsWrapper(logger_choice, self.run_name)

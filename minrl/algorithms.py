@@ -102,8 +102,6 @@ def rollout(
                 generated_token_ids, skip_special_tokens=True
             )
 
-            logger.info(generated_text)
-
             # Calculate rewards
             rewards = reward_function(
                 response=generated_text,
