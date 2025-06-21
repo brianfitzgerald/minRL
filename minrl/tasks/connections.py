@@ -132,7 +132,7 @@ class ConnectionsDataset(MinRLDataset):
         prompts_pd = pd.read_json(generated_prompts_path, lines=True)
         df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
         self.tokenizer = tokenizer
-        num_samples = 10000
+        num_samples = 1000
 
         logger.info(f"Generating {num_samples} samples")
 

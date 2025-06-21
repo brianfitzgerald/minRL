@@ -57,24 +57,22 @@ def rollout(
     vllm_model: LLM,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
-    end_token_id = tokenizer.eos_token_id
-    pad_token_id = tokenizer.pad_token_id
+    end_token_id: int = tokenizer.eos_token_id  # type: ignore
+    pad_token_id: int = tokenizer.pad_token_id  # type: ignore
 
     # Convert to tensor and move to device
 
     logger.info(
-        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}"
+        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answer_per_question}"
     )
-    prefixes_batch: list[str] = [
-        batch.prefixes[i]
-        for i in range(len(batch.prefixes))
-        for _ in range(num_answer_per_question)
-    ]
+    prefixes_batch: list[str] = [batch.prefixes[i] for i in range(len(batch.prefixes))]
 
     outputs = vllm_model.generate(
         prefixes_batch,
         sampling_params=SamplingParams(
-            max_tokens=max_new_tokens, temperature=config.temperature
+            max_tokens=max_new_tokens,
+            temperature=config.temperature,
+            n=num_answer_per_question,
         ),
     )
     # Clear CUDA cache
@@ -83,24 +81,18 @@ def rollout(
 
     # Process outputs and create episodes
     episodes: List[Episode] = []
-    for i in range(len(batch.prefixes)):
+    for i in range(len(outputs)):
         for j in range(num_answer_per_question):
             # idx of the j-th answer for the i-th prompt
-            idx = i * num_answer_per_question + j
 
-            generated_token_ids: list[int] = list(outputs[idx].outputs[0].token_ids)
+            generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
 
             # Remove padding tokens
             if pad_token_id in generated_token_ids:
-                generated_token_ids = generated_token_ids[
-                    : generated_token_ids.index(
-                        pad_token_id  # type: ignore
-                    )  # type: ignore
-                ]
+                pad_token_idx = generated_token_ids.index(pad_token_id)
+                generated_token_ids = generated_token_ids[:pad_token_idx]
 
-            generated_text = tokenizer.decode(
-                generated_token_ids, skip_special_tokens=True
-            )
+            generated_text = outputs[i].outputs[j].text
 
             # Calculate rewards
             rewards = reward_function(
@@ -185,20 +177,17 @@ def update_policy(
     episodes.sort(
         key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True
     )
-    n_micro_batches = len(episodes) // micro_batch_size
     n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
     entropy = torch.tensor(0.0, device=device)
 
     logger.info(
-        f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens, {n_micro_batches} micro-batches"
+        f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens"
     )
 
     loss, grad_norm, entropy = 0, 0, 0
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
-        logger.info(f"* Computing policy gradient: {i:>2d}/{len(episodes):>2d}")
-
         # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
 
