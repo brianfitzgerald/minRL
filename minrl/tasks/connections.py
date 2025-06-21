@@ -16,8 +16,8 @@ SYSTEM_MESSAGE = (
 )
 RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 
-N_GROUPS = 4
-GROUP_SIZE = 4
+N_CONNECTION_GROUPS = 4
+CONNECTION_GROUP_SIZE = 4
 
 
 CONNECTIONS_PROMPT = """
@@ -25,9 +25,6 @@ You are an expert puzzle solving model.
 Find groups of words that are related to each other. Each group is four words long. There are exactly four groups in total.
 You may only use each word in one group.
 Respond in the following format:
-<think>
-...
-</think>
 <answer>
 <group>
 ...
@@ -39,11 +36,6 @@ Respond in the following format:
 # Example
 
 User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
-Assistant: <think>
-For Group 1, the words related to wax: candle, crayon, honeycomb, seal — connecting to wax in various forms, such as crayon and candles being wax-based.
-For Group 2, "My Favorite Things" connects to lyrics mentioning kettles, mittens, raindrops, whiskers.
-Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves "no" related phrases like "no excuse," "no defense."
-</think>
 <answer>
 <group> candle, crayon, honeycomb, seal</group>
 <group> kettles, mittens, raindrops, whiskers</group>
@@ -229,10 +221,10 @@ def score_connections_soft(
     """Return the best match count for each solution group."""
     solution_sets = [set(group) for group in solution_groups]
     submitted_sets = [
-        set(group) for group in submitted_groups if len(group) == GROUP_SIZE
+        set(group) for group in submitted_groups if len(group) == CONNECTION_GROUP_SIZE
     ]
 
-    if len(submitted_sets) > N_GROUPS:
+    if len(submitted_sets) > N_CONNECTION_GROUPS:
         return 0.0
 
     if len(submitted_groups) == 0 or len(solution_groups) == 0:
@@ -266,7 +258,7 @@ def score_connections_hard(
     solution_set = [set(group) for group in solution_groups]
     solved = set()
 
-    if len(submitted_groups) > N_GROUPS:
+    if len(submitted_groups) > N_CONNECTION_GROUPS:
         return 0.0
 
     for submitted_group in submitted_groups:
