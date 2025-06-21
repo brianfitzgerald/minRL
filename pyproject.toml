@@ -35,11 +35,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-training = [
-    "vllm==0.8.4",
-    "flash-attn; sys_platform == 'linux'",
-    "flashinfer-python>=0.2.6.post1; sys_platform == 'linux'",
-]
+training = ["vllm==0.8.4", "flash-attn; sys_platform == 'linux'"]
 
 
 [tool.uv]
