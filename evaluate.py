@@ -114,20 +114,25 @@ async def main(
     model = EVAL_MODELS[model_name]
     vllm_model: LLM | None = None
     model_type = model["type"]
-    if model_type == "finetuned":
-        model_path = os.path.join(".", "checkpoints", model["model_id"])
-        logger.info(f"Loading finetuned model from {model_path}")
-        assert (
-            "base_model_id" in model
-        ), "Base model ID is required for finetuned models"
-        if not os.path.exists(model_path):
-            logger.info(
-                f"{model['model_id']} not found locally, downloading from modal"
-            )
-            _download_checkpoint_from_modal(model["model_id"])
+    if model_type in ["finetuned", "huggingface"]:
+        tokenizer_model_id = model["model_id"]
+        if model_type == "finetuned":
+            model_path = os.path.join(".", "checkpoints", model["model_id"])
+            logger.info(f"Loading finetuned model from {model_path}")
+            assert (
+                "base_model_id" in model
+            ), "Base model ID is required for finetuned models"
+            tokenizer_model_id = model["base_model_id"]
+            if not os.path.exists(model_path):
+                logger.info(
+                    f"{model['model_id']} not found locally, downloading from modal"
+                )
+                _download_checkpoint_from_modal(model["model_id"])
+        else:
+            model_path = model["model_id"]
         vllm_model = LLM(
             model=model_path,
-            tokenizer=model["base_model_id"],
+            tokenizer=tokenizer_model_id,
             device="cuda",
             gpu_memory_utilization=0.2,
             max_model_len=1024,
@@ -169,7 +174,7 @@ async def main(
 
         for sample, response in zip(batch, responses):
             response_content = ""
-            if model_type == "finetuned":
+            if model_type in ["finetuned", "huggingface"]:
                 assert isinstance(response, RequestOutput)
                 response_content = response.outputs[0].text
             else:
