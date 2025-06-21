@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 from vllm import LLM
-
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 from loguru import logger
@@ -15,7 +15,7 @@ from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DEFINITIONS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.dataset import MinRLDataset
+from minrl.tasks.dataset import Episode, MinRLDataset
 from vllm.envs import set_vllm_use_v1
 
 
@@ -155,7 +155,7 @@ class Trainer:
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,
-                micro_batch_size=self.config.micro_batch_size,
+                micro_batch_size=self.config.train_batch_size,
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
@@ -165,11 +165,7 @@ class Trainer:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             if step % self.config.eval_interval == 0:
-                eval_success_rate = self.evaluate()
-                logger.info(f"\rEval success rate: {eval_success_rate:.2f}" + " " * 100)
-                self.metrics_wrapper.add_scalar(
-                    "success_rate/eval", eval_success_rate, step
-                )
+                self.evaluate(step)
 
             compute_metrics(
                 episodes, results, self.metrics_wrapper, step, self.optimizer
@@ -183,14 +179,38 @@ class Trainer:
 
         self.metrics_wrapper.close()
 
-    def evaluate(self) -> float:
+    def evaluate(self, step: int) -> None:
         """Evaluate the current model.
 
         Returns:
             float: The evaluation success rate (currently returns 0.0 as placeholder)
         """
-        # TODO: Implement evaluation logic
-        return 0.0
+        eval_loader = DataLoader(
+            self.eval_dataset,
+            shuffle=False,
+            collate_fn=self.eval_dataset.collate_fn,
+            batch_size=self.config.eval_batch_size,
+        )
+        assert self.model is not None
+
+        assert self.tokenizer is not None
+        mean_reward = 0
+        episodes: list[Episode] = []
+        for batch in tqdm(eval_loader):
+            eval_rollout = rollout(
+                config=self.config,
+                tokenizer=self.tokenizer,
+                batch=batch,
+                max_new_tokens=self.config.max_new_tokens,
+                num_answer_per_question=self.config.num_answers_per_question,
+                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
+                vllm_model=self.vllm_model,
+            )
+            episodes.extend(eval_rollout)
+
+        reward = [episode.reward for episode in episodes]
+        mean_reward = sum(reward) / len(reward)
+        self.metrics_wrapper.add_scalar("eval/mean_reward", mean_reward, step)
 
     @property
     def checkpoint_dir(self) -> Path:

@@ -327,11 +327,13 @@ def compute_metrics(
     )
 
     metrics_wrapper.add_scalar("loss", loss, step)
-    metrics_wrapper.add_scalar("mean_reward", mean_reward, step)
-    metrics_wrapper.add_scalar("std_reward", std_reward, step)
-    metrics_wrapper.add_scalar("grad_norm", grad_norm, step)
-    metrics_wrapper.add_scalar("num_finished_episodes", num_finished_episodes, step)
-    metrics_wrapper.add_scalar("learning_rate", lr, step)
+    metrics_wrapper.add_scalar("train/mean_reward", mean_reward, step)
+    metrics_wrapper.add_scalar("train/std_reward", std_reward, step)
+    metrics_wrapper.add_scalar("train/grad_norm", grad_norm, step)
+    metrics_wrapper.add_scalar(
+        "train/num_finished_episodes", num_finished_episodes, step
+    )
+    metrics_wrapper.add_scalar("train/learning_rate", lr, step)
     metrics_wrapper.add_scalar("mean_response_len", mean_response_len, step)
     metrics_wrapper.add_scalar("entropy", entropy, step)
     for i, episode in enumerate(episodes):
