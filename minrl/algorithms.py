@@ -26,26 +26,6 @@ debug_tokenizer = AutoTokenizer.from_pretrained(
 )
 
 
-def logprob_dict_to_logprobs(
-    logprobs: list[list[dict[int, float]]], vocab_size: int
-) -> torch.Tensor:
-    """Convert from vLLM format to logprobs.
-    vLLM returns a list of dicts, each containing a token and its logprob.
-    We convert this to a tensor of shape (batch_size, seq_len, vocab_size)
-    """
-    all_probs = []
-    for seq in logprobs:
-        seq_probs = []
-        for token in seq:
-            tokens_sorted = sorted(token.items(), key=lambda x: int(x[1]), reverse=True)
-            out_tensor = torch.zeros(vocab_size)
-            for token_idx, prob in tokens_sorted:
-                out_tensor[int(token_idx)] = prob
-            seq_probs.append(out_tensor)
-        all_probs.append(torch.stack(seq_probs))
-    return torch.stack(all_probs)
-
-
 @torch.no_grad()
 def rollout(
     config: TrainerConfig,
@@ -315,7 +295,7 @@ def compute_metrics(
         np.mean([len(episode.generated_token_ids) for episode in episodes])
     )
 
-    metrics_wrapper.add_scalar("loss", loss, step)
+    metrics_wrapper.add_scalar("train/loss", loss, step)
     metrics_wrapper.add_scalar("train/mean_reward", mean_reward, step)
     metrics_wrapper.add_scalar("train/std_reward", std_reward, step)
     metrics_wrapper.add_scalar("train/grad_norm", grad_norm, step)
@@ -323,8 +303,8 @@ def compute_metrics(
         "train/num_finished_episodes", num_finished_episodes, step
     )
     metrics_wrapper.add_scalar("train/learning_rate", lr, step)
-    metrics_wrapper.add_scalar("mean_response_len", mean_response_len, step)
-    metrics_wrapper.add_scalar("entropy", entropy, step)
+    metrics_wrapper.add_scalar("train/mean_response_len", mean_response_len, step)
+    metrics_wrapper.add_scalar("train/entropy", entropy, step)
     for i, episode in enumerate(episodes):
         text = html.escape(episode.text)
         metrics_wrapper.add_text(f"sample_{i}", text, step)

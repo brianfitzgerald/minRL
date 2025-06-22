@@ -141,14 +141,15 @@ class HanoiDataset(MinRLDataset):
         self.seed = 42
         random.seed(self.seed)
         self.interpolate_weights = False
+        self.n_disks_range = range(3, 15)
 
     def __getitem__(self, i: int) -> HanoiSample:
         if self.interpolate_weights:
             w1, w2 = make_distributions(9)
             w = blend(w1, w2, i / self.n_samples)
         else:
-            w = [1.0] * 9
-        n_disks = random.choices(range(1, 10), k=1, weights=w)[0]
+            w = [1.0] * len(self.n_disks_range)
+        n_disks = random.choices(self.n_disks_range, k=1, weights=w)[0]
         return {"n_disks": n_disks}
 
     def __len__(self) -> int:

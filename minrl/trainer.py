@@ -97,7 +97,7 @@ class Trainer:
             shuffle=True,
             collate_fn=self.train_dataset.collate_fn,
             generator=generator,
-            batch_size=1,
+            batch_size=self.config.train_batch_size,
         )
 
         if self.config.optimizer == "adamw":
@@ -118,7 +118,9 @@ class Trainer:
             "wandb" if self.host_type == "modal" else "tensorboard"
         )
         logger.info(f"Logging to: {logger_choice}")
-        self.metrics_wrapper = MetricsWrapper(logger_choice, self.run_name)
+        self.metrics_wrapper = MetricsWrapper(
+            logger_choice, self.config.task, self.config.model_id, self.run_name
+        )
 
     def train(self) -> None:
         """Run the main training loop.
