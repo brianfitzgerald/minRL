@@ -155,7 +155,7 @@ class HanoiDataset(MinRLDataset):
     def __len__(self) -> int:
         # mock value to satisfy dataloader
         # 10k samples
-        return self.n_samples
+        return self.n_samples if self.split == "train" else 100
 
     def conversation(self, sample: HanoiSample) -> list[dict[str, Any]]:
         return [

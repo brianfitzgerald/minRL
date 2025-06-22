@@ -144,7 +144,7 @@ class Trainer:
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
-                num_answer_per_question=self.config.num_answers_per_question,
+                num_answers_per_question=self.config.num_answers_per_question,
                 reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
                 vllm_model=self.vllm_model,
             )
@@ -204,7 +204,7 @@ class Trainer:
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
-                num_answer_per_question=self.config.num_answers_per_question,
+                num_answers_per_question=1,
                 reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
                 vllm_model=self.vllm_model,
             )

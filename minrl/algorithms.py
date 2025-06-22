@@ -32,7 +32,7 @@ def rollout(
     tokenizer: PreTrainedTokenizerBase,
     batch: MiniBatch,
     max_new_tokens: int,
-    num_answer_per_question: int,
+    num_answers_per_question: int,
     reward_function: RewardFunction,
     vllm_model: LLM,
 ) -> List[Episode]:
@@ -43,7 +43,7 @@ def rollout(
     # Convert to tensor and move to device
 
     logger.info(
-        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answer_per_question}"
+        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answers_per_question}"
     )
     prefixes_batch: list[str] = [batch.prefixes[i] for i in range(len(batch.prefixes))]
 
@@ -52,7 +52,7 @@ def rollout(
         sampling_params=SamplingParams(
             max_tokens=max_new_tokens,
             temperature=config.temperature,
-            n=num_answer_per_question,
+            n=num_answers_per_question,
         ),
     )
     # Clear CUDA cache
@@ -62,7 +62,7 @@ def rollout(
     # Process outputs and create episodes
     episodes: List[Episode] = []
     for i in range(len(outputs)):
-        for j in range(num_answer_per_question):
+        for j in range(num_answers_per_question):
             # idx of the j-th answer for the i-th prompt
 
             generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
