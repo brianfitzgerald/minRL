@@ -34,8 +34,8 @@ MODAL_IMAGE = (
     )
     .run_commands(
         [
-            "uv sync --no-group training",
-            "uv sync --group training --no-build-isolation",
+            "uv sync --no-group training --no-group games",
+            "uv sync --group training --no-group games --no-build-isolation",
         ]
     )
     .add_local_python_source(
