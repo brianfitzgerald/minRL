@@ -1,7 +1,6 @@
 from minrl.constants import HostType
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from typing import Any
 import textworld
 from textworld.core import Environment
 import textworld.gym
@@ -49,14 +48,22 @@ class TextWorldAgent:
     def __init__(self):
         self.commands = []
         self.inventory = []
-        self.description_history = []
+        self.observation_history = []
+        self.action_history = []
 
-    def step(self, description: str) -> list[ChatCompletionMessageParam]:
+    def conversation(self, description: str) -> list[ChatCompletionMessageParam]:
         """Format conversation used for infernce, given current state"""
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": description},
         ]
+
+    def update(self, description: str, inventory: list[str], action: str) -> str:
+        """Update the agent's state based on the description"""
+        self.observation_history.append(description)
+        self.inventory = inventory
+        self.action_history.append(action)
+        return description
 
 
 class ZorkDataset(MinRLDataset):
@@ -107,8 +114,8 @@ class ZorkDataset(MinRLDataset):
         prefixes = []
         prefix_token_ids = []
         for item in batch:
-            prefix: str = self.tokenizer.apply_chat_template(  # type: ignore
-                self.conversation(item),
+            prefix: str = self.tokenizer.apply_chat_template(
+                self.conversation(item),  # type: ignore
                 tokenize=False,
                 enable_thinking=False,
             )

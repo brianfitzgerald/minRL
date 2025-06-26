@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Literal
+from typing import NotRequired, TypedDict, Literal
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
 
@@ -15,6 +15,50 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 HostType = Literal["modal", "local"]
 
 TaskChoice = Literal["connections", "hanoi"]
+
+
+ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
+
+
+class EvalModel(TypedDict):
+    type: ModelType
+    model_id: str
+    base_model_id: NotRequired[str]
+
+
+ModelName = Literal[
+    "gemini_2_flash",
+    "gpt_4.1_mini",
+    "Qwen3.0-6B",
+    "qwen_grpo",
+    "qwen_reinforce",
+    "magistral_medium",
+    "gpt_4o",
+]
+
+EVAL_MODELS: dict[ModelName, EvalModel] = {
+    "gemini_2_flash": {
+        "type": "openrouter",
+        "model_id": "google/gemini-2.0-flash-001",
+    },
+    "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
+    "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},
+    "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
+    "qwen_grpo": {
+        "type": "finetuned",
+        "model_id": "Qwen3_0.6B-grpo-connections-0620_221447_step_003500",
+        "base_model_id": QWEN_3_0_6B,
+    },
+    "qwen_reinforce": {
+        "type": "finetuned",
+        "model_id": "Qwen3_0.6B-reinforce-20250612_213402_step_000900",
+        "base_model_id": QWEN_3_0_6B,
+    },
+    "magistral_medium": {
+        "type": "openrouter",
+        "model_id": "mistralai/magistral-medium-2506:thinking",
+    },
+}
 
 
 class TrainerConfig(BaseModel):
