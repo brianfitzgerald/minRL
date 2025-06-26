@@ -47,22 +47,32 @@ class TextWorldAgent:
 
     def __init__(self):
         self.commands = []
-        self.inventory = []
+        self.inventory = None
         self.observation_history = []
         self.action_history = []
 
     def conversation(self, description: str) -> list[ChatCompletionMessageParam]:
         """Format conversation used for infernce, given current state"""
+        action_history_formatted = []
+        for action, description in zip(self.action_history, self.observation_history):
+            action_history_formatted.append(f"Observation: {description}\n{action}")
+        action_history_formatted = "Actions:\n" + "\n".join(action_history_formatted)
+        inventory_formatted = self.inventory if self.inventory else ""
+        user_msg = f"### History{action_history_formatted}\n### Inventory\n{inventory_formatted}\n### Current state\n{description}"
+        print(user_msg)
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": description},
+            {
+                "role": "user",
+                "content": user_msg,
+            },
         ]
 
-    def update(self, description: str, inventory: list[str], action: str) -> str:
+    def update(self, description: str, inventory: str, action: str) -> str:
         """Update the agent's state based on the description"""
-        self.observation_history.append(description)
+        self.observation_history.append(description.strip("\n\r"))
         self.inventory = inventory
-        self.action_history.append(action)
+        self.action_history.append(action.replace("COMMAND: ", "").strip("\n\r"))
         return description
 
 

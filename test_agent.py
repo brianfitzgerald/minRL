@@ -5,6 +5,7 @@ import textworld.gym
 from textworld.gym.envs import TextworldGymEnv
 from minrl.constants import EVAL_MODELS
 from minrl.tasks.zork import TextWorldAgent
+from loguru import logger
 
 infos = textworld.EnvInfos(
     feedback=True,
@@ -35,10 +36,12 @@ while not done:
     )
     response_str = response.choices[0].message.content
     assert response_str is not None, "Response is None"
-    inventory = infos["inventory"] if "inventory" in infos else []
+    inventory = infos["inventory"] if "inventory" in infos else ""
     agent.update(obs, inventory, response_str)
+    response_str = response_str.replace("COMMAND: ", "").strip()
+    logger.info(f"COMMAND: {response_str}")
     obs, score, done, infos = env.step(response_str)  # type: ignore
-    env.render()
+    logger.info(env.render(mode="text"))
     total_score += score  # type: ignore
     moves += 1
     print(f"Score: {total_score}, Moves: {moves}")
