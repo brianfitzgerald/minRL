@@ -59,7 +59,6 @@ class TextWorldAgent:
         action_history_formatted = "Actions:\n" + "\n".join(action_history_formatted)
         inventory_formatted = self.inventory if self.inventory else ""
         user_msg = f"### History{action_history_formatted}\n### Inventory\n{inventory_formatted}\n### Current state\n{description}"
-        print(user_msg)
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
