@@ -5,6 +5,58 @@ from typing import Any
 import textworld
 from textworld.core import Environment
 import textworld.gym
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+
+SYSTEM_PROMPT = """
+You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
+
+INSTRUCTIONS:
+1. After each game response, parse the text to update:
+   • Your current location  
+   • Inventory items  
+   • Visible exits and objects  
+   • Any puzzles or obstacles described  
+
+2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor").
+
+3. Always choose the highest-value action, balancing exploration, safety (avoid known hazards), and puzzle-solving.
+
+4. Never output internal reasoning.  Only output the next command, prefixed with:
+   
+   COMMAND: <your next command>
+
+5. If you ever die or become stuck, output:
+   
+   COMMAND: restart
+
+EXAMPLE TURN:
+(Game says: "You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.")
+
+Your response should be:
+   
+   COMMAND: take key
+
+That's all.  Ready?  Begin by reading the game's opening description.  When you're ready, output your first COMMAND.
+"""
+
+
+class TextWorldAgent:
+    """
+    Wrapper for an agent that plays an adventure game.
+    Contains any state required as well as a list of commands that the agent can take.
+    """
+
+    def __init__(self):
+        self.commands = []
+        self.inventory = []
+        self.description_history = []
+
+    def step(self, description: str) -> list[ChatCompletionMessageParam]:
+        """Format conversation used for infernce, given current state"""
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": description},
+        ]
 
 
 class ZorkDataset(MinRLDataset):
@@ -39,7 +91,7 @@ class ZorkDataset(MinRLDataset):
     def __len__(self) -> int:
         return 0
 
-    def conversation(self, sample: dict) -> list[dict[str, Any]]:
+    def conversation(self, sample: dict) -> list[ChatCompletionMessageParam]:
         return []
 
     def collate_fn(self, batch: list[dict]) -> MiniBatch:

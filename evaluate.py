@@ -119,9 +119,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert (
-                "base_model_id" in model
-            ), "Base model ID is required for finetuned models"
+            assert "base_model_id" in model, (
+                "Base model ID is required for finetuned models"
+            )
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(

@@ -18,6 +18,7 @@ dependencies = [
     "numpy>=2.2.5",
     "openai>=1.75.0",
     "pandas>=2.2.3",
+    "pip>=25.1.1",
     "pyarrow>=19.0.1",
     "pydantic>=2.11.3",
     "pytest>=8.3.5",
@@ -36,7 +37,7 @@ dependencies = [
 
 [dependency-groups]
 training = ["vllm==0.8.4", "flash-attn; sys_platform == 'linux'"]
-games = ["nle[agent]>=0.9.1", "textworld>=1.6.2"]
+games = ["nle[agent]>=0.9.1", "textworld>=1.6.2", "pip>=25.1.1"]
 
 
 [tool.uv]

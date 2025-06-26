@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from minrl.constants import HostType
 
@@ -51,6 +52,6 @@ class MinRLDataset(Dataset):
         pass
 
     @abstractmethod
-    def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
+    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessage]:
         """Conversation used to generate the prefix, or the prompt for evals."""
         pass
