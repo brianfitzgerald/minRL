@@ -1,14 +1,18 @@
 import os
+from tqdm import tqdm
 from openai import OpenAI
 import textworld
 import textworld.gym
 from textworld.gym.envs import TextworldGymEnv
 from minrl.constants import EVAL_MODELS, QWEN_3_0_6B
+from minrl.tasks.dataset import Episode
 from minrl.tasks.zork import TextWorldAgent
 from loguru import logger
 from minrl.tasks.zork import ZorkDataset
 from torch.utils.data import DataLoader
 from transformers.models.auto.tokenization_auto import AutoTokenizer
+
+model_name = EVAL_MODELS["gpt_4.1_mini"]["model_id"]
 
 
 def test_agent():
@@ -23,7 +27,6 @@ def test_agent():
     )
 
     openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    model_name = EVAL_MODELS["gpt_4.1_mini"]["model_id"]
 
     env_id = textworld.gym.register_game("games/zork.z5", infos)
     env: TextworldGymEnv = textworld.gym.make(env_id)
@@ -54,11 +57,32 @@ def test_agent():
 
 
 def test_dataset():
+    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     tokenizer = AutoTokenizer.from_pretrained(QWEN_3_0_6B)
     dataset = ZorkDataset(split="train", host="local", tokenizer=tokenizer)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     for i, batch in enumerate(dataloader):
         print(batch)
+        convs = batch["conversation"]
+        for i, conv in enumerate(tqdm(convs, desc="Generating responses")):
+            completion = openai_client.chat.completions.create(
+                model=model_name,
+                messages=conv,
+            )
+            content = completion.choices[0].message.content
+            assert content is not None, "Response is None"
+            episode = Episode(
+                batch_index=i,
+                answer_index=i,
+                prefix=conv[0].content,
+                prefix_token_ids=[],
+                generated_token_ids=[],
+                text=content,
+                reward=0,
+                is_finished=False,
+                reward_info={},
+            )
+            dataset.post_generate(episode)
         if i > 10:
             break
 
