@@ -1,5 +1,4 @@
-from typing import Any
-from minrl.constants import HostType, QWEN_3_1_7_B
+from minrl.constants import HostType
 from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
@@ -130,9 +129,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert len(batch) >= self.n_concurrent, (
-            "Batch size must be >= n_environments, cannot have multiple games in a batch"
-        )
+        assert (
+            len(batch) >= self.n_concurrent
+        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []
