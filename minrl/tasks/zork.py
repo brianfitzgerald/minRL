@@ -1,5 +1,6 @@
-from minrl.constants import HostType
-from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+from typing import Any
+from minrl.constants import HostType, QWEN_3_1_7_B
+from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 from textworld.core import Environment
@@ -22,18 +23,18 @@ INSTRUCTIONS:
 
 4. Never output internal reasoning.  Only output the next command, prefixed with:
    
-   COMMAND: <your next command>
+   <command>your next command</command>
 
 5. If you ever die or become stuck, output:
    
-   COMMAND: restart
+   <command>restart</command>
 
 EXAMPLE TURN:
 (Game says: "You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.")
 
 Your response should be:
    
-   COMMAND: take key
+   <command>take key</command>
 
 That's all.  Ready?  Begin by reading the game's opening description.  When you're ready, output your first COMMAND.
 """
@@ -68,7 +69,10 @@ class TextWorldAgent:
         ]
 
     def update(self, description: str, inventory: str, action: str) -> str:
-        """Update the agent's state based on the description"""
+        """
+        Update the agent's state based on the description and new inventory.
+        This is called after each turn.
+        """
         self.observation_history.append(description.strip("\n\r"))
         self.inventory = inventory
         self.action_history.append(action.replace("COMMAND: ", "").strip("\n\r"))
@@ -90,25 +94,36 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
         # N concurrent game states
-        self.n_concurrent = 32
+        self.n_concurrent = 8
         self.envs: list[Environment] = [
             textworld.start("games/zork.z5") for _ in range(self.n_concurrent)
+        ]
+        self.agents: list[TextWorldAgent] = [
+            TextWorldAgent() for _ in range(self.n_concurrent)
         ]
 
     def __getitem__(self, i: int) -> dict:
         # Generate a sample for the given index
         # This is a placeholder implementation - you'll need to customize based on your needs
+        env_idx = i % self.n_concurrent
+        env = self.envs[env_idx]
+        agent = self.agents[env_idx]
+        obs = env.reset()
+        conv = agent.conversation(obs.raw)
         return {
             "id": i,
-            "sample_data": f"sample_{i}",
-            # Add other fields as needed for your nethack task
+            "conversation": conv,
         }
 
-    def __len__(self) -> int:
-        return 0
+    def post_generate(self, episode: Episode):
+        env_idx = episode.batch_index % self.n_concurrent
+        env = self.envs[env_idx]
+        agent: TextWorldAgent = self.agents[env_idx]
+        obs, score, done, infos = env.step(episode.text)  # type: ignore
+        agent.update(obs, infos["inventory"], episode.text)
 
-    def conversation(self, sample: dict) -> list[ChatCompletionMessageParam]:
-        return []
+    def __len__(self) -> int:
+        return 10000
 
     def collate_fn(self, batch: list[dict]) -> MiniBatch:
         """
@@ -124,7 +139,7 @@ class ZorkDataset(MinRLDataset):
         prefix_token_ids = []
         for item in batch:
             prefix: str = self.tokenizer.apply_chat_template(
-                self.conversation(item),  # type: ignore
+                item["conversation"],  # type: ignore
                 tokenize=False,
                 enable_thinking=False,
             )

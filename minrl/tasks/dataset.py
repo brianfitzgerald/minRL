@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from minrl.constants import HostType
 
@@ -16,6 +16,9 @@ Split = Literal["train", "test", "eval"]
 class Episode:
     """Store all relevant information of an episode."""
 
+    # Index of sample in batch
+    batch_index: int
+    answer_index: int
     prefix: str
     text: str
     # Token IDs of the prefix
@@ -52,6 +55,11 @@ class MinRLDataset(Dataset):
         pass
 
     @abstractmethod
-    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessage]:
+    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessageParam]:
         """Conversation used to generate the prefix, or the prompt for evals."""
         pass
+
+    @abstractmethod
+    def post_generate(self, episode: Episode):
+        """Some datasets have an internal state that needs to be updated after generation."""
+        raise NotImplementedError("post_generate is not implemented for this dataset")

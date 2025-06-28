@@ -150,9 +150,19 @@ class Trainer:
                 reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
                 vllm_model=self.vllm_model,
             )
+
             if self.config.skip_unfinished_episodes:
                 episodes = [episode for episode in episodes if episode.is_finished]
             logger.info(f"Updating policy for step {step}")
+
+            best_reward, best_reward_episode = -float("inf"), None
+            for episode in episodes:
+                if episode.reward > best_reward:
+                    best_reward = episode.reward
+                    best_reward_episode = episode
+            if best_reward_episode is not None:
+                logger.info(f"Best reward: {best_reward}")
+                self.train_dataset.post_generate(best_reward_episode)
 
             # Update policy - compute loss and perform backward pass
             results = update_policy(

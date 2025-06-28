@@ -77,19 +77,21 @@ def rollout(
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
             # Calculate rewards
-            rewards = reward_function(
+            reward = reward_function(
                 response=generated_text,
                 sample=batch.samples[i],
             )
 
             # Create episode
             episode = Episode(
+                batch_index=i,
+                answer_index=j,
                 prefix=batch.prefixes[i],
                 text=batch.prefixes[i] + generated_text,
                 prefix_token_ids=batch.prefix_token_ids[i],
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,
-                reward=rewards,
+                reward=reward,
                 reward_info={},
             )
             episodes.append(episode)
