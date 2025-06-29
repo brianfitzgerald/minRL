@@ -3,12 +3,13 @@ from minrl.constants import HostType
 from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
-from textworld.core import Environment
 import textworld.gym
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from typing import Literal, TypedDict
 import requests
 from pathlib import Path
+from textworld.gym.envs import TextworldGymEnv
+import re
 
 SYSTEM_PROMPT = """
 You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
@@ -33,7 +34,7 @@ INSTRUCTIONS:
    <command>restart</command>
 
 EXAMPLE TURN:
-(Game says: "You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.")
+You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.
 
 Your response should be:
    
@@ -87,15 +88,18 @@ class TextWorldAgent:
             },
         ]
 
-    def update(self, description: str, inventory: str, action: str) -> str:
+    def update(self, command: str, observation: str, inventory: str):
         """
-        Update the agent's state based on the description and new inventory.
-        This is called after each turn.
+        Update agent state after a command and the resulting observation.
         """
-        self.observation_history.append(description.strip("\n\r"))
+        self.observation_history.append(observation.strip("\n"))
         self.inventory = inventory
-        self.action_history.append(action.replace("COMMAND: ", "").strip("\n\r"))
-        return description
+        self.action_history.append(command.replace("COMMAND: ", "").strip("\n"))
+
+
+def parse_command(input_string: str) -> str:
+    command_contents = re.findall(r"<command>(.*?)</command>", input_string, re.DOTALL)
+    return command_contents[0]
 
 
 class ZorkDataset(MinRLDataset):
@@ -117,16 +121,27 @@ class ZorkDataset(MinRLDataset):
         self.game_name: ZGameName = "zork1"
         self.game_metadata = Z_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
-        self.envs: list[Environment] = [
-            textworld.start(f"games/{self.game_metadata['filename']}")
-            for _ in range(self.n_concurrent)
+        self.infos = textworld.EnvInfos(
+            feedback=True,
+            description=True,
+            inventory=True,
+            verbs=True,
+            intermediate_reward=True,
+            entities=True,
+            facts=True,
+        )
+        env_id = textworld.gym.register_game(
+            f"games/{self.game_metadata['filename']}", self.infos
+        )
+
+        self.envs: list[TextworldGymEnv] = [
+            textworld.gym.make(env_id) for _ in range(self.n_concurrent)
         ]
         self.agents: list[TextWorldAgent] = [
             TextWorldAgent() for _ in range(self.n_concurrent)
         ]
 
     def _download_game_if_needed(self, game_name: ZGameName):
-
         games_dir = Path.cwd() / "games"
         games_dir.mkdir(exist_ok=True)
 
@@ -150,19 +165,20 @@ class ZorkDataset(MinRLDataset):
         env_idx = i % self.n_concurrent
         env = self.envs[env_idx]
         agent = self.agents[env_idx]
-        obs = env.reset()
-        conv = agent.conversation(obs.raw)
+        obs, info = env.reset()
+        conv = agent.conversation(obs)
         return {
             "id": i,
             "conversation": conv,
         }
 
     def post_generate(self, episode: Episode):
+        command = parse_command(episode.text)
         env_idx = episode.batch_index % self.n_concurrent
         env = self.envs[env_idx]
         agent: TextWorldAgent = self.agents[env_idx]
-        obs, score, done, infos = env.step(episode.text)  # type: ignore
-        agent.update(obs, infos["inventory"], episode.text)
+        obs, score, done, infos = env.step(command)  # type: ignore
+        agent.update(command, obs, infos["inventory"])
 
     def __len__(self) -> int:
         return 10000
@@ -172,9 +188,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert (
-            len(batch) >= self.n_concurrent
-        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        assert len(batch) >= self.n_concurrent, (
+            "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        )
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []

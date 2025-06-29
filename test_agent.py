@@ -28,7 +28,7 @@ def test_agent():
 
     openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    env_id = textworld.gym.register_game("games/zork.z5", infos)
+    env_id = textworld.gym.register_game("games/zork1.z5", infos)
     env: TextworldGymEnv = textworld.gym.make(env_id)
     obs = env.reset()
 
@@ -37,7 +37,7 @@ def test_agent():
     env.render()
     total_score, moves, done, infos = 0, 0, False, {}
     while not done:
-        conv = agent.conversation(obs.raw)
+        conv = agent.conversation(obs["raw"])  # type: ignore
         response = openai_client.chat.completions.create(
             model=model_name,
             messages=conv,
@@ -45,7 +45,7 @@ def test_agent():
         response_str = response.choices[0].message.content
         assert response_str is not None, "Response is None"
         inventory = infos["inventory"] if "inventory" in infos else ""
-        agent.update(obs, inventory, response_str)
+        agent.update(response_str, obs, inventory)  # type: ignore
         response_str = response_str.replace("COMMAND: ", "").strip()
         logger.info(f"COMMAND: {response_str}")
         obs, score, done, infos = env.step(response_str)  # type: ignore
@@ -60,24 +60,24 @@ def test_dataset():
     openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     tokenizer = AutoTokenizer.from_pretrained(QWEN_3_0_6B)
     dataset = ZorkDataset(split="train", host="local", tokenizer=tokenizer)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=1, collate_fn=lambda x: x)
     for i, batch in enumerate(dataloader):
-        print(batch)
-        convs = batch["conversation"]
-        for i, conv in enumerate(tqdm(convs, desc="Generating responses")):
+        convs = [x["conversation"] for x in batch]
+        for i, conv in enumerate(tqdm(convs, desc="Inference")):
+            print(conv[1]["content"])
             completion = openai_client.chat.completions.create(
                 model=model_name,
                 messages=conv,
             )
-            content = completion.choices[0].message.content
-            assert content is not None, "Response is None"
+            completion_content = completion.choices[0].message.content
+            assert completion_content is not None, "Response is None"
             episode = Episode(
                 batch_index=i,
                 answer_index=i,
-                prefix=conv[0].content,
+                prefix=conv[0]["content"],
                 prefix_token_ids=[],
                 generated_token_ids=[],
-                text=content,
+                text=completion_content,
                 reward=0,
                 is_finished=False,
                 reward_info={},
