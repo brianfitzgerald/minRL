@@ -21,7 +21,7 @@ INSTRUCTIONS:
    • Visible exits and objects  
    • Any puzzles or obstacles described  
 
-2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor").
+2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor"). You can also type 'verbose' to see the full description of the current location.
 
 3. Always choose the highest-value action, balancing exploration, safety (avoid known hazards), and puzzle-solving.
 
@@ -100,17 +100,14 @@ class TextWorldAgent:
             },
         ]
 
-    def update(
-        self, command: str | None, description: str, observation: str, inventory: str
-    ):
+    def update(self, command: str | None, observation: str, inventory: str):
         """
         Update agent state after a command and the resulting observation.
         """
         observation = observation.strip("\n")
         if command is not None:
             self.action_history.append(command)
-        self.observation_history.append(description)
-        self.description = description.strip("\n")
+        self.observation_history.append(observation)
         self.inventory = inventory
 
 
@@ -184,7 +181,7 @@ class ZorkDataset(MinRLDataset):
         agent = self.agents[env_idx]
         if len(agent.observation_history) == 0:
             obs, info = self.envs[env_idx].reset()
-            agent.update(None, info["description"], obs, info["inventory"])
+            agent.update(None, obs + info["description"], info["inventory"])
         conv = agent.conversation()
 
         return {
@@ -197,7 +194,7 @@ class ZorkDataset(MinRLDataset):
         env_idx = episode.batch_index % self.n_environments
         obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
         self.agents[env_idx].update(
-            command, infos["description"], obs, infos["inventory"].strip("\n")
+            command, obs + infos["description"], infos["inventory"].strip("\n")
         )
 
     def __len__(self) -> int:
