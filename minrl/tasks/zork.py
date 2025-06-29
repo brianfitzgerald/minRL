@@ -69,6 +69,7 @@ class TextWorldAgent:
         self.commands = []
         self.inventory = None
         self.observation_history = []
+        self.description = None
         self.action_history = []
         self.game_name: ZGameName = "zork1"
 
@@ -88,9 +89,9 @@ class TextWorldAgent:
                 )
             action_history_formatted = "\n".join(action_history_formatted)
             user_message += f"\n### History\n{action_history_formatted}\n"
-        if len(self.observation_history) > 0:
-            last_description = self.observation_history[-1]
-            user_message += f"\n### Current Observation\n{last_description}"
+        if len(self.observation_history) > 0 and self.description:
+            last_obs = self.observation_history[-1]
+            user_message += f"\n###Description\n{self.description}\n### Current Observation\n{last_obs}\n"
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -99,13 +100,17 @@ class TextWorldAgent:
             },
         ]
 
-    def update(self, command: str | None, observation: str, inventory: str):
+    def update(
+        self, command: str | None, description: str, observation: str, inventory: str
+    ):
         """
         Update agent state after a command and the resulting observation.
         """
+        observation = observation.strip("\n")
         if command is not None:
             self.action_history.append(command)
-        self.observation_history.append(observation)
+        self.observation_history.append(description)
+        self.description = description.strip("\n")
         self.inventory = inventory
 
 
@@ -178,9 +183,10 @@ class ZorkDataset(MinRLDataset):
         env_idx = i % self.n_environments
         agent = self.agents[env_idx]
         if len(agent.observation_history) == 0:
-            _, info = self.envs[env_idx].reset()
-            agent.update(None, info["description"], info["inventory"])
+            obs, info = self.envs[env_idx].reset()
+            agent.update(None, info["description"], obs, info["inventory"])
         conv = agent.conversation()
+
         return {
             "id": i,
             "conversation": conv,
@@ -190,8 +196,9 @@ class ZorkDataset(MinRLDataset):
         command = parse_command(episode.text)
         env_idx = episode.batch_index % self.n_environments
         obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
-        obs = obs.strip("\n")
-        self.agents[env_idx].update(command, obs, infos["inventory"])
+        self.agents[env_idx].update(
+            command, infos["description"], obs, infos["inventory"].strip("\n")
+        )
 
     def __len__(self) -> int:
         return 10000

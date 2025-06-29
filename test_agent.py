@@ -45,7 +45,7 @@ def test_agent():
         response_str = response.choices[0].message.content
         assert response_str is not None, "Response is None"
         inventory = infos["inventory"] if "inventory" in infos else ""
-        agent.update(response_str, obs, inventory)  # type: ignore
+        agent.update(response_str, infos["description"], obs, inventory)  # type: ignore
         response_str = response_str.replace("COMMAND: ", "").strip()
         logger.info(f"COMMAND: {response_str}")
         obs, score, done, infos = env.step(response_str)  # type: ignore

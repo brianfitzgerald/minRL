@@ -34,6 +34,7 @@ ModelName = Literal[
     "qwen_reinforce",
     "magistral_medium",
     "gpt_4o",
+    "o4_mini",
 ]
 
 EVAL_MODELS: dict[ModelName, EvalModel] = {
@@ -43,6 +44,7 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
     },
     "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
     "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},
+    "o4_mini": {"type": "openai", "model_id": "o4-mini"},
     "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
     "qwen_grpo": {
         "type": "finetuned",
