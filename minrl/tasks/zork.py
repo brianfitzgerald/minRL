@@ -1,3 +1,4 @@
+from loguru import logger
 from minrl.constants import HostType
 from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -5,6 +6,9 @@ import textworld
 from textworld.core import Environment
 import textworld.gym
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+from typing import Literal, TypedDict
+import requests
+from pathlib import Path
 
 SYSTEM_PROMPT = """
 You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
@@ -38,6 +42,21 @@ Your response should be:
 That's all.  Ready?  Begin by reading the game's opening description.  When you're ready, output your first COMMAND.
 """
 
+ZGameName = Literal["zork1"]
+
+
+class ZGame(TypedDict):
+    url: str
+    filename: str
+
+
+Z_GAMES: dict[ZGameName, ZGame] = {
+    "zork1": {
+        "url": "https://github.com/danielricks/textplayer/blob/master/games/zork1.z5",
+        "filename": "zork1.z5",
+    }
+}
+
 
 class TextWorldAgent:
     """
@@ -50,6 +69,7 @@ class TextWorldAgent:
         self.inventory = None
         self.observation_history = []
         self.action_history = []
+        self.game_name: ZGameName = "zork1"
 
     def conversation(self, description: str) -> list[ChatCompletionMessageParam]:
         """Format conversation used for infernce, given current state"""
@@ -94,12 +114,35 @@ class ZorkDataset(MinRLDataset):
         self.tokenizer = tokenizer
         # N concurrent game states
         self.n_concurrent = 8
+        self.game_name: ZGameName = "zork1"
+        self.game_metadata = Z_GAMES[self.game_name]
+        self._download_game_if_needed(self.game_name)
         self.envs: list[Environment] = [
-            textworld.start("games/zork.z5") for _ in range(self.n_concurrent)
+            textworld.start(f"games/{self.game_metadata['filename']}")
+            for _ in range(self.n_concurrent)
         ]
         self.agents: list[TextWorldAgent] = [
             TextWorldAgent() for _ in range(self.n_concurrent)
         ]
+
+    def _download_game_if_needed(self, game_name: ZGameName):
+
+        games_dir = Path.cwd() / "games"
+        games_dir.mkdir(exist_ok=True)
+
+        game_path = games_dir / self.game_metadata["filename"]
+
+        if game_path.exists():
+            logger.info(f"Game {game_name} already exists at {game_path}")
+            return
+
+        logger.info(f"Downloading game {game_name} to {game_path}")
+
+        response = requests.get(self.game_metadata["url"])
+        response.raise_for_status()
+
+        with open(game_path, "wb") as f:
+            f.write(response.content)
 
     def __getitem__(self, i: int) -> dict:
         # Generate a sample for the given index
