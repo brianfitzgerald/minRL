@@ -74,15 +74,23 @@ class TextWorldAgent:
 
     def conversation(self) -> list[ChatCompletionMessageParam]:
         """Format conversation used for inference, given current state"""
-        action_history_formatted = []
-        for action, description in zip(self.action_history, self.observation_history):
-            action_history_formatted.append(f"Observation: {description}\n{action}")
-        action_history_formatted = "Actions:\n" + "\n".join(action_history_formatted)
-        inventory_formatted = self.inventory if self.inventory else ""
-        user_message = f"### History\n{action_history_formatted}\n### Inventory\n{inventory_formatted}\n"
+        user_message = ""
+        if self.inventory and len(self.inventory) > 0:
+            inventory_formatted = self.inventory.strip("\n") if self.inventory else ""
+            user_message += f"\n### Inventory\n{inventory_formatted}"
+        if len(self.action_history) > 0:
+            action_history_formatted = []
+            for action, description in zip(
+                self.action_history, self.observation_history
+            ):
+                action_history_formatted.append(
+                    f"Observation: {description}\nCommand: {action}"
+                )
+            action_history_formatted = "\n".join(action_history_formatted)
+            user_message += f"\n### History\n{action_history_formatted}\n"
         if len(self.observation_history) > 0:
             last_description = self.observation_history[-1]
-            user_message += f"### Current state\n{last_description}"
+            user_message += f"\n### Current Observation\n{last_description}"
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -182,6 +190,7 @@ class ZorkDataset(MinRLDataset):
         command = parse_command(episode.text)
         env_idx = episode.batch_index % self.n_environments
         obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
+        obs = obs.strip("\n")
         self.agents[env_idx].update(command, obs, infos["inventory"])
 
     def __len__(self) -> int:
