@@ -52,7 +52,7 @@ class ZGame(TypedDict):
 
 Z_GAMES: dict[ZGameName, ZGame] = {
     "zork1": {
-        "url": "https://github.com/danielricks/textplayer/blob/master/games/zork1.z5",
+        "url": "https://github.com/danielricks/textplayer/raw/refs/heads/master/games/zork1.z5",
         "filename": "zork1.z5",
     }
 }
