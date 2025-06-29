@@ -72,32 +72,37 @@ class TextWorldAgent:
         self.action_history = []
         self.game_name: ZGameName = "zork1"
 
-    def conversation(self, description: str) -> list[ChatCompletionMessageParam]:
-        """Format conversation used for infernce, given current state"""
+    def conversation(self) -> list[ChatCompletionMessageParam]:
+        """Format conversation used for inference, given current state"""
         action_history_formatted = []
         for action, description in zip(self.action_history, self.observation_history):
             action_history_formatted.append(f"Observation: {description}\n{action}")
         action_history_formatted = "Actions:\n" + "\n".join(action_history_formatted)
         inventory_formatted = self.inventory if self.inventory else ""
-        user_msg = f"### History{action_history_formatted}\n### Inventory\n{inventory_formatted}\n### Current state\n{description}"
+        user_message = f"### History\n{action_history_formatted}\n### Inventory\n{inventory_formatted}\n"
+        if len(self.observation_history) > 0:
+            last_description = self.observation_history[-1]
+            user_message += f"### Current state\n{last_description}"
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": user_msg,
+                "content": user_message,
             },
         ]
 
-    def update(self, command: str, observation: str, inventory: str):
+    def update(self, command: str | None, observation: str, inventory: str):
         """
         Update agent state after a command and the resulting observation.
         """
-        self.observation_history.append(observation.strip("\n"))
+        if command is not None:
+            self.action_history.append(command)
+        self.observation_history.append(observation)
         self.inventory = inventory
-        self.action_history.append(command.replace("COMMAND: ", "").strip("\n"))
 
 
 def parse_command(input_string: str) -> str:
+    input_string = input_string.strip("\n").replace("COMMAND: ", "")
     command_contents = re.findall(r"<command>(.*?)</command>", input_string, re.DOTALL)
     return command_contents[0]
 
@@ -117,7 +122,7 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
         # N concurrent game states
-        self.n_concurrent = 8
+        self.n_environments = 1
         self.game_name: ZGameName = "zork1"
         self.game_metadata = Z_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
@@ -135,10 +140,10 @@ class ZorkDataset(MinRLDataset):
         )
 
         self.envs: list[TextworldGymEnv] = [
-            textworld.gym.make(env_id) for _ in range(self.n_concurrent)
+            textworld.gym.make(env_id) for _ in range(self.n_environments)
         ]
         self.agents: list[TextWorldAgent] = [
-            TextWorldAgent() for _ in range(self.n_concurrent)
+            TextWorldAgent() for _ in range(self.n_environments)
         ]
 
     def _download_game_if_needed(self, game_name: ZGameName):
@@ -162,11 +167,12 @@ class ZorkDataset(MinRLDataset):
     def __getitem__(self, i: int) -> dict:
         # Generate a sample for the given index
         # This is a placeholder implementation - you'll need to customize based on your needs
-        env_idx = i % self.n_concurrent
-        env = self.envs[env_idx]
+        env_idx = i % self.n_environments
         agent = self.agents[env_idx]
-        obs, info = env.reset()
-        conv = agent.conversation(obs)
+        if len(agent.observation_history) == 0:
+            _, info = self.envs[env_idx].reset()
+            agent.update(None, info["description"], info["inventory"])
+        conv = agent.conversation()
         return {
             "id": i,
             "conversation": conv,
@@ -174,11 +180,9 @@ class ZorkDataset(MinRLDataset):
 
     def post_generate(self, episode: Episode):
         command = parse_command(episode.text)
-        env_idx = episode.batch_index % self.n_concurrent
-        env = self.envs[env_idx]
-        agent: TextWorldAgent = self.agents[env_idx]
-        obs, score, done, infos = env.step(command)  # type: ignore
-        agent.update(command, obs, infos["inventory"])
+        env_idx = episode.batch_index % self.n_environments
+        obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
+        self.agents[env_idx].update(command, obs, infos["inventory"])
 
     def __len__(self) -> int:
         return 10000
@@ -188,7 +192,7 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert len(batch) >= self.n_concurrent, (
+        assert len(batch) == self.n_environments, (
             "Batch size must be >= n_environments, cannot have multiple games in a batch"
         )
         if self.tokenizer is None:
