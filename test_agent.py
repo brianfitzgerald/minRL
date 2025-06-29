@@ -11,6 +11,9 @@ from loguru import logger
 from minrl.tasks.zork import ZorkDataset
 from torch.utils.data import DataLoader
 from transformers.models.auto.tokenization_auto import AutoTokenizer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 model_name = EVAL_MODELS["gpt_4.1_mini"]["model_id"]
 
