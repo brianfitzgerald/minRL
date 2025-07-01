@@ -193,9 +193,7 @@ class ZorkDataset(MinRLDataset):
         command = parse_command(episode.text)
         env_idx = episode.batch_index % self.n_environments
         obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
-        self.agents[env_idx].update(
-            command, obs + infos["description"], infos["inventory"].strip("\n")
-        )
+        self.agents[env_idx].update(command, obs, infos["inventory"].strip("\n"))
 
     def __len__(self) -> int:
         return 10000
