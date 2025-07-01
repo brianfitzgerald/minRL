@@ -35,12 +35,17 @@ ModelName = Literal[
     "magistral_medium",
     "gpt_4o",
     "o4_mini",
+    "gemini_2.5_flash",
 ]
 
 EVAL_MODELS: dict[ModelName, EvalModel] = {
     "gemini_2_flash": {
         "type": "openrouter",
         "model_id": "google/gemini-2.0-flash-001",
+    },
+    "gemini_2.5_flash": {
+        "type": "openrouter",
+        "model_id": "google/gemini-2.5-flash-preview-05-20:thinking",
     },
     "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
     "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},

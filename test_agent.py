@@ -1,5 +1,4 @@
 import os
-from tqdm import tqdm
 from openai import OpenAI
 import textworld
 import textworld.gym
@@ -15,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-model_name = EVAL_MODELS["gpt_4.1_mini"]["model_id"]
+model_name = EVAL_MODELS["gemini_2.5_flash"]["model_id"]
 
 
 def test_agent():
@@ -29,7 +28,10 @@ def test_agent():
         facts=True,
     )
 
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    openai_client = OpenAI(
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1",
+    )
 
     env_id = textworld.gym.register_game("games/zork1.z5", infos)
     env: TextworldGymEnv = textworld.gym.make(env_id)
@@ -60,14 +62,18 @@ def test_agent():
 
 
 def test_dataset():
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    openai_client = OpenAI(
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1",
+    )
     tokenizer = AutoTokenizer.from_pretrained(QWEN_3_0_6B)
-    dataset = ZorkDataset(split="train", host="local", tokenizer=tokenizer)
-    dataloader = DataLoader(dataset, batch_size=1, collate_fn=lambda x: x)
+    dataset = ZorkDataset(
+        split="train", host="local", tokenizer=tokenizer, n_environments=4
+    )
+    dataloader = DataLoader(dataset, batch_size=4, collate_fn=lambda x: x)
     for i, batch in enumerate(dataloader):
         convs = [x["conversation"] for x in batch]
-        for i, conv in enumerate(tqdm(convs, desc="Inference")):
-            print(conv[1]["content"])
+        for i, conv in enumerate(convs):
             completion = openai_client.chat.completions.create(
                 model=model_name,
                 messages=conv,

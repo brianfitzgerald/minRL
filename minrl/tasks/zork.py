@@ -72,6 +72,8 @@ class TextWorldAgent:
         self.description = None
         self.action_history = []
         self.game_name: ZGameName = "zork1"
+        self.done = False
+        self.score = 0
 
     def conversation(self) -> list[ChatCompletionMessageParam]:
         """Format conversation used for inference, given current state"""
@@ -100,15 +102,26 @@ class TextWorldAgent:
             },
         ]
 
-    def update(self, command: str | None, observation: str, inventory: str):
+    def update(
+        self,
+        command: str | None,
+        observation: str,
+        inventory: str,
+        done: bool,
+        score: int,
+    ):
         """
         Update agent state after a command and the resulting observation.
         """
+        if self.done:
+            raise ValueError("Agent is done")
         observation = observation.strip("\n")
         if command is not None:
             self.action_history.append(command)
         self.observation_history.append(observation)
         self.inventory = inventory
+        self.done = done
+        self.score = score
 
 
 def parse_command(input_string: str) -> str:
@@ -128,11 +141,11 @@ class ZorkDataset(MinRLDataset):
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
+        n_environments: int = 1,
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        # N concurrent game states
-        self.n_environments = 1
+        self.n_environments = n_environments
         self.game_name: ZGameName = "zork1"
         self.game_metadata = Z_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
@@ -155,6 +168,7 @@ class ZorkDataset(MinRLDataset):
         self.agents: list[TextWorldAgent] = [
             TextWorldAgent() for _ in range(self.n_environments)
         ]
+        self.completed_episodes = []
 
     def _download_game_if_needed(self, game_name: ZGameName):
         games_dir = Path.cwd() / "games"
@@ -179,9 +193,12 @@ class ZorkDataset(MinRLDataset):
         # This is a placeholder implementation - you'll need to customize based on your needs
         env_idx = i % self.n_environments
         agent = self.agents[env_idx]
+        if agent.done:
+            self.completed_episodes.append(self.agents[env_idx])
+            self.agents[env_idx] = TextWorldAgent()
         if len(agent.observation_history) == 0:
             obs, info = self.envs[env_idx].reset()
-            agent.update(None, obs + info["description"], info["inventory"])
+            agent.update(None, obs + info["description"], info["inventory"], False, 0)
         conv = agent.conversation()
 
         return {
@@ -191,9 +208,18 @@ class ZorkDataset(MinRLDataset):
 
     def post_generate(self, episode: Episode):
         command = parse_command(episode.text)
-        env_idx = episode.batch_index % self.n_environments
-        obs, score, done, infos = self.envs[env_idx].step(command)  # type: ignore
-        self.agents[env_idx].update(command, obs, infos["inventory"].strip("\n"))
+        idx = episode.batch_index % self.n_environments
+        obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
+        logger.info(
+            f"\n### Agent {idx}, score: {score} ###\nCommand: {command}\nObservation: {obs}"
+        )
+        self.agents[idx].update(
+            command,
+            obs,
+            infos["inventory"].strip("\n"),
+            done,
+            score,  # type: ignore
+        )
 
     def __len__(self) -> int:
         return 10000
