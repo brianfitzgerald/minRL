@@ -45,7 +45,7 @@ EVAL_MODELS: dict[ModelName, EvalModel] = {
     },
     "gemini_2.5_flash": {
         "type": "openrouter",
-        "model_id": "google/gemini-2.5-flash-preview-05-20:thinking",
+        "model_id": "google/gemini-2.5-flash-preview-05-20",
     },
     "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
     "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},
