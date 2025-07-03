@@ -14,7 +14,7 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
 
-TaskChoice = Literal["connections", "hanoi"]
+TaskChoice = Literal["connections", "hanoi", "zork"]
 
 
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
@@ -81,7 +81,7 @@ class TrainerConfig(BaseModel):
     skip_unfinished_episodes: bool = False
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "hanoi"
+    task: TaskChoice = "zork"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2

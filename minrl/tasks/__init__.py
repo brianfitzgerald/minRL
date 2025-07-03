@@ -7,6 +7,7 @@ from typing import TypedDict, Protocol, Any
 
 from minrl.tasks.dataset import MinRLDataset
 from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func
+from minrl.tasks.zork import ZorkDataset
 
 
 class RewardFunction(Protocol):
@@ -26,5 +27,10 @@ TASK_DEFINITIONS: dict[TaskChoice, TaskDefinition] = {
     "hanoi": {
         "reward_function": hanoi_reward_func,
         "dataset": HanoiDataset,
+    },
+    "zork": {
+        # TODO: Implement reward function
+        "reward_function": lambda response, sample: 1,
+        "dataset": ZorkDataset,
     },
 }

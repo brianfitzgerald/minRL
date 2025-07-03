@@ -62,4 +62,4 @@ class MinRLDataset(Dataset):
     @abstractmethod
     def post_generate(self, episode: Episode):
         """Some datasets have an internal state that needs to be updated after generation."""
-        raise NotImplementedError("post_generate is not implemented for this dataset")
+        pass

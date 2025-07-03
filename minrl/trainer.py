@@ -23,9 +23,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -153,18 +151,11 @@ class Trainer:
 
             if self.config.skip_unfinished_episodes:
                 episodes = [episode for episode in episodes if episode.is_finished]
+
+            for episode in episodes:
+                self.train_dataset.post_generate(episode)
             logger.info(f"Updating policy for step {step}")
 
-            best_reward, best_reward_episode = -float("inf"), None
-            for episode in episodes:
-                if episode.reward > best_reward:
-                    best_reward = episode.reward
-                    best_reward_episode = episode
-            if best_reward_episode is not None:
-                logger.info(f"Best reward: {best_reward}")
-                self.train_dataset.post_generate(best_reward_episode)
-
-            # Update policy - compute loss and perform backward pass
             results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
