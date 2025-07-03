@@ -134,6 +134,12 @@ def zork_reward_func(response: str, sample: dict[str, Any]) -> float:
     return 0.0
 
 
+class ZorkSample(TypedDict):
+    id: int
+    conversation: list[ChatCompletionMessageParam]
+    agent_index: int
+
+
 class ZorkDataset(MinRLDataset):
     """
     Dataset where the agent plays multiple steps of a text adventure game,
@@ -193,13 +199,13 @@ class ZorkDataset(MinRLDataset):
             f.write(response.content)
 
     def __getitem__(self, i: int) -> dict:
-        # Generate a sample for the given index
-        # This is a placeholder implementation - you'll need to customize based on your needs
+        """On each call, we get a new sample for the given index"""
         env_idx = i % self.n_environments
         agent = self.agents[env_idx]
         if agent.done:
             self.completed_episodes.append(self.agents[env_idx])
             self.agents[env_idx] = TextWorldAgent()
+        # If the agent is done, reset the environment and start a new episode
         if len(agent.observation_history) == 0:
             obs, info = self.envs[env_idx].reset()
             agent.update(None, obs + info["description"], info["inventory"], False, 0)
@@ -208,6 +214,7 @@ class ZorkDataset(MinRLDataset):
         return {
             "id": i,
             "conversation": conv,
+            "agent_index": env_idx,
         }
 
     def post_generate(self, episode: Episode):
@@ -229,7 +236,7 @@ class ZorkDataset(MinRLDataset):
         return 10000
 
     def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessageParam]:
-        agent: TextWorldAgent = self.agents[sample["id"]]
+        agent: TextWorldAgent = self.agents[sample["agent_index"]]
         return agent.conversation()
 
     def collate_fn(self, batch: list[dict]) -> MiniBatch:

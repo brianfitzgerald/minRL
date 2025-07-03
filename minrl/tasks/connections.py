@@ -192,6 +192,15 @@ class ConnectionsDataset(MinRLDataset):
             samples=batch,
         )
 
+    def reward_func(self, response: str, sample: dict[str, Any]) -> float:
+        groups = parse_groups(response)
+        hard_score = score_connections_hard(sample["answer_groups"], groups)
+        soft_score = score_connections_soft(sample["answer_groups"], groups)
+        score = (hard_score + soft_score) / 2
+        if math.isnan(score):
+            return 0.0
+        return score
+
 
 def strict_format_reward_func(
     response: str, samples: dict[str, Any]
@@ -272,14 +281,3 @@ def score_connections_hard(
     if len(submitted_groups) == 0:
         return 0.0
     return float(hard_score) / len(submitted_groups)
-
-
-def connections_reward_func(response: str, sample: dict[str, Any]) -> float:
-    """Reward the number of correct groups."""
-    groups = parse_groups(response)
-    hard_score = score_connections_hard(sample["answer_groups"], groups)
-    soft_score = score_connections_soft(sample["answer_groups"], groups)
-    score = (hard_score + soft_score) / 2
-    if math.isnan(score):
-        return 0.0
-    return score
