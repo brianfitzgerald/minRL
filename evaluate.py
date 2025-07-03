@@ -19,7 +19,7 @@ from minrl.tasks import TASK_DEFINITIONS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
     ModelName,
-    EVAL_MODELS,
+    INFERENCE_MODELS,
 )
 
 """
@@ -57,9 +57,9 @@ def _download_checkpoint_from_modal(checkpoint_name: str):
 
 
 async def main(
-    task: TaskChoice = "connections",
-    model_name: ModelName = "gemini_2_flash",
-    batch_size: int = 32,
+    task: TaskChoice = "zork",
+    model_name: ModelName = "gemini_2.5_flash",
+    batch_size: int = 4,
 ):
     task_definition = TASK_DEFINITIONS[task]
     dataset, reward_function = (
@@ -70,9 +70,9 @@ async def main(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
 
-    if model_name not in EVAL_MODELS:
+    if model_name not in INFERENCE_MODELS:
         raise ValueError(f"Invalid model name: {model_name}")
-    model = EVAL_MODELS[model_name]
+    model = INFERENCE_MODELS[model_name]
     vllm_model: LLM | None = None
     model_type = model["type"]
     if model_type in ["finetuned", "huggingface"]:
@@ -80,9 +80,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert "base_model_id" in model, (
-                "Base model ID is required for finetuned models"
-            )
+            assert (
+                "base_model_id" in model
+            ), "Base model ID is required for finetuned models"
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(

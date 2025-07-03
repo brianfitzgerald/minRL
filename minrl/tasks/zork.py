@@ -5,7 +5,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 import textworld.gym
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 import requests
 from pathlib import Path
 from textworld.gym.envs import TextworldGymEnv
@@ -130,6 +130,10 @@ def parse_command(input_string: str) -> str:
     return command_contents[0]
 
 
+def zork_reward_func(response: str, sample: dict[str, Any]) -> float:
+    return 0.0
+
+
 class ZorkDataset(MinRLDataset):
     """
     Dataset where the agent plays multiple steps of a text adventure game,
@@ -223,6 +227,10 @@ class ZorkDataset(MinRLDataset):
 
     def __len__(self) -> int:
         return 10000
+
+    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessageParam]:
+        agent: TextWorldAgent = self.agents[sample["id"]]
+        return agent.conversation()
 
     def collate_fn(self, batch: list[dict]) -> MiniBatch:
         """

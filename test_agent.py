@@ -1,9 +1,9 @@
 import os
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 import textworld
 import textworld.gym
 from textworld.gym.envs import TextworldGymEnv
-from minrl.constants import EVAL_MODELS, QWEN_3_0_6B
+from minrl.constants import INFERENCE_MODELS, QWEN_3_0_6B
 from minrl.tasks.dataset import Episode
 from minrl.tasks.zork import TextWorldAgent
 from loguru import logger
@@ -14,10 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-model_name = EVAL_MODELS["gemini_2.5_flash"]["model_id"]
+model_name = INFERENCE_MODELS["gemini_2.5_flash"]["model_id"]
 
 
-def test_agent():
+async def test_agent():
     infos = textworld.EnvInfos(
         feedback=True,
         description=True,
@@ -28,7 +28,7 @@ def test_agent():
         facts=True,
     )
 
-    openai_client = OpenAI(
+    openai_client = AsyncOpenAI(
         api_key=os.getenv("OPENROUTER_API_KEY"),
         base_url="https://openrouter.ai/api/v1",
     )
@@ -43,7 +43,7 @@ def test_agent():
     total_score, moves, done, infos = 0, 0, False, {}
     while not done:
         conv = agent.conversation(obs["raw"])  # type: ignore
-        response = openai_client.chat.completions.create(
+        response = await openai_client.chat.completions.create(
             model=model_name,
             messages=conv,
         )

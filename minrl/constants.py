@@ -38,7 +38,7 @@ ModelName = Literal[
     "gemini_2.5_flash",
 ]
 
-EVAL_MODELS: dict[ModelName, EvalModel] = {
+INFERENCE_MODELS: dict[ModelName, EvalModel] = {
     "gemini_2_flash": {
         "type": "openrouter",
         "model_id": "google/gemini-2.0-flash-001",
