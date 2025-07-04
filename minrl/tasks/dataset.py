@@ -63,3 +63,8 @@ class MinRLDataset(Dataset):
     def post_generate(self, episode: Episode):
         """Some datasets have an internal state that needs to be updated after generation."""
         pass
+
+    @abstractmethod
+    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
+        """Reward function for the dataset."""
+        pass

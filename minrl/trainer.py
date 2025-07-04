@@ -23,7 +23,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -84,7 +86,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]["dataset"]
+        dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )
@@ -145,7 +147,7 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answers_per_question=self.config.num_answers_per_question,
-                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
+                reward_function=self.train_dataset.reward_function,
                 vllm_model=self.vllm_model,
             )
 
@@ -208,7 +210,7 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answers_per_question=1,
-                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
+                reward_function=self.eval_dataset.reward_function,
                 vllm_model=self.vllm_model,
             )
             episodes.extend(eval_rollout)

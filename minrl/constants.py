@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from typing import NotRequired, TypedDict, Literal
+from typing import Any, Callable, NotRequired, TypedDict, Literal
+
+RewardFunction = Callable[[str, dict[str, Any]], float]
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
 
@@ -78,7 +80,7 @@ class TrainerConfig(BaseModel):
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
     lr: float = 5e-6
-    skip_unfinished_episodes: bool = False
+    skip_unfinished_episodes: bool = True
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "zork"

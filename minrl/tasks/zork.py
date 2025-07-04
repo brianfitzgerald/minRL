@@ -244,9 +244,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert (
-            len(batch) == self.n_environments
-        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        assert len(batch) == self.n_environments, (
+            "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        )
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []

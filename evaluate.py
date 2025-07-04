@@ -62,10 +62,7 @@ async def main(
     batch_size: int = 4,
 ):
     task_definition = TASK_DEFINITIONS[task]
-    dataset, reward_function = (
-        task_definition["dataset"]("eval", host="local"),
-        task_definition["reward_function"],
-    )
+    dataset = task_definition(split="eval", host="local")
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
@@ -80,9 +77,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert (
-                "base_model_id" in model
-            ), "Base model ID is required for finetuned models"
+            assert "base_model_id" in model, (
+                "Base model ID is required for finetuned models"
+            )
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -142,7 +139,7 @@ async def main(
                 assert isinstance(response, ChatCompletion)
                 response_content = response.choices[0].message.content
             assert response_content is not None, "No response content"
-            score = reward_function(response_content, cast(dict, sample))
+            score = dataset.reward_function(response_content, cast(dict, sample))
             logger.info(f"Score: {score}")
             out_rows.append(
                 {

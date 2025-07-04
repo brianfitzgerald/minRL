@@ -17,7 +17,7 @@ from vllm.sampling_params import (
 from vllm.worker.model_runner_base import ModelRunnerBase
 
 from minrl.constants import AlgorithmChoice, TrainerConfig
-from minrl.tasks import RewardFunction
+from minrl.constants import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
 from minrl.metrics import MetricsWrapper
 
@@ -77,10 +77,7 @@ def rollout(
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
             # Calculate rewards
-            reward = reward_function(
-                response=generated_text,
-                sample=batch.samples[i],
-            )
+            reward = reward_function(generated_text, batch.samples[i])
 
             # Create episode
             episode = Episode(
