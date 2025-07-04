@@ -192,7 +192,7 @@ class ConnectionsDataset(MinRLDataset):
             samples=batch,
         )
 
-    def reward_func(self, response: str, sample: dict[str, Any]) -> float:
+    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
         groups = parse_groups(response)
         hard_score = score_connections_hard(sample["answer_groups"], groups)
         soft_score = score_connections_soft(sample["answer_groups"], groups)

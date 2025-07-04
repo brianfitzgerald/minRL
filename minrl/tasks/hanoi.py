@@ -193,6 +193,9 @@ class HanoiDataset(MinRLDataset):
             samples=batch,
         )
 
+    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
+        return hanoi_reward_func(response, sample)
+
 
 def extract_result_list(s: str) -> list[list[int]]:
     m = re.search(r"<result>(.*?)</result>", s, re.DOTALL)
