@@ -1,6 +1,6 @@
 from loguru import logger
 from minrl.constants import HostType
-from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch, Split
+from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 import textworld.gym
@@ -217,9 +217,10 @@ class ZorkDataset(MinRLDataset):
             "agent_index": env_idx,
         }
 
-    def post_generate(self, episode: Episode):
-        command = parse_command(episode.text)
-        idx = episode.batch_index % self.n_environments
+    def reward_function(self, response: str, sample: ZorkSample) -> float:
+        """This reward function also updates the internal state of the environment."""
+        command = parse_command(response)
+        idx = sample["agent_index"] % self.n_environments
         obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
         logger.info(
             f"\n### Agent {idx}, score: {score} ###\nCommand: {command}\nObservation: {obs}"
@@ -231,6 +232,7 @@ class ZorkDataset(MinRLDataset):
             done,
             score,  # type: ignore
         )
+        return score  # type: ignore
 
     def __len__(self) -> int:
         return 10000

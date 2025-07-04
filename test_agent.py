@@ -4,7 +4,6 @@ import textworld
 import textworld.gym
 from textworld.gym.envs import TextworldGymEnv
 from minrl.constants import INFERENCE_MODELS, QWEN_3_0_6B
-from minrl.tasks.dataset import Episode
 from minrl.tasks.zork import TextWorldAgent
 from loguru import logger
 from minrl.tasks.zork import ZorkDataset
@@ -80,18 +79,6 @@ def test_dataset():
             )
             completion_content = completion.choices[0].message.content
             assert completion_content is not None, "Response is None"
-            episode = Episode(
-                batch_index=i,
-                answer_index=i,
-                prefix=conv[0]["content"],
-                prefix_token_ids=[],
-                generated_token_ids=[],
-                text=completion_content,
-                reward=0,
-                is_finished=False,
-                reward_info={},
-            )
-            dataset.post_generate(episode)
         if i > 10:
             break
 

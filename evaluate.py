@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 from tqdm import tqdm
 
 import fire
@@ -67,6 +67,7 @@ async def main(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
 
+    openai_client = None
     if model_name not in INFERENCE_MODELS:
         raise ValueError(f"Invalid model name: {model_name}")
     model = INFERENCE_MODELS[model_name]
@@ -120,6 +121,7 @@ async def main(
             sampling_params = SamplingParams(max_tokens=1024)
             responses = vllm_model.chat(conversations, sampling_params=sampling_params)
         else:
+            assert openai_client is not None, "OpenAI client is not initialized"
             responses = await asyncio.gather(
                 *[
                     openai_client.chat.completions.create(
@@ -139,7 +141,7 @@ async def main(
                 assert isinstance(response, ChatCompletion)
                 response_content = response.choices[0].message.content
             assert response_content is not None, "No response content"
-            score = dataset.reward_function(response_content, cast(dict, sample))
+            score = dataset.reward_function(response_content, sample)
             logger.info(f"Score: {score}")
             out_rows.append(
                 {

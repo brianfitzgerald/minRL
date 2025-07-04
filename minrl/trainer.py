@@ -154,8 +154,6 @@ class Trainer:
             if self.config.skip_unfinished_episodes:
                 episodes = [episode for episode in episodes if episode.is_finished]
 
-            for episode in episodes:
-                self.train_dataset.post_generate(episode)
             logger.info(f"Updating policy for step {step}")
 
             results = update_policy(

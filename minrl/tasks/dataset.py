@@ -20,6 +20,7 @@ class Episode:
     batch_index: int
     answer_index: int
     prefix: str
+    # prefix + generated text
     text: str
     # Token IDs of the prefix
     prefix_token_ids: list[int]
@@ -27,7 +28,7 @@ class Episode:
     generated_token_ids: list[int]
     is_finished: bool
     reward: float
-    reward_info: dict[str, float]
+    sample: dict[str, Any]
 
 
 @dataclass

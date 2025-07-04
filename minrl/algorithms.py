@@ -89,7 +89,7 @@ def rollout(
                 generated_token_ids=generated_token_ids,
                 is_finished=end_token_id in generated_token_ids,
                 reward=reward,
-                reward_info={},
+                sample=batch.samples[i],
             )
             episodes.append(episode)
 
