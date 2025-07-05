@@ -12,7 +12,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import LoggerChoice, HostType, TrainerConfig
 from minrl.metrics import MetricsWrapper
-from minrl.tasks import TASK_DEFINITIONS
+from minrl.tasks import TASK_DATASETS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
 from minrl.tasks.dataset import Episode, MinRLDataset
@@ -23,9 +23,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -86,7 +84,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]
+        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )

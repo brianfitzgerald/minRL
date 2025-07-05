@@ -5,7 +5,7 @@ from minrl.tasks.hanoi import HanoiDataset
 from minrl.tasks.zork import ZorkDataset
 
 
-TASK_DEFINITIONS: dict[TaskChoice, type[MinRLDataset]] = {
+TASK_DATASETS: dict[TaskChoice, type[MinRLDataset]] = {
     "connections": ConnectionsDataset,
     "hanoi": HanoiDataset,
     "zork": ZorkDataset,

@@ -21,17 +21,13 @@ INSTRUCTIONS:
    • Visible exits and objects  
    • Any puzzles or obstacles described  
 
-2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor"). You can also type 'verbose' to see the full description of the current location.
+2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor").
 
 3. Always choose the highest-value action, balancing exploration, safety (avoid known hazards), and puzzle-solving.
 
 4. Never output internal reasoning.  Only output the next command, prefixed with:
    
    <command>your next command</command>
-
-5. If you ever die or become stuck, output:
-   
-   <command>restart</command>
 
 EXAMPLE TURN:
 You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.
@@ -40,7 +36,6 @@ Your response should be:
    
    <command>take key</command>
 
-That's all.  Ready?  Begin by reading the game's opening description.  When you're ready, output your first COMMAND.
 """
 
 ZGameName = Literal["zork1"]
@@ -151,11 +146,11 @@ class ZorkDataset(MinRLDataset):
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
-        n_environments: int = 4,
+        batch_size: int = 4,
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        self.n_environments = n_environments
+        self.n_environments = batch_size
         self.game_name: ZGameName = "zork1"
         self.game_metadata = Z_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
@@ -218,10 +213,18 @@ class ZorkDataset(MinRLDataset):
         }
 
     def reward_function(self, response: str, sample: ZorkSample) -> float:
-        """This reward function also updates the internal state of the environment."""
-        command = parse_command(response)
+        """This steps the environment and updates agent state, and returns the reward gotten for the step."""
+        try:
+            command = parse_command(response)
+        except Exception as e:
+            logger.error(f"Error parsing command: {e}")
+            return 0.0
         idx = sample["agent_index"] % self.n_environments
         obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
+        print("infos:")
+        for k, v in infos.items():
+            val = v.strip() if isinstance(v, str) else v
+            print(f"{k}: {val}")
         logger.info(
             f"\n### Agent {idx}, score: {score} ###\nCommand: {command}\nObservation: {obs}"
         )
@@ -246,9 +249,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert len(batch) == self.n_environments, (
-            "Batch size must be >= n_environments, cannot have multiple games in a batch"
-        )
+        assert (
+            len(batch) == self.n_environments
+        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []

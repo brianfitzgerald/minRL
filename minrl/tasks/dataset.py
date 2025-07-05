@@ -46,10 +46,12 @@ class MinRLDataset(Dataset):
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
+        batch_size: int = 4,
     ):
         self.split = split
         self.tokenizer = tokenizer
         self.host = host
+        self.batch_size = batch_size
 
     @abstractmethod
     def collate_fn(self, batch: list[dict]) -> MiniBatch:
