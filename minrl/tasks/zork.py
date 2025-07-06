@@ -46,7 +46,7 @@ class ZGame(TypedDict):
     filename: str
 
 
-Z_GAMES: dict[ZGameName, ZGame] = {
+TEXTWORLD_GAMES: dict[ZGameName, ZGame] = {
     "zork1": {
         "url": "https://github.com/danielricks/textplayer/raw/refs/heads/master/games/zork1.z5",
         "filename": "zork1.z5",
@@ -152,7 +152,7 @@ class ZorkDataset(MinRLDataset):
         self.tokenizer = tokenizer
         self.n_environments = batch_size
         self.game_name: ZGameName = "zork1"
-        self.game_metadata = Z_GAMES[self.game_name]
+        self.game_metadata = TEXTWORLD_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
         self.infos = textworld.EnvInfos(
             feedback=True,
@@ -221,13 +221,7 @@ class ZorkDataset(MinRLDataset):
             return 0.0
         idx = sample["agent_index"] % self.n_environments
         obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
-        print("infos:")
-        for k, v in infos.items():
-            val = v.strip() if isinstance(v, str) else v
-            print(f"{k}: {val}")
-        logger.info(
-            f"\n### Agent {idx}, score: {score} ###\nCommand: {command}\nObservation: {obs}"
-        )
+        logger.info(f"\n### Agent {idx}###\nCommand: {command}\nObservation: {obs}")
         self.agents[idx].update(
             command,
             obs,
@@ -249,9 +243,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert (
-            len(batch) == self.n_environments
-        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        assert len(batch) == self.n_environments, (
+            "Batch size must be >= n_environments, cannot have multiple games in a batch"
+        )
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []
