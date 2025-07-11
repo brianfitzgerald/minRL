@@ -6,13 +6,15 @@ from minrl.tasks.zork import TextWorldAgent
 from loguru import logger
 from dotenv import load_dotenv
 import fire
+import os
+from pathlib import Path
 
 load_dotenv()
 
 model_name = INFERENCE_MODELS["gemini_2.5_flash"]["model_id"]
 
 
-async def test_agent():
+async def test_agent(game: str = "wurm.z5"):
     infos = textworld.EnvInfos(
         feedback=True,
         description=True,
@@ -23,7 +25,10 @@ async def test_agent():
         facts=True,
     )
 
-    env_id = textworld.gym.register_game("games/zork1.z5", infos)
+    games_dir = Path(os.path.expanduser("~/Documents/GitHub/DeepZork/game_files"))
+    games_path = games_dir / game
+    logger.info(games_path)
+    env_id = textworld.gym.register_game(games_path.as_posix(), infos)
     env: TextworldGymEnv = textworld.gym.make(env_id)
     obs = env.reset()
 
