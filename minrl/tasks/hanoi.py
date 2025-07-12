@@ -6,7 +6,7 @@ from loguru import logger
 import re
 import ast
 import numpy as np
-from minrl.constants import HostType
+from minrl.constants import Conversation, HostType
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -169,33 +169,6 @@ class HanoiDataset(MinRLDataset):
             },
         ]
 
-    def collate_fn(self, batch: List[HanoiSample]) -> MiniBatch:
-        """
-        Collate examples into a batch.
-        Used during training only, requires a tokenizer.
-        """
-        if self.tokenizer is None:
-            raise ValueError("Tokenizer is not set")
-        prefixes = []
-        prefix_token_ids = []
-        for item in batch:
-            prefix: str = self.tokenizer.apply_chat_template(  # type: ignore
-                self.conversation(item),
-                tokenize=False,
-                enable_thinking=False,
-            )
-            prefixes.append(prefix)
-            prefix_token_ids.append(self.tokenizer.encode(prefix))
-
-        return MiniBatch(
-            prefixes=prefixes,
-            prefix_token_ids=prefix_token_ids,
-            samples=batch,
-        )
-
-    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
-        return hanoi_reward_func(response, sample)
-
 
 def extract_result_list(s: str) -> list[list[int]]:
     m = re.search(r"<result>(.*?)</result>", s, re.DOTALL)
@@ -204,10 +177,10 @@ def extract_result_list(s: str) -> list[list[int]]:
     return ast.literal_eval(m.group(1))
 
 
-def hanoi_reward_func(response: str, sample: dict[str, Any]) -> float:
+def hanoi_reward_func(conversation: Conversation, sample: dict[str, Any]) -> float:
     try:
         game = TowerOfHanoi(sample["n_disks"])
-        moves = extract_result_list(response)
+        moves = extract_result_list(conversation[-1]["content"])
         n_valid_moves, required_moves, solved = 0, game.get_minimum_moves(), False
         for i, move in enumerate(moves):
             from_stack, to_stack = move[1], move[2]

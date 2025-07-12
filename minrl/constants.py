@@ -1,7 +1,16 @@
 from pydantic import BaseModel
-from typing import Any, Callable, NotRequired, TypedDict, Literal
+from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal
 
-RewardFunction = Callable[[str, dict[str, Any]], float]
+
+class ConversationMessage(TypedDict):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+Conversation: TypeAlias = list[ConversationMessage]
+
+
+RewardFunction = Callable[[Conversation, dict[str, Any]], float]
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
 

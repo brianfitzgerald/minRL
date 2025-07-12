@@ -1,5 +1,5 @@
 from loguru import logger
-from minrl.constants import HostType
+from minrl.constants import Conversation, HostType
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
@@ -125,7 +125,7 @@ def parse_command(input_string: str) -> str:
     return command_contents[0]
 
 
-def zork_reward_func(response: str, sample: dict[str, Any]) -> float:
+def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> float:
     return 0.0
 
 
@@ -243,9 +243,9 @@ class ZorkDataset(MinRLDataset):
         Collate examples into a batch.
         Used during training only, requires a tokenizer.
         """
-        assert len(batch) == self.n_environments, (
-            "Batch size must be >= n_environments, cannot have multiple games in a batch"
-        )
+        assert (
+            len(batch) == self.n_environments
+        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
         if self.tokenizer is None:
             raise ValueError("Tokenizer is not set")
         prefixes = []

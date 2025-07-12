@@ -61,7 +61,7 @@ async def main(
     model_name: ModelName = "gpt_4.1_mini",
     batch_size: int = 1,
 ):
-    dataset_cls = TASK_DATASETS[task]
+    dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local", batch_size=batch_size)
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
@@ -78,9 +78,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert "base_model_id" in model, (
-                "Base model ID is required for finetuned models"
-            )
+            assert (
+                "base_model_id" in model
+            ), "Base model ID is required for finetuned models"
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -141,7 +141,9 @@ async def main(
                 assert isinstance(response, ChatCompletion)
                 response_content = response.choices[0].message.content
             assert response_content is not None, "No response content"
-            score = dataset.reward_function(response_content, sample)
+            score = TASK_DATASETS[task]["reward_function"](
+                [{"role": "assistant", "content": response_content}], sample
+            )
             logger.info(f"Score: {score}")
             out_rows.append(
                 {

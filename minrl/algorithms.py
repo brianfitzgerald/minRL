@@ -77,7 +77,10 @@ def rollout(
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
             # Calculate rewards
-            reward = reward_function(generated_text, batch.samples[i])
+            # TODO store and send the whole conversation
+            reward = reward_function(
+                [{"role": "assistant", "content": generated_text}], batch.samples[i]
+            )
 
             # Create episode
             episode = Episode(

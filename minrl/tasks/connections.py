@@ -8,7 +8,7 @@ from loguru import logger
 from sklearn.model_selection import train_test_split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
-from minrl.constants import HostType
+from minrl.constants import Conversation, HostType
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -192,14 +192,17 @@ class ConnectionsDataset(MinRLDataset):
             samples=batch,
         )
 
-    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
-        groups = parse_groups(response)
-        hard_score = score_connections_hard(sample["answer_groups"], groups)
-        soft_score = score_connections_soft(sample["answer_groups"], groups)
-        score = (hard_score + soft_score) / 2
-        if math.isnan(score):
-            return 0.0
-        return score
+
+def connections_reward_func(
+    conversation: Conversation, sample: dict[str, Any]
+) -> float:
+    groups = parse_groups(conversation[-1]["content"])
+    hard_score = score_connections_hard(sample["answer_groups"], groups)
+    soft_score = score_connections_soft(sample["answer_groups"], groups)
+    score = (hard_score + soft_score) / 2
+    if math.isnan(score):
+        return 0.0
+    return score
 
 
 def strict_format_reward_func(
