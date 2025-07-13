@@ -169,49 +169,26 @@ class ConnectionsDataset(MinRLDataset):
             {"role": "user", "content": sample["prompt"]},
         ]
 
-    def collate_fn(self, batch: List[ConnectionsSample]) -> MiniBatch:
-        """
-        Collate examples into a batch.
-        Used during training / only, requires a tokenizer.
-        """
-        if self.tokenizer is None:
-            raise ValueError("Tokenizer is not set")
-        prefixes, prefix_token_ids = [], []
-        for sample in batch:
-            prefix: str = self.tokenizer.apply_chat_template(
-                self.conversation(sample),  # type: ignore
-                tokenize=False,
-                enable_thinking=False,
-            )  # type: ignore
-            tokens = self.tokenizer.encode(prefix)
-            prefixes.append(prefix)
-            prefix_token_ids.append(tokens)
-        return MiniBatch(
-            prefixes=prefixes,
-            prefix_token_ids=prefix_token_ids,
-            samples=batch,
-        )
-
 
 def connections_reward_func(
     conversation: Conversation, sample: dict[str, Any]
 ) -> float:
-    groups = parse_groups(conversation[-1]["content"])
+    answer_str = conversation[-1]["content"]
+    groups = parse_groups(answer_str)
+    format_score = strict_format_reward_func(answer_str)
     hard_score = score_connections_hard(sample["answer_groups"], groups)
     soft_score = score_connections_soft(sample["answer_groups"], groups)
-    score = (hard_score + soft_score) / 2
+    score = (hard_score + soft_score) / 2 + format_score
     if math.isnan(score):
         return 0.0
     return score
 
 
-def strict_format_reward_func(
-    response: str, samples: dict[str, Any]
-) -> Dict[str, float]:
+def strict_format_reward_func(response: str) -> float:
     """Reward function that checks if the completion has the right format, with strict spacing."""
     pattern = r"^<reasoning>.*?</reasoning>\s*<answer>.*?</answer>\s*$"
     match = re.match(pattern, response, flags=re.DOTALL)
-    return {"reward": 0.25 if match else 0.0}
+    return 0.25 if match else 0.0
 
 
 def parse_groups(input_string) -> list[list[str]]:

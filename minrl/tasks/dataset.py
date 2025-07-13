@@ -1,12 +1,12 @@
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
-from minrl.constants import HostType
+from minrl.constants import Conversation, HostType, Sample
 
 
 Split = Literal["train", "test", "eval"]
@@ -19,25 +19,17 @@ class Episode:
     # Index of sample in batch
     batch_index: int
     answer_index: int
-    prefix: str
-    # prefix + generated text
-    text: str
-    # Token IDs of the prefix
-    prefix_token_ids: list[int]
-    # Token IDs of the generated text
-    generated_token_ids: list[int]
-    is_finished: bool
+    finished: bool
     reward: float
-    sample: dict[str, Any]
+    conversation: Conversation
 
 
 @dataclass
 class MiniBatch:
     """Batch of data for each training step."""
 
-    prefixes: list[str]
-    prefix_token_ids: list[list[int]]
-    samples: list[Any]
+    conversations: list[Conversation]
+    samples: list[Sample]
 
 
 class MinRLDataset(Dataset):
@@ -54,12 +46,8 @@ class MinRLDataset(Dataset):
         self.batch_size = batch_size
 
     @abstractmethod
-    def collate_fn(self, batch: list[dict]) -> MiniBatch:
-        pass
-
-    @abstractmethod
-    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessageParam]:
-        """Conversation used to generate the prefix, or the prompt for evals."""
+    def conversation(self, sample: Sample) -> Conversation:
+        """Conversation used to generate a completion."""
         pass
 
     @abstractmethod
@@ -68,6 +56,6 @@ class MinRLDataset(Dataset):
         pass
 
     @abstractmethod
-    def reward_function(self, response: str, sample: dict[str, Any]) -> float:
+    def reward_function(self, response: str, sample: Sample) -> float:
         """Reward function for the dataset."""
         pass

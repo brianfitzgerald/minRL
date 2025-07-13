@@ -10,7 +10,8 @@ class ConversationMessage(TypedDict):
 Conversation: TypeAlias = list[ConversationMessage]
 
 
-RewardFunction = Callable[[Conversation, dict[str, Any]], float]
+Sample: TypeAlias = dict[str, Any]
+RewardFunction: TypeAlias = Callable[[Conversation, Sample], float]
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
 

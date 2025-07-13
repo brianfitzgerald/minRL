@@ -86,13 +86,12 @@ def rollout(
             episode = Episode(
                 batch_index=i,
                 answer_index=j,
-                prefix=batch.prefixes[i],
-                text=batch.prefixes[i] + generated_text,
-                prefix_token_ids=batch.prefix_token_ids[i],
-                generated_token_ids=generated_token_ids,
-                is_finished=end_token_id in generated_token_ids,
+                finished=end_token_id in generated_token_ids,
                 reward=reward,
-                sample=batch.samples[i],
+                conversation=[
+                    {"role": "user", "content": batch.prefixes[i]},
+                    {"role": "assistant", "content": generated_text},
+                ],
             )
             episodes.append(episode)
 
@@ -155,6 +154,11 @@ def update_policy(
     algorithm: AlgorithmChoice,
     apply_loss: bool = True,
 ) -> dict[str, float]:
+    """
+    Once episodes are generated, use them to update the policy
+    by computing the loss from the reward and generated logits.
+    This implements a number of different algorithms.
+    """
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
@@ -286,7 +290,7 @@ def compute_metrics(
     optimizer: torch.optim.Optimizer,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
-    num_finished_episodes = sum(episode.is_finished for episode in episodes)
+    num_finished_episodes = sum(episode.finished for episode in episodes)
     mean_reward = float(np.mean(reward))
     std_reward = float(np.std(reward))
     grad_norm = results["grad_norm"]

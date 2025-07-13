@@ -15,7 +15,7 @@ from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.dataset import Episode, MinRLDataset
+from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch
 from vllm.envs import set_vllm_use_v1
 
 
@@ -34,6 +34,30 @@ def simple_timestamp() -> str:
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # type: ignore
+
+
+def collate_fn(self, batch: list[dict[str, Any]]) -> MiniBatch:
+    """
+    Collate examples into a batch.
+    Used during training / only, requires a tokenizer.
+    """
+    if self.tokenizer is None:
+        raise ValueError("Tokenizer is not set")
+    prefixes, prefix_token_ids = [], []
+    for sample in batch:
+        prefix: str = self.tokenizer.apply_chat_template(
+            self.conversation(sample),  # type: ignore
+            tokenize=False,
+            enable_thinking=False,
+        )  # type: ignore
+        tokens = self.tokenizer.encode(prefix)
+        prefixes.append(prefix)
+        prefix_token_ids.append(tokens)
+    return MiniBatch(
+        prefixes=prefixes,
+        prefix_token_ids=prefix_token_ids,
+        samples=batch,
+    )
 
 
 class Trainer:
@@ -150,7 +174,7 @@ class Trainer:
             )
 
             if self.config.skip_unfinished_episodes:
-                episodes = [episode for episode in episodes if episode.is_finished]
+                episodes = [episode for episode in episodes if episode.finished]
 
             logger.info(f"Updating policy for step {step}")
 
