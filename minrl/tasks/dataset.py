@@ -4,7 +4,6 @@ from typing import Literal
 
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from minrl.constants import Conversation, HostType, Sample
 
@@ -16,8 +15,8 @@ Split = Literal["train", "test", "eval"]
 class Episode:
     """Store all relevant information of an episode."""
 
-    # Index of sample in batch
-    batch_index: int
+    # Index of group in batch
+    group_index: int
     answer_index: int
     finished: bool
     reward: float
@@ -30,6 +29,9 @@ class MiniBatch:
 
     conversations: list[Conversation]
     samples: list[Sample]
+
+    def __len__(self) -> int:
+        return len(self.samples)
 
 
 class MinRLDataset(Dataset):

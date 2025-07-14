@@ -18,7 +18,8 @@ MODAL_MODELS_VOLUME_NAME = "minrl-models"
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"
 QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
-SMOL_LM_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
+SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
+TINY_LLAMA_V0 = "Maykeye/TinyLLama-v0"
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
 AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
@@ -27,7 +28,6 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 HostType = Literal["modal", "local"]
 
 TaskChoice = Literal["connections", "hanoi", "zork"]
-
 
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 

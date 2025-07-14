@@ -108,7 +108,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]
+        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )
@@ -119,7 +119,7 @@ class Trainer:
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
-            collate_fn=self.train_dataset.collate_fn,
+            collate_fn=collate_fn,
             generator=generator,
             batch_size=self.config.train_batch_size,
         )
