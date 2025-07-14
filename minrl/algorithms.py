@@ -10,7 +10,7 @@ import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from vllm import LLM
+from vllm import LLM, TokensPrompt
 from vllm.sampling_params import (
     SamplingParams,
 )
@@ -56,8 +56,12 @@ def rollout(
             conversations, tokenize=True, enable_thinking=False
         )
 
+        prefixes_prompts: list[TokensPrompt] = [
+            {"prompt_token_ids": prefix} for prefix in prefixes_batch
+        ]
+
         outputs = vllm_model.generate(
-            prefixes_batch,
+            prefixes_prompts,
             sampling_params=SamplingParams(
                 max_tokens=max_new_tokens,
                 temperature=config.temperature,
