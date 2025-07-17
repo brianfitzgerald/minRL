@@ -23,7 +23,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -62,7 +64,7 @@ class Trainer:
             max_model_len=self.config.max_new_tokens,
             max_seq_len_to_capture=self.config.max_new_tokens,
             enforce_eager=True,
-            dtype="bfloat16",
+            dtype="bfloat16" if not USING_MPS else "float16",
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "flash_attention_2" if self.device.type == "cuda" else "sdpa"
