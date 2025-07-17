@@ -5,6 +5,7 @@ from vllm import LLM
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+import numpy as np
 from loguru import logger
 from torch.utils.data import DataLoader
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
@@ -134,6 +135,8 @@ class Trainer:
             4. Saves checkpoints periodically
             5. Logs metrics to TensorBoard or Weights & Biases
         """
+        
+        prev_reward_std: float | None = None
 
         for step, batch in enumerate(self.train_dataloader, start=1):
             logger.info(f"Starting rollout for step {step}")
@@ -149,6 +152,7 @@ class Trainer:
                 num_answers_per_question=self.config.num_answers_per_question,
                 reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
                 vllm_model=self.vllm_model,
+                prev_reward_std=prev_reward_std,
             )
             if self.config.skip_unfinished_episodes:
                 episodes = [episode for episode in episodes if episode.is_finished]
@@ -166,14 +170,25 @@ class Trainer:
                 vllm_model=self.vllm_model,
                 algorithm=self.config.algorithm,
             )
+            # Compute current reward std for next iteration
+            current_rewards = [episode.reward for episode in episodes]
+            current_reward_std = float(np.std(current_rewards))
+            
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             if step % self.config.eval_interval == 0:
                 self.evaluate(step)
 
+            # Get temperature used for logging
+            from minrl.algorithms import compute_scaled_temperature
+            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
+            
             compute_metrics(
-                episodes, results, self.metrics_wrapper, step, self.optimizer
+                episodes, results, self.metrics_wrapper, step, self.optimizer, temperature_used
             )
+            
+            # Update prev_reward_std for next iteration
+            prev_reward_std = current_reward_std
             # save checkpoint
             if step % self.config.ckpt_save_interval == 0:
                 logger.info(f"Saving checkpoint for step {step}")

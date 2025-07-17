@@ -36,6 +36,9 @@ class TrainerConfig(BaseModel):
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2
+    temperature_scaling: bool = False
+    temperature_min: float = 0.6
+    temperature_max: float = 2.0
 
     @property
     def model_display_name(self) -> str:
