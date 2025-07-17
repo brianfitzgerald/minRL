@@ -26,6 +26,31 @@ debug_tokenizer = AutoTokenizer.from_pretrained(
 )
 
 
+def compute_scaled_temperature(
+    config: TrainerConfig,
+    prev_reward_std: float | None = None,
+    reference_std: float = 1.0,
+) -> float:
+    """
+    Compute temperature scaled based on previous batch reward standard deviation.
+    As reward std decreases, temperature increases.
+
+    """
+    if not config.temperature_scaling or prev_reward_std is None:
+        return config.temperature
+
+    if prev_reward_std <= 0:
+        return config.temperature_max
+
+    scale_factor = reference_std / prev_reward_std
+
+    scaled_temp = config.temperature * scale_factor
+
+    scaled_temp = max(config.temperature_min, min(config.temperature_max, scaled_temp))
+
+    return scaled_temp
+
+
 @torch.no_grad()
 def rollout(
     config: TrainerConfig,
@@ -35,6 +60,7 @@ def rollout(
     num_answers_per_question: int,
     reward_function: RewardFunction,
     vllm_model: LLM,
+    prev_reward_std: float | None = None,
 ) -> List[Episode]:
     """Generate multiple responses for each prompt in the batch."""
     end_token_id: int = tokenizer.eos_token_id  # type: ignore
@@ -42,8 +68,11 @@ def rollout(
 
     # Convert to tensor and move to device
 
+    # Compute scaled temperature based on previous reward std
+    temperature = compute_scaled_temperature(config, prev_reward_std)
+
     logger.info(
-        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answers_per_question}"
+        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answers_per_question}, temperature={temperature:.3f}"
     )
     prefixes_batch: list[str] = [batch.prefixes[i] for i in range(len(batch.prefixes))]
 
@@ -51,7 +80,7 @@ def rollout(
         prefixes_batch,
         sampling_params=SamplingParams(
             max_tokens=max_new_tokens,
-            temperature=config.temperature,
+            temperature=temperature,
             n=num_answers_per_question,
         ),
     )
@@ -282,6 +311,7 @@ def compute_metrics(
     metrics_wrapper: MetricsWrapper,
     step: int,
     optimizer: torch.optim.Optimizer,
+    temperature: float | None = None,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
     num_finished_episodes = sum(episode.is_finished for episode in episodes)
@@ -305,6 +335,8 @@ def compute_metrics(
     metrics_wrapper.add_scalar("train/learning_rate", lr, step)
     metrics_wrapper.add_scalar("train/mean_response_len", mean_response_len, step)
     metrics_wrapper.add_scalar("train/entropy", entropy, step)
+    if temperature is not None:
+        metrics_wrapper.add_scalar("train/temperature", temperature, step)
     for i, episode in enumerate(episodes):
         text = html.escape(episode.text)
         metrics_wrapper.add_text(f"sample_{i}", text, step)
@@ -319,5 +351,7 @@ def compute_metrics(
         "mean_response_len": mean_response_len,
         "num_finished_episodes": float(num_finished_episodes),
     }
+    if temperature is not None:
+        log_dict["temperature"] = temperature
     logger.info(f"Metrics: {log_dict}")
     return log_dict

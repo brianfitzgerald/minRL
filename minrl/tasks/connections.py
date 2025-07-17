@@ -115,11 +115,8 @@ class ConnectionsDataset(MinRLDataset):
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
         super().__init__(split, host, tokenizer)
-        generated_prompts_path = (
-            "/data/connections_generated.jsonl"
-            if host == "modal"
-            else "data/connections_generated.jsonl"
-        )
+        dataset_dir = "/data/connections" if host == "modal" else "data/"
+        generated_prompts_path = f"{dataset_dir}/connections_generated.jsonl"
         logger.info(f"Loading generated prompts from {generated_prompts_path}")
         prompts_pd = pd.read_json(generated_prompts_path, lines=True)
         df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
@@ -140,15 +137,16 @@ class ConnectionsDataset(MinRLDataset):
 
         samples_generated = pd.DataFrame(groups)
         samples_generated = samples_generated.apply(_map_generated_sample, axis=1)
-        canonical_prompts_path = (
-            "/data/connections_canonical.json"
-            if host == "modal"
-            else "data/connections_canonical.json"
-        )
+        canonical_prompts_path = f"{dataset_dir}/connections_canonical.json"
         logger.info(f"Loading canonical prompts from {canonical_prompts_path}")
         samples_canonical = pd.read_json(canonical_prompts_path)
         samples_canonical = samples_canonical.apply(_map_canonical_sample, axis=1)
-        train_data, val_data = train_test_split(
+
+        # concat both datasets
+        samples_generated = pd.concat([samples_generated, samples_canonical])
+
+        # Only use generated samples for now
+        train_data, val_data = train_test_split(  # type: ignore
             samples_generated, test_size=0.1, random_state=42
         )
         self.dataframe: pd.DataFrame = train_data if split == "train" else val_data
