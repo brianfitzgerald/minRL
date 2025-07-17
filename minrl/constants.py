@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Literal
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
+MODAL_DATASET_VOLUME_NAME = "minrl-datasets"
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"
@@ -36,9 +37,9 @@ class TrainerConfig(BaseModel):
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2
-    temperature_scaling: bool = False
-    temperature_min: float = 0.6
-    temperature_max: float = 2.0
+    temperature_scaling: bool = True
+    temperature_min: float = 0.2
+    temperature_max: float = 1.5
 
     @property
     def model_display_name(self) -> str:
