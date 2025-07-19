@@ -1,7 +1,7 @@
 import sys
 from loguru import logger
 from minrl.constants import Conversation, HostType
-from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 import textworld.gym
@@ -168,9 +168,6 @@ class ZorkDataset(MinRLDataset):
             f"games/{self.game_metadata['filename']}", self.infos
         )
 
-        self.envs: list[TextworldGymEnv] = [
-            textworld.gym.make(env_id) for _ in range(self.n_environments)
-        ]
         self.completed_episodes = []
 
     def _download_game_if_needed(self, game_name: ZGameName):
@@ -194,7 +191,13 @@ class ZorkDataset(MinRLDataset):
     def __getitem__(self, index: int) -> Any:
         env: TextworldGymEnv = textworld.gym.make(self.env_id)
         agent = TextWorldAgent()
-        return agent.format_conversation()
+        conversation: Conversation = []
+        for _ in range(self.max_steps):
+            obs, score, done, infos = env.step(agent.format_conversation())  # type: ignore
+            agent.update(obs, score, done, infos)  # type: ignore
+            conversation = agent.format_conversation()
+
+        return conversation
 
     def __len__(self) -> int:
         return sys.maxsize
