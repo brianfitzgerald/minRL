@@ -17,6 +17,7 @@ class Episode:
 
     # Index of group in batch
     group_index: int
+    # Index of answer in group
     answer_index: int
     finished: bool
     reward: float
@@ -35,29 +36,25 @@ class MiniBatch:
 
 
 class MinRLDataset(Dataset):
+    """
+    Base class for all datasets.
+    Each dataset has a step wise inference function and a max number of steps.
+    """
+
+    max_steps: int = 1
+
     def __init__(
         self,
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
-        batch_size: int = 4,
     ):
         self.split = split
         self.tokenizer = tokenizer
         self.host = host
-        self.batch_size = batch_size
 
     @abstractmethod
-    def conversation(self, sample: Sample) -> Conversation:
-        """Conversation used to generate a completion."""
-        pass
-
-    @abstractmethod
-    def post_generate(self, episode: Episode):
-        """Some datasets have an internal state that needs to be updated after generation."""
-        pass
-
-    @abstractmethod
-    def reward_function(self, response: str, sample: Sample) -> float:
-        """Reward function for the dataset."""
-        pass
+    def conversation(self, sample: Sample, conversation: Conversation) -> Conversation:
+        """
+        Given a sample and a conversation, the conversation to complete.
+        """

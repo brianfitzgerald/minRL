@@ -262,6 +262,7 @@ def update_policy(
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
 
+        # Get the cross entropy loss of the label and generated tokens
         logprobs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             target_token_ids.reshape(-1),

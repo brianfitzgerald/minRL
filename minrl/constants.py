@@ -3,7 +3,7 @@ from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal
 
 
 class ConversationMessage(TypedDict):
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "system"]
     content: str
 
 

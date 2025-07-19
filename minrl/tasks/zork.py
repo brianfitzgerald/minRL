@@ -1,3 +1,4 @@
+import sys
 from loguru import logger
 from minrl.constants import Conversation, HostType
 from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
@@ -70,7 +71,7 @@ class TextWorldAgent:
         self.done = False
         self.score = 0
 
-    def conversation(self) -> list[ChatCompletionMessageParam]:
+    def format_conversation(self) -> Conversation:
         """Format conversation used for inference, given current state"""
         user_message = ""
         if self.inventory and len(self.inventory) > 0:
@@ -141,16 +142,16 @@ class ZorkDataset(MinRLDataset):
     and the reward is the sum of the rewards for each step.
     """
 
+    max_steps: int = 10
+
     def __init__(
         self,
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
-        batch_size: int = 4,
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        self.n_environments = batch_size
         self.game_name: ZGameName = "zork1"
         self.game_metadata = TEXTWORLD_GAMES[self.game_name]
         self._download_game_if_needed(self.game_name)
@@ -163,15 +164,12 @@ class ZorkDataset(MinRLDataset):
             entities=True,
             facts=True,
         )
-        env_id = textworld.gym.register_game(
+        self.env_id = textworld.gym.register_game(
             f"games/{self.game_metadata['filename']}", self.infos
         )
 
         self.envs: list[TextworldGymEnv] = [
             textworld.gym.make(env_id) for _ in range(self.n_environments)
-        ]
-        self.agents: list[TextWorldAgent] = [
-            TextWorldAgent() for _ in range(self.n_environments)
         ]
         self.completed_episodes = []
 
@@ -193,74 +191,30 @@ class ZorkDataset(MinRLDataset):
         with open(game_path, "wb") as f:
             f.write(response.content)
 
-    def __getitem__(self, i: int) -> dict:
-        """On each call, we get a new sample for the given index"""
-        env_idx = i % self.n_environments
-        agent = self.agents[env_idx]
-        if agent.done:
-            self.completed_episodes.append(self.agents[env_idx])
-            self.agents[env_idx] = TextWorldAgent()
-        # If the agent is done, reset the environment and start a new episode
-        if len(agent.observation_history) == 0:
-            obs, info = self.envs[env_idx].reset()
-            agent.update(None, obs + info["description"], info["inventory"], False, 0)
-        conv = agent.conversation()
-
-        return {
-            "id": i,
-            "conversation": conv,
-            "agent_index": env_idx,
-        }
-
-    def reward_function(self, response: str, sample: ZorkSample) -> float:
-        """This steps the environment and updates agent state, and returns the reward gotten for the step."""
-        try:
-            command = parse_command(response)
-        except Exception as e:
-            logger.error(f"Error parsing command: {e}")
-            return 0.0
-        idx = sample["agent_index"] % self.n_environments
-        obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
-        logger.info(f"\n### Agent {idx}###\nCommand: {command}\nObservation: {obs}")
-        self.agents[idx].update(
-            command,
-            obs,
-            infos["inventory"].strip("\n"),
-            done,
-            score,  # type: ignore
-        )
-        return score  # type: ignore
+    def __getitem__(self, index: int) -> Any:
+        env: TextworldGymEnv = textworld.gym.make(self.env_id)
+        agent = TextWorldAgent()
+        return agent.format_conversation()
 
     def __len__(self) -> int:
-        return 10000
+        return sys.maxsize
 
-    def conversation(self, sample: dict[str, Any]) -> list[ChatCompletionMessageParam]:
-        agent: TextWorldAgent = self.agents[sample["agent_index"]]
-        return agent.conversation()
 
-    def collate_fn(self, batch: list[dict]) -> MiniBatch:
-        """
-        Collate examples into a batch.
-        Used during training only, requires a tokenizer.
-        """
-        assert (
-            len(batch) == self.n_environments
-        ), "Batch size must be >= n_environments, cannot have multiple games in a batch"
-        if self.tokenizer is None:
-            raise ValueError("Tokenizer is not set")
-        prefixes = []
-        prefix_token_ids = []
-        for item in batch:
-            prefix: str = self.tokenizer.apply_chat_template(
-                item["conversation"],  # type: ignore
-                tokenize=False,
-                enable_thinking=False,
-            )
-            prefixes.append(prefix)
-            prefix_token_ids.append(self.tokenizer.encode(prefix))
-
-        return MiniBatch(
-            prefixes=prefixes,
-            prefix_token_ids=prefix_token_ids,
-            samples=batch,
-        )
+def zork_reward_function(self, response: str, sample: ZorkSample) -> float:
+    """This steps the environment and updates agent state, and returns the reward gotten for the step."""
+    try:
+        command = parse_command(response)
+    except Exception as e:
+        logger.error(f"Error parsing command: {e}")
+        return 0.0
+    idx = sample["agent_index"] % self.n_environments
+    obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
+    logger.info(f"\n### Agent {idx}###\nCommand: {command}\nObservation: {obs}")
+    self.agents[idx].update(
+        command,
+        obs,
+        infos["inventory"].strip("\n"),
+        done,
+        score,  # type: ignore
+    )
+    return score  # type: ignore

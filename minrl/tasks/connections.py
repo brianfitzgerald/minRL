@@ -1,14 +1,14 @@
 import itertools
 import re
-from typing import Any, Dict, List, TypedDict
+from typing import Any, List, TypedDict
 import math
 
 import pandas as pd
 from loguru import logger
 from sklearn.model_selection import train_test_split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
-from minrl.constants import Conversation, HostType
+from minrl.tasks.dataset import MinRLDataset, Split
+from minrl.constants import Conversation, HostType, Sample
 
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
@@ -158,7 +158,7 @@ class ConnectionsDataset(MinRLDataset):
         item = self.dataframe.iloc[idx]
         return item  # type: ignore
 
-    def conversation(self, sample: dict[str, Any]) -> List[dict[str, Any]]:
+    def conversation(self, sample: Sample, conversation: Conversation) -> Conversation:
         return [
             {
                 "role": "system",
