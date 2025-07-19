@@ -1,11 +1,11 @@
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.constants import HostType
+from minrl.constants import Conversation, HostType, Sample
 
 
 Split = Literal["train", "test", "eval"]
@@ -15,27 +15,34 @@ Split = Literal["train", "test", "eval"]
 class Episode:
     """Store all relevant information of an episode."""
 
-    prefix: str
-    text: str
-    # Token IDs of the prefix
-    prefix_token_ids: list[int]
-    # Token IDs of the generated text
-    generated_token_ids: list[int]
-    is_finished: bool
+    # Index of group in batch
+    group_index: int
+    # Index of answer in group
+    answer_index: int
+    finished: bool
     reward: float
-    reward_info: dict[str, float]
+    conversation: Conversation
 
 
 @dataclass
 class MiniBatch:
     """Batch of data for each training step."""
 
-    prefixes: list[str]
-    prefix_token_ids: list[list[int]]
-    samples: list[Any]
+    conversations: list[Conversation]
+    samples: list[Sample]
+
+    def __len__(self) -> int:
+        return len(self.samples)
 
 
 class MinRLDataset(Dataset):
+    """
+    Base class for all datasets.
+    Each dataset has a step wise inference function and a max number of steps.
+    """
+
+    max_steps: int = 1
+
     def __init__(
         self,
         split: Split,
@@ -47,10 +54,7 @@ class MinRLDataset(Dataset):
         self.host = host
 
     @abstractmethod
-    def collate_fn(self, batch: list[dict]) -> MiniBatch:
-        pass
-
-    @abstractmethod
-    def conversation(self, sample: dict[str, Any]) -> list[dict[str, Any]]:
-        """Conversation used to generate the prefix, or the prompt for evals."""
-        pass
+    def conversation(self, sample: Sample, conversation: Conversation) -> Conversation:
+        """
+        Given a sample and a conversation, the conversation to complete.
+        """

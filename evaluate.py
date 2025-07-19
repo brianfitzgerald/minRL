@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, Literal, NotRequired, TypedDict, cast
+from typing import Any, TypedDict
 from tqdm import tqdm
 
 import fire
@@ -15,57 +15,18 @@ import modal
 from modal.volume import FileEntryType
 from pathlib import Path
 
-from minrl.tasks import TASK_DEFINITIONS, TaskChoice
-from minrl.constants import MODAL_MODELS_VOLUME_NAME, QWEN_3_0_6B
+from minrl.tasks import TASK_DATASETS, TaskChoice
+from minrl.constants import (
+    MODAL_MODELS_VOLUME_NAME,
+    ModelName,
+    INFERENCE_MODELS,
+)
 
 """
 Evaluate against any task in the minrl.tasks module.
 """
 
 load_dotenv(".env")
-
-ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
-
-
-class EvalModel(TypedDict):
-    type: ModelType
-    model_id: str
-    base_model_id: NotRequired[str]
-
-
-ModelName = Literal[
-    "gemini_2_flash",
-    "gpt_4.1_mini",
-    "Qwen3.0-6B",
-    "qwen_grpo",
-    "qwen_reinforce",
-    "magistral_medium",
-    "gpt_4o",
-]
-
-EVAL_MODELS: dict[ModelName, EvalModel] = {
-    "gemini_2_flash": {
-        "type": "openrouter",
-        "model_id": "google/gemini-2.0-flash-001",
-    },
-    "gpt_4.1_mini": {"type": "openai", "model_id": "gpt-4.1-mini"},
-    "gpt_4o": {"type": "openai", "model_id": "gpt-4o-2024-08-06"},
-    "Qwen3.0-6B": {"type": "huggingface", "model_id": QWEN_3_0_6B},
-    "qwen_grpo": {
-        "type": "finetuned",
-        "model_id": "Qwen3_0.6B-grpo-connections-0620_221447_step_003500",
-        "base_model_id": QWEN_3_0_6B,
-    },
-    "qwen_reinforce": {
-        "type": "finetuned",
-        "model_id": "Qwen3_0.6B-reinforce-20250612_213402_step_000900",
-        "base_model_id": QWEN_3_0_6B,
-    },
-    "magistral_medium": {
-        "type": "openrouter",
-        "model_id": "mistralai/magistral-medium-2506:thinking",
-    },
-}
 
 
 class OutRow(TypedDict):
@@ -96,22 +57,20 @@ def _download_checkpoint_from_modal(checkpoint_name: str):
 
 
 async def main(
-    task: TaskChoice = "connections",
-    model_name: ModelName = "gemini_2_flash",
-    batch_size: int = 32,
+    task: TaskChoice = "zork",
+    model_name: ModelName = "gpt_4.1_mini",
+    batch_size: int = 1,
 ):
-    task_definition = TASK_DEFINITIONS[task]
-    dataset, reward_function = (
-        task_definition["dataset"]("eval", host="local"),
-        task_definition["reward_function"],
-    )
+    dataset_cls = TASK_DATASETS[task]["dataset"]
+    dataset = dataset_cls(split="eval", host="local", batch_size=batch_size)
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
 
-    if model_name not in EVAL_MODELS:
+    openai_client = None
+    if model_name not in INFERENCE_MODELS:
         raise ValueError(f"Invalid model name: {model_name}")
-    model = EVAL_MODELS[model_name]
+    model = INFERENCE_MODELS[model_name]
     vllm_model: LLM | None = None
     model_type = model["type"]
     if model_type in ["finetuned", "huggingface"]:
@@ -162,6 +121,7 @@ async def main(
             sampling_params = SamplingParams(max_tokens=1024)
             responses = vllm_model.chat(conversations, sampling_params=sampling_params)
         else:
+            assert openai_client is not None, "OpenAI client is not initialized"
             responses = await asyncio.gather(
                 *[
                     openai_client.chat.completions.create(
@@ -181,7 +141,9 @@ async def main(
                 assert isinstance(response, ChatCompletion)
                 response_content = response.choices[0].message.content
             assert response_content is not None, "No response content"
-            score = reward_function(response_content, cast(dict, sample))
+            score = TASK_DATASETS[task]["reward_function"](
+                [{"role": "assistant", "content": response_content}], sample
+            )
             logger.info(f"Score: {score}")
             out_rows.append(
                 {

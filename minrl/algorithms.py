@@ -10,14 +10,14 @@ import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from vllm import LLM
+from vllm import LLM, TokensPrompt
 from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
 
-from minrl.constants import AlgorithmChoice, TrainerConfig
-from minrl.tasks import RewardFunction
+from minrl.constants import AlgorithmChoice, Conversation, TrainerConfig
+from minrl.constants import RewardFunction
 from minrl.tasks.dataset import Episode, MiniBatch
 from minrl.metrics import MetricsWrapper
 
@@ -58,6 +58,7 @@ def rollout(
     batch: MiniBatch,
     max_new_tokens: int,
     num_answers_per_question: int,
+    max_turns: int,
     reward_function: RewardFunction,
     vllm_model: LLM,
     prev_reward_std: float | None = None,
@@ -74,26 +75,38 @@ def rollout(
     logger.info(
         f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answers_per_question}, temperature={temperature:.3f}"
     )
-    prefixes_batch: list[str] = [batch.prefixes[i] for i in range(len(batch.prefixes))]
 
-    outputs = vllm_model.generate(
-        prefixes_batch,
-        sampling_params=SamplingParams(
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-            n=num_answers_per_question,
-        ),
-    )
-    # Clear CUDA cache
-    gc.collect()
-    torch.cuda.empty_cache()
+    conversations: list[Conversation] = []
 
-    # Process outputs and create episodes
+    # Perform N rounds of rollout for the max turn count
+    for _ in range(max_turns):
+        conversations: List[List[Dict[str, str]]] = batch.conversations  # type: ignore
+
+        prefixes_batch = tokenizer.apply_chat_template(
+            conversations, tokenize=True, enable_thinking=False
+        )
+
+        prefixes_prompts: list[TokensPrompt] = [
+            {"prompt_token_ids": prefix} for prefix in prefixes_batch
+        ]
+
+        outputs = vllm_model.generate(
+            prefixes_prompts,
+            sampling_params=SamplingParams(
+                max_tokens=max_new_tokens,
+                temperature=config.temperature,
+                n=num_answers_per_question,
+            ),
+        )
+
+        # Clear CUDA cache
+        gc.collect()
+        torch.cuda.empty_cache()
+
     episodes: List[Episode] = []
     for i in range(len(outputs)):
         for j in range(num_answers_per_question):
             # idx of the j-th answer for the i-th prompt
-
             generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
 
             # Remove padding tokens
@@ -106,20 +119,21 @@ def rollout(
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
             # Calculate rewards
-            rewards = reward_function(
-                response=generated_text,
-                sample=batch.samples[i],
+            # TODO store and send the whole conversation
+            reward = reward_function(
+                [{"role": "assistant", "content": generated_text}], batch.samples[i]
             )
 
             # Create episode
             episode = Episode(
-                prefix=batch.prefixes[i],
-                text=batch.prefixes[i] + generated_text,
-                prefix_token_ids=batch.prefix_token_ids[i],
-                generated_token_ids=generated_token_ids,
-                is_finished=end_token_id in generated_token_ids,
-                reward=rewards,
-                reward_info={},
+                group_index=i,
+                answer_index=j,
+                finished=end_token_id in generated_token_ids,
+                reward=reward,
+                conversation=[
+                    {"role": "user", "content": batch.prefixes[i]},
+                    {"role": "assistant", "content": generated_text},
+                ],
             )
             episodes.append(episode)
 
@@ -145,7 +159,7 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     # Group episodes by prefix and calculate stats
     groups: Dict[str, List[Episode]] = defaultdict(list)
     for episode in episodes:
-        groups[episode.prefix].append(episode)
+        groups[episode.group_index].append(episode)
 
     # Normalize rewards within each group
     normalized_episodes: List[Episode] = []
@@ -182,6 +196,11 @@ def update_policy(
     algorithm: AlgorithmChoice,
     apply_loss: bool = True,
 ) -> dict[str, float]:
+    """
+    Once episodes are generated, use them to update the policy
+    by computing the loss from the reward and generated logits.
+    This implements a number of different algorithms.
+    """
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
     # sort episodes by length, for more efficient batching
@@ -243,6 +262,7 @@ def update_policy(
         # TODO only compute logits for the target tokens, not the input tokens
         logits: torch.Tensor = model(input_token_ids).logits.float()
 
+        # Get the cross entropy loss of the label and generated tokens
         logprobs = -torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.size(-1)),
             target_token_ids.reshape(-1),
@@ -314,7 +334,7 @@ def compute_metrics(
     temperature: float | None = None,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
-    num_finished_episodes = sum(episode.is_finished for episode in episodes)
+    num_finished_episodes = sum(episode.finished for episode in episodes)
     mean_reward = float(np.mean(reward))
     std_reward = float(np.std(reward))
     grad_norm = results["grad_norm"]

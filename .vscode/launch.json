@@ -21,6 +21,13 @@
             "request": "launch",
             "program": "visualize_results.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Agent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "test_agent.py",
+            "console": "integratedTerminal"
         }
     ]
 }

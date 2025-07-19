@@ -13,10 +13,10 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import LoggerChoice, HostType, TrainerConfig
 from minrl.metrics import MetricsWrapper
-from minrl.tasks import TASK_DEFINITIONS
+from minrl.tasks import TASK_DATASETS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.dataset import Episode, MinRLDataset
+from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch
 from vllm.envs import set_vllm_use_v1
 
 
@@ -37,6 +37,30 @@ def simple_timestamp() -> str:
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # type: ignore
+
+
+def collate_fn(self, batch: list[dict[str, Any]]) -> MiniBatch:
+    """
+    Collate examples into a batch.
+    Used during training / only, requires a tokenizer.
+    """
+    if self.tokenizer is None:
+        raise ValueError("Tokenizer is not set")
+    prefixes, prefix_token_ids = [], []
+    for sample in batch:
+        prefix: str = self.tokenizer.apply_chat_template(
+            self.conversation(sample),  # type: ignore
+            tokenize=False,
+            enable_thinking=False,
+        )  # type: ignore
+        tokens = self.tokenizer.encode(prefix)
+        prefixes.append(prefix)
+        prefix_token_ids.append(tokens)
+    return MiniBatch(
+        prefixes=prefixes,
+        prefix_token_ids=prefix_token_ids,
+        samples=batch,
+    )
 
 
 class Trainer:
@@ -87,7 +111,7 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        dataset_cls: type[MinRLDataset] = TASK_DEFINITIONS[self.config.task]["dataset"]
+        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )
@@ -98,7 +122,7 @@ class Trainer:
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
-            collate_fn=self.train_dataset.collate_fn,
+            collate_fn=collate_fn,
             generator=generator,
             batch_size=self.config.train_batch_size,
         )
@@ -150,15 +174,16 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answers_per_question=self.config.num_answers_per_question,
-                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
+                reward_function=self.train_dataset.reward_function,
                 vllm_model=self.vllm_model,
                 prev_reward_std=prev_reward_std,
             )
+
             if self.config.skip_unfinished_episodes:
-                episodes = [episode for episode in episodes if episode.is_finished]
+                episodes = [episode for episode in episodes if episode.finished]
+
             logger.info(f"Updating policy for step {step}")
 
-            # Update policy - compute loss and perform backward pass
             results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
@@ -222,7 +247,7 @@ class Trainer:
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
                 num_answers_per_question=1,
-                reward_function=TASK_DEFINITIONS[self.config.task]["reward_function"],
+                reward_function=self.eval_dataset.reward_function,
                 vllm_model=self.vllm_model,
             )
             episodes.extend(eval_rollout)

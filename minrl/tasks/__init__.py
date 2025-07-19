@@ -1,30 +1,32 @@
-from minrl.constants import TaskChoice
-from minrl.tasks.connections import (
-    ConnectionsDataset,
-    connections_reward_func,
-)
-from typing import TypedDict, Protocol, Any
-
+from typing import TypedDict
+from minrl.constants import TaskChoice, RewardFunction
+from minrl.tasks.connections import ConnectionsDataset
 from minrl.tasks.dataset import MinRLDataset
+from minrl.tasks.connections import connections_reward_func
 from minrl.tasks.hanoi import HanoiDataset, hanoi_reward_func
-
-
-class RewardFunction(Protocol):
-    def __call__(self, response: str, sample: dict[str, Any]) -> float: ...
+from minrl.tasks.zork import ZorkDataset, zork_reward_func
 
 
 class TaskDefinition(TypedDict):
-    reward_function: RewardFunction
     dataset: type[MinRLDataset]
+    reward_function: RewardFunction
+    n_max_turns: int
 
 
-TASK_DEFINITIONS: dict[TaskChoice, TaskDefinition] = {
+TASK_DATASETS: dict[TaskChoice, TaskDefinition] = {
     "connections": {
-        "reward_function": connections_reward_func,
         "dataset": ConnectionsDataset,
+        "reward_function": connections_reward_func,
+        "n_max_turns": 1,
     },
     "hanoi": {
-        "reward_function": hanoi_reward_func,
         "dataset": HanoiDataset,
+        "reward_function": hanoi_reward_func,
+        "n_max_turns": 1,
+    },
+    "zork": {
+        "dataset": ZorkDataset,
+        "reward_function": zork_reward_func,
+        "n_max_turns": 1000,
     },
 }
