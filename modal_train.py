@@ -1,14 +1,13 @@
 from modal import Image, App
 import modal
-import os
 from pathlib import Path
 
-from minrl.constants import MODAL_MODELS_VOLUME_NAME
+from minrl.constants import MODAL_DATASET_VOLUME_NAME, MODAL_MODELS_VOLUME_NAME
 from minrl.trainer import Trainer
 
 APP_NAME = "minRL"
 MODELS_VOLUME_PATH = Path(f"/{MODAL_MODELS_VOLUME_NAME}")
-DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
+DATASET_VOLUME_PATH = Path(f"/{MODAL_DATASET_VOLUME_NAME}")
 
 app = App(APP_NAME)
 
@@ -53,6 +52,9 @@ def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
 MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(
     MODAL_MODELS_VOLUME_NAME, create_if_missing=True
 )
+DATASET_VOLUME = modal.Volume.from_name(
+    MODAL_DATASET_VOLUME_NAME, create_if_missing=True
+)
 
 
 @app.function(
@@ -61,7 +63,10 @@ MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(
     secrets=[
         modal.Secret.from_name("smolmodels"),
     ],
-    volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
+    volumes={
+        MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME,
+        DATASET_VOLUME_PATH.as_posix(): DATASET_VOLUME,
+    },
     timeout=format_timeout(hours=6),
 )
 def training():

@@ -14,12 +14,15 @@ Sample: TypeAlias = dict[str, Any]
 RewardFunction: TypeAlias = Callable[[Conversation, Sample], float]
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
+MODAL_DATASET_VOLUME_NAME = "minrl-datasets"
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"
 QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
-SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 TINY_LLAMA_V0 = "Maykeye/TinyLLama-v0"
+SMOL_LM_2_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
+SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
+
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
 AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
@@ -81,7 +84,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = QWEN_3_0_6B
+    model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10
     num_answers_per_question: int = 4
     max_new_tokens: int = 512
@@ -97,6 +100,9 @@ class TrainerConfig(BaseModel):
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2
+    temperature_scaling: bool = True
+    temperature_min: float = 0.2
+    temperature_max: float = 1.5
 
     @property
     def model_display_name(self) -> str:
