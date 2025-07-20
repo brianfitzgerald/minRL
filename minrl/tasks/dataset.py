@@ -5,7 +5,7 @@ from typing import Literal
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.constants import Conversation, HostType, Sample
+from minrl.constants import Conversation, HostType, InferenceFunction, Sample
 
 
 Split = Literal["train", "test", "eval"]
@@ -54,7 +54,9 @@ class MinRLDataset(Dataset):
         self.host = host
 
     @abstractmethod
-    def conversation(self, sample: Sample, conversation: Conversation) -> Conversation:
+    def rollout(
+        self, sample: Sample, inference_function: InferenceFunction
+    ) -> Conversation:
         """
-        Given a sample and a conversation, the conversation to complete.
+        Given a sample, perform a multi turn rollout.
         """

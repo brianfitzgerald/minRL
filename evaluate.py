@@ -18,6 +18,7 @@ from pathlib import Path
 from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
+    Conversation,
     ModelName,
     INFERENCE_MODELS,
 )
@@ -62,7 +63,7 @@ async def main(
     batch_size: int = 1,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
-    dataset = dataset_cls(split="eval", host="local", batch_size=batch_size)
+    dataset = dataset_cls(split="eval", host="local")
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
@@ -110,23 +111,23 @@ async def main(
     out_rows: list[OutRow] = []
 
     os.makedirs("eval_results", exist_ok=True)
+    conversations: list[Conversation] = []
 
     for i, batch in enumerate(tqdm(loader)):
-        conversations = []
         for sample in batch:
-            conversations.append(dataset.conversation(sample))
+            conversations.append(dataset.rollout(sample, i))
 
         logger.info(f"Requesting batch {i} of {len(conversations)} completions")
         if vllm_model is not None:
             sampling_params = SamplingParams(max_tokens=1024)
-            responses = vllm_model.chat(conversations, sampling_params=sampling_params)
+            responses = vllm_model.chat(conversations, sampling_params=sampling_params)  # type: ignore
         else:
             assert openai_client is not None, "OpenAI client is not initialized"
             responses = await asyncio.gather(
                 *[
                     openai_client.chat.completions.create(
                         model=model["model_id"],
-                        messages=conv,
+                        messages=conv,  # type: ignore
                     )
                     for conv in conversations
                 ]

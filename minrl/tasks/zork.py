@@ -1,6 +1,6 @@
 import sys
 from loguru import logger
-from minrl.constants import Conversation, HostType
+from minrl.constants import Conversation, HostType, InferenceFunction, Sample
 from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
@@ -168,6 +168,9 @@ class ZorkDataset(MinRLDataset):
             f"games/{self.game_metadata['filename']}", self.infos
         )
 
+        self.envs: dict[int, TextworldGymEnv] = {}
+        self.agents: dict[int, TextWorldAgent] = {}
+
         self.completed_episodes = []
 
     def _download_game_if_needed(self, game_name: ZGameName):
@@ -188,14 +191,20 @@ class ZorkDataset(MinRLDataset):
         with open(game_path, "wb") as f:
             f.write(response.content)
 
-    def __getitem__(self, index: int) -> Any:
-        env: TextworldGymEnv = textworld.gym.make(self.env_id)
-        agent = TextWorldAgent()
-        conversation: Conversation = []
-        for _ in range(self.max_steps):
-            obs, score, done, infos = env.step(agent.format_conversation())  # type: ignore
-            agent.update(obs, score, done, infos)  # type: ignore
-            conversation = agent.format_conversation()
+    def conversation(
+        self, _: Sample, sample_index: int, conversation: Conversation
+    ) -> Conversation:
+        """
+        Given a sample, perform a multi turn rollout.
+        """
+        if sample_index not in self.envs:
+            self.envs[sample_index] = textworld.gym.make(self.env_id)
+            self.agents[sample_index] = TextWorldAgent()
+        env: TextworldGymEnv = self.envs[sample_index]
+        agent = self.agents[sample_index]
+        obs, score, done, infos = env.step(conversation)  # type: ignore
+        agent.update(obs, score, done, infos)  # type: ignore
+        conversation = agent.format_conversation()
 
         return conversation
 

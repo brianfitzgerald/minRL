@@ -29,9 +29,7 @@ AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
-
 TaskChoice = Literal["connections", "hanoi", "zork"]
-
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 
 
