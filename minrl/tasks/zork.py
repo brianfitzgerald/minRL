@@ -1,4 +1,3 @@
-import sys
 from loguru import logger
 from minrl.constants import Conversation, HostType, Sample
 from minrl.tasks.dataset import MinRLDataset, Split
@@ -61,11 +60,10 @@ class ZorkSample(TypedDict):
 class TextWorldAgent:
     """
     Wrapper for an agent that plays an adventure game.
-    Contains any state required as well as a list of commands that the agent can take.
+    Stores any state required for the agent to play the game.
     """
 
     def __init__(self):
-        self.commands = []
         self.inventory = None
         self.observation_history = []
         self.description = None
@@ -93,13 +91,12 @@ class TextWorldAgent:
         if len(self.observation_history) > 0 and self.description:
             last_obs = self.observation_history[-1]
             user_message += f"\n###Description\n{self.description}\n### Current Observation\n{last_obs}\n"
-        return [
+        conv: Conversation = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": user_message,
-            },
         ]
+        if user_message:
+            conv.append({"role": "user", "content": user_message})
+        return conv
 
     def update(
         self,
@@ -200,7 +197,9 @@ class ZorkDataset(MinRLDataset):
             self.agents[sample_index] = agent
             agent.update(None, obs, "", False, 0)
         agent = self.agents[sample_index]
-        return agent.format_conversation()
+        conv = agent.format_conversation()
+        logger.info(f"Conversation: {conv[-1]['content']}")
+        return conv
 
     def __getitem__(self, index: int) -> ZorkSample:
         """
@@ -216,9 +215,10 @@ class ZorkDataset(MinRLDataset):
         agent = self.agents[sample_index]
         env: TextworldGymEnv = self.envs[sample_index]
         action = parse_command(model_response)
-        logger.info(f"Action: {action}")
         obs, score, done, infos = env.step(action)  # type: ignore
         agent.update(action, obs, score, done, infos)  # type: ignore
+        logger.info(f"Action: {action}")
+        logger.info(f"Observation: {obs}")
         return done
 
     def __len__(self) -> int:

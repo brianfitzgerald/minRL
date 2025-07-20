@@ -124,10 +124,10 @@ async def main(
 
         while not all(done):
             conv_batch = []
-            for i, (conv, is_done) in enumerate(zip(conversations, done)):
+            for j, (conv, is_done) in enumerate(zip(conversations, done)):
                 if is_done:
                     continue
-                conv_batch.append(dataset.conversation(sample, i))
+                conv_batch.append(dataset.conversation(sample, j))
 
             # Perform inference
             logger.info(f"Requesting batch {i} of {len(conversations)} completions")
