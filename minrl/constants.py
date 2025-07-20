@@ -1,13 +1,10 @@
 from pydantic import BaseModel
 from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal
 
-
-class ConversationMessage(TypedDict):
-    role: Literal["user", "assistant", "system"]
-    content: str
+from openai.types.chat import ChatCompletionMessageParam
 
 
-Conversation: TypeAlias = list[ConversationMessage]
+Conversation: TypeAlias = list[ChatCompletionMessageParam]
 
 
 Sample: TypeAlias = dict[str, Any]

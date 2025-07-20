@@ -158,7 +158,7 @@ class ConnectionsDataset(MinRLDataset):
         item = self.dataframe.iloc[idx]
         return item  # type: ignore
 
-    def conversation(self, sample: Sample, conversation: Conversation) -> Conversation:
+    def conversation(self, sample: Sample, _: int) -> Conversation:
         return [
             {
                 "role": "system",

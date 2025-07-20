@@ -42,6 +42,7 @@ class MinRLDataset(Dataset):
     """
 
     max_steps: int = 1
+    max_tokens: int = 1024
 
     def __init__(
         self,
@@ -54,9 +55,14 @@ class MinRLDataset(Dataset):
         self.host = host
 
     @abstractmethod
-    def rollout(
-        self, sample: Sample, inference_function: InferenceFunction
-    ) -> Conversation:
+    def conversation(self, sample: Sample, sample_index: int) -> Conversation:
         """
-        Given a sample, perform a multi turn rollout.
+        Given a sample, format the conversation for inference.
         """
+
+    def post_rollout(self, sample_index: int, model_response: str) -> bool:
+        """
+        After rollout, update any state needed for the next rollout.
+        Return whether the episode is done, true by default for single turn inference.
+        """
+        return True

@@ -191,22 +191,27 @@ class ZorkDataset(MinRLDataset):
         with open(game_path, "wb") as f:
             f.write(response.content)
 
-    def conversation(
-        self, _: Sample, sample_index: int, conversation: Conversation
-    ) -> Conversation:
+    def conversation(self, _: Sample, sample_index: int) -> Conversation:
         """
         Given a sample, perform a multi turn rollout.
         """
         if sample_index not in self.envs:
             self.envs[sample_index] = textworld.gym.make(self.env_id)
             self.agents[sample_index] = TextWorldAgent()
-        env: TextworldGymEnv = self.envs[sample_index]
         agent = self.agents[sample_index]
-        obs, score, done, infos = env.step(conversation)  # type: ignore
-        agent.update(obs, score, done, infos)  # type: ignore
-        conversation = agent.format_conversation()
+        return agent.format_conversation()
 
-        return conversation
+    def post_rollout(self, sample_index: int, model_response: str) -> bool:
+        """
+        After rollout, update any state needed for the next rollout.
+        Returns whether the episode is done.
+        """
+        agent = self.agents[sample_index]
+        env: TextworldGymEnv = self.envs[sample_index]
+        action = parse_command(model_response)
+        obs, score, done, infos = env.step(action)  # type: ignore
+        agent.update(obs, score, done, infos)  # type: ignore
+        return done
 
     def __len__(self) -> int:
         return sys.maxsize

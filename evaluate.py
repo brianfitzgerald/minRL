@@ -112,14 +112,15 @@ async def main(
 
     os.makedirs("eval_results", exist_ok=True)
     conversations: list[Conversation] = []
+    reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
         for sample in batch:
-            conversations.append(dataset.rollout(sample, i))
+            conversations.append(dataset.conversation(sample, i))
 
         logger.info(f"Requesting batch {i} of {len(conversations)} completions")
         if vllm_model is not None:
-            sampling_params = SamplingParams(max_tokens=1024)
+            sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
             responses = vllm_model.chat(conversations, sampling_params=sampling_params)  # type: ignore
         else:
             assert openai_client is not None, "OpenAI client is not initialized"
@@ -142,7 +143,7 @@ async def main(
                 assert isinstance(response, ChatCompletion)
                 response_content = response.choices[0].message.content
             assert response_content is not None, "No response content"
-            score = TASK_DATASETS[task]["reward_function"](
+            score = reward_function(
                 [{"role": "assistant", "content": response_content}], sample
             )
             logger.info(f"Score: {score}")
