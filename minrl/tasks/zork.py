@@ -1,6 +1,6 @@
 import sys
 from loguru import logger
-from minrl.constants import Conversation, HostType, InferenceFunction, Sample
+from minrl.constants import Conversation, HostType, Sample
 from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld

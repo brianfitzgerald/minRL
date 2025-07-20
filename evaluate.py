@@ -112,37 +112,56 @@ async def main(
 
     os.makedirs("eval_results", exist_ok=True)
     conversations: list[Conversation] = []
+    done: list[bool] = []
     reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
+        conversations = []
+        done = []
         for sample in batch:
             conversations.append(dataset.conversation(sample, i))
+            done.append(False)
 
-        logger.info(f"Requesting batch {i} of {len(conversations)} completions")
-        if vllm_model is not None:
-            sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
-            responses = vllm_model.chat(conversations, sampling_params=sampling_params)  # type: ignore
-        else:
-            assert openai_client is not None, "OpenAI client is not initialized"
-            responses = await asyncio.gather(
-                *[
-                    openai_client.chat.completions.create(
-                        model=model["model_id"],
-                        messages=conv,  # type: ignore
-                    )
-                    for conv in conversations
-                ]
-            )
+        while not all(done):
+            conv_batch = []
+            for i, (conv, is_done) in enumerate(zip(conversations, done)):
+                if is_done:
+                    continue
+                conv_batch.append(dataset.conversation(sample, i))
+
+            # Perform inference
+            logger.info(f"Requesting batch {i} of {len(conversations)} completions")
+            if model_type in ("finetuned", "huggingface"):
+                sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
+                responses = vllm_model.chat(conv, sampling_params=sampling_params)  # type: ignore
+            elif model_type == "openai":
+                assert openai_client is not None, "OpenAI client is not initialized"
+                responses = await asyncio.gather(
+                    *[
+                        openai_client.chat.completions.create(
+                            model=model["model_id"],
+                            messages=conv,  # type: ignore
+                        )
+                        for conv in conversations
+                    ]
+                )
+            else:
+                raise ValueError(f"Invalid model type: {model_type}")
+
+            for i, (response, is_done) in enumerate(zip(responses, done)):
+                if is_done:
+                    continue
+                response_content = ""
+                if model_type in ["finetuned", "huggingface"]:
+                    assert isinstance(response, RequestOutput)
+                    response_content = response.outputs[0].text
+                else:
+                    assert isinstance(response, ChatCompletion)
+                    response_content = response.choices[0].message.content
+                assert response_content is not None, "No response content"
+                done[i] = dataset.post_rollout(i, response_content)
 
         for sample, response in zip(batch, responses):
-            response_content = ""
-            if model_type in ["finetuned", "huggingface"]:
-                assert isinstance(response, RequestOutput)
-                response_content = response.outputs[0].text
-            else:
-                assert isinstance(response, ChatCompletion)
-                response_content = response.choices[0].message.content
-            assert response_content is not None, "No response content"
             score = reward_function(
                 [{"role": "assistant", "content": response_content}], sample
             )
