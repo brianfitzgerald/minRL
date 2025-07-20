@@ -5,7 +5,7 @@ from typing import Literal
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.constants import Conversation, HostType, InferenceFunction, Sample
+from minrl.constants import Conversation, HostType, Sample
 
 
 Split = Literal["train", "test", "eval"]

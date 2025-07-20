@@ -5,7 +5,6 @@ from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 import textworld.gym
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from typing import Any, Literal, TypedDict
 import requests
 from pathlib import Path
@@ -53,6 +52,10 @@ TEXTWORLD_GAMES: dict[ZGameName, ZGame] = {
         "filename": "zork1.z5",
     }
 }
+
+
+class ZorkSample(TypedDict):
+    index: int
 
 
 class TextWorldAgent:
@@ -130,12 +133,6 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
     return 0.0
 
 
-class ZorkSample(TypedDict):
-    id: int
-    conversation: list[ChatCompletionMessageParam]
-    agent_index: int
-
-
 class ZorkDataset(MinRLDataset):
     """
     Dataset where the agent plays multiple steps of a text adventure game,
@@ -193,13 +190,23 @@ class ZorkDataset(MinRLDataset):
 
     def conversation(self, _: Sample, sample_index: int) -> Conversation:
         """
-        Given a sample, perform a multi turn rollout.
+        Return the inference conversation for a single turn.
         """
         if sample_index not in self.envs:
-            self.envs[sample_index] = textworld.gym.make(self.env_id)
-            self.agents[sample_index] = TextWorldAgent()
+            env: TextworldGymEnv = textworld.gym.make(self.env_id)
+            agent = TextWorldAgent()
+            self.envs[sample_index] = env
+            obs, info = env.reset()
+            self.agents[sample_index] = agent
+            agent.update(None, obs, "", False, 0)
         agent = self.agents[sample_index]
         return agent.format_conversation()
+
+    def __getitem__(self, index: int) -> ZorkSample:
+        """
+        Get a sample from the dataset.
+        """
+        return {"index": index}
 
     def post_rollout(self, sample_index: int, model_response: str) -> bool:
         """
@@ -209,29 +216,10 @@ class ZorkDataset(MinRLDataset):
         agent = self.agents[sample_index]
         env: TextworldGymEnv = self.envs[sample_index]
         action = parse_command(model_response)
+        logger.info(f"Action: {action}")
         obs, score, done, infos = env.step(action)  # type: ignore
-        agent.update(obs, score, done, infos)  # type: ignore
+        agent.update(action, obs, score, done, infos)  # type: ignore
         return done
 
     def __len__(self) -> int:
-        return sys.maxsize
-
-
-def zork_reward_function(self, response: str, sample: ZorkSample) -> float:
-    """This steps the environment and updates agent state, and returns the reward gotten for the step."""
-    try:
-        command = parse_command(response)
-    except Exception as e:
-        logger.error(f"Error parsing command: {e}")
-        return 0.0
-    idx = sample["agent_index"] % self.n_environments
-    obs, score, done, infos = self.envs[idx].step(command)  # type: ignore
-    logger.info(f"\n### Agent {idx}###\nCommand: {command}\nObservation: {obs}")
-    self.agents[idx].update(
-        command,
-        obs,
-        infos["inventory"].strip("\n"),
-        done,
-        score,  # type: ignore
-    )
-    return score  # type: ignore
+        return 1000

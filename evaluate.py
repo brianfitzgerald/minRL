@@ -148,6 +148,7 @@ async def main(
             else:
                 raise ValueError(f"Invalid model type: {model_type}")
 
+            # Process responses
             for i, (response, is_done) in enumerate(zip(responses, done)):
                 if is_done:
                     continue
