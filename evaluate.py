@@ -59,7 +59,7 @@ def _download_checkpoint_from_modal(checkpoint_name: str):
 
 async def main(
     task: TaskChoice = "zork",
-    model_name: ModelName = "gpt_4.1_mini",
+    model_name: ModelName = "gemini_2.5_flash",
     batch_size: int = 1,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
@@ -134,7 +134,7 @@ async def main(
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
                 responses = vllm_model.chat(conv, sampling_params=sampling_params)  # type: ignore
-            elif model_type == "openai":
+            elif model_type in ("openai", "openrouter"):
                 assert openai_client is not None, "OpenAI client is not initialized"
                 responses = await asyncio.gather(
                     *[

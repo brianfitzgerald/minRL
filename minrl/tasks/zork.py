@@ -24,16 +24,9 @@ INSTRUCTIONS:
 
 3. Always choose the highest-value action, balancing exploration, safety (avoid known hazards), and puzzle-solving.
 
-4. Never output internal reasoning.  Only output the next command, prefixed with:
+4. Output the next command, formatted as:
    
    <command>your next command</command>
-
-EXAMPLE TURN:
-You are in a dimly lit room.  To the north is a heavy oak door.  A rusty key lies on the floor.
-
-Your response should be:
-   
-   <command>take key</command>
 
 """
 
@@ -214,7 +207,11 @@ class ZorkDataset(MinRLDataset):
         """
         agent = self.agents[sample_index]
         env: TextworldGymEnv = self.envs[sample_index]
-        action = parse_command(model_response)
+        try:
+            action = parse_command(model_response)
+        except Exception as e:
+            logger.error(f"Error parsing command from {model_response}: {e}")
+            return True
         obs, score, done, infos = env.step(action)  # type: ignore
         agent.update(action, obs, score, done, infos)  # type: ignore
         logger.info(f"Action: {action}")
