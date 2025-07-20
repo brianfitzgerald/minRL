@@ -18,7 +18,6 @@ from pathlib import Path
 from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
-    Conversation,
     ModelName,
     INFERENCE_MODELS,
 )
@@ -111,29 +110,26 @@ async def main(
     out_rows: list[OutRow] = []
 
     os.makedirs("eval_results", exist_ok=True)
-    conversations: list[Conversation] = []
     done: list[bool] = []
     reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
-        conversations = []
         done = []
         for sample in batch:
-            conversations.append(dataset.conversation(sample, i))
             done.append(False)
 
         while not all(done):
             conv_batch = []
-            for j, (conv, is_done) in enumerate(zip(conversations, done)):
+            for j, (sample, is_done) in enumerate(zip(batch, done)):
                 if is_done:
                     continue
                 conv_batch.append(dataset.conversation(sample, j))
 
             # Perform inference
-            logger.info(f"Requesting batch {i} of {len(conversations)} completions")
+            logger.info(f"Requesting batch {i} of {len(conv_batch)} completions")
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
-                responses = vllm_model.chat(conv, sampling_params=sampling_params)  # type: ignore
+                responses = vllm_model.chat(conv_batch, sampling_params=sampling_params)  # type: ignore
             elif model_type in ("openai", "openrouter"):
                 assert openai_client is not None, "OpenAI client is not initialized"
                 responses = await asyncio.gather(
@@ -142,7 +138,7 @@ async def main(
                             model=model["model_id"],
                             messages=conv,  # type: ignore
                         )
-                        for conv in conversations
+                        for conv in conv_batch
                     ]
                 )
             else:

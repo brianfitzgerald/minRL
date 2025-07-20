@@ -188,7 +188,6 @@ class ZorkDataset(MinRLDataset):
             self.envs[sample_index] = env
             obs, info = env.reset()
             self.agents[sample_index] = agent
-            agent.update(None, obs, "", False, 0)
         agent = self.agents[sample_index]
         conv = agent.format_conversation()
         logger.info(f"Conversation: {conv[-1]['content']}")
@@ -213,9 +212,10 @@ class ZorkDataset(MinRLDataset):
             logger.error(f"Error parsing command from {model_response}: {e}")
             return True
         obs, score, done, infos = env.step(action)  # type: ignore
-        agent.update(action, obs, score, done, infos)  # type: ignore
-        logger.info(f"Action: {action}")
+        if not done:
+            agent.update(action, obs, score, done, infos)  # type: ignore
         logger.info(f"Observation: {obs}")
+        logger.info(f"Action: {action} Done: {done}")
         return done
 
     def __len__(self) -> int:
