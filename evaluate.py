@@ -130,17 +130,17 @@ async def main(
     out_rows: list[OutRow] = []
 
     os.makedirs("eval_results", exist_ok=True)
-    done: list[bool] = []
+    sample_done: list[bool] = []
     reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
-        done = []
+        sample_done = []
         for sample in batch:
-            done.append(False)
+            sample_done.append(False)
 
-        while not all(done):
+        while not all(sample_done):
             conv_batch = []
-            for j, (sample, is_done) in enumerate(zip(batch, done)):
+            for j, (sample, is_done) in enumerate(zip(batch, sample_done)):
                 if is_done:
                     continue
                 conv_batch.append(dataset.conversation(sample, j))
@@ -172,7 +172,9 @@ async def main(
                 raise ValueError(f"Invalid model type: {model_type}")
 
             # Process responses
-            for i, (response, is_done) in enumerate(zip(responses, done)):
+            for i, (response, is_done, sample) in enumerate(
+                zip(responses, sample_done, batch)
+            ):
                 if is_done:
                     continue
                 response_content = ""
@@ -186,21 +188,20 @@ async def main(
                     assert isinstance(response, dict)
                     response_content = response["choices"][0]["message"]["content"]
                 assert response_content is not None, "No response content"
-                done[i] = dataset.post_rollout(i, response_content)
+                sample_done[i] = dataset.post_rollout(i, response_content)
 
-        for sample, response in zip(batch, responses):
-            score = reward_function(
-                [{"role": "assistant", "content": response_content}], sample
-            )
-            logger.info(f"Score: {score}")
-            out_rows.append(
-                {
-                    "model": model_name,
-                    "response": response_content,
-                    "score": score,
-                    "sample": sample,
-                }
-            )
+                score = reward_function(
+                    [{"role": "assistant", "content": response_content}], sample
+                )
+                logger.info(f"Score: {score}")
+                out_rows.append(
+                    {
+                        "model": model_name,
+                        "response": response_content,
+                        "score": score,
+                        "sample": sample,
+                    }
+                )
 
     out_rows_pd = pd.DataFrame(out_rows)
 
