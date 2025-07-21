@@ -1,6 +1,7 @@
 import asyncio
 import os
 from typing import Any, TypedDict
+import aiohttp
 from tqdm import tqdm
 
 import fire
@@ -56,6 +57,25 @@ def _download_checkpoint_from_modal(checkpoint_name: str):
                 raise e
 
 
+async def _openrouter_request(
+    model_id: str,
+    conv: list[dict[str, str]],
+    api_key: str,
+    reasoning_effort: str | None = None,
+):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    data = {"model": model_id, "messages": conv}
+    if reasoning_effort:
+        data["reasoning"] = {"effort": reasoning_effort, "enabled": True}
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as response:
+            return await response.json()
+
+
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
@@ -68,6 +88,7 @@ async def main(
     )
 
     openai_client = None
+    api_key = None
     if model_name not in INFERENCE_MODELS:
         raise ValueError(f"Invalid model name: {model_name}")
     model = INFERENCE_MODELS[model_name]
@@ -100,10 +121,9 @@ async def main(
     elif model_type == "openai":
         openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     elif model_type == "openrouter":
-        openai_client = AsyncOpenAI(
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-            base_url="https://openrouter.ai/api/v1",
-        )
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY is not set")
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
@@ -126,11 +146,10 @@ async def main(
                 conv_batch.append(dataset.conversation(sample, j))
 
             # Perform inference
-            logger.info(f"Requesting batch {i} of {len(conv_batch)} completions")
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
                 responses = vllm_model.chat(conv_batch, sampling_params=sampling_params)  # type: ignore
-            elif model_type in ("openai", "openrouter"):
+            elif model_type == "openai":
                 assert openai_client is not None, "OpenAI client is not initialized"
                 responses = await asyncio.gather(
                     *[
@@ -138,6 +157,14 @@ async def main(
                             model=model["model_id"],
                             messages=conv,  # type: ignore
                         )
+                        for conv in conv_batch
+                    ]
+                )
+            elif model_type == "openrouter":
+                assert api_key is not None, "OpenRouter API key is not set"
+                responses = await asyncio.gather(
+                    *[
+                        _openrouter_request(model["model_id"], conv, api_key, "medium")
                         for conv in conv_batch
                     ]
                 )
@@ -152,9 +179,12 @@ async def main(
                 if model_type in ["finetuned", "huggingface"]:
                     assert isinstance(response, RequestOutput)
                     response_content = response.outputs[0].text
-                else:
+                elif model_type == "openai":
                     assert isinstance(response, ChatCompletion)
                     response_content = response.choices[0].message.content
+                elif model_type == "openrouter":
+                    assert isinstance(response, dict)
+                    response_content = response["choices"][0]["message"]["content"]
                 assert response_content is not None, "No response content"
                 done[i] = dataset.post_rollout(i, response_content)
 
