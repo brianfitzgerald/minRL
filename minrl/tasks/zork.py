@@ -1,4 +1,3 @@
-import uuid
 from loguru import logger
 from minrl.constants import Conversation, HostType, Sample
 from minrl.tasks.dataset import MinRLDataset, Split
@@ -49,7 +48,6 @@ TEXTWORLD_GAMES: dict[ZGameName, ZGame] = {
 
 class ZorkSample(TypedDict):
     index: int
-    run_id: str
 
 
 class TextWorldAgent:
@@ -198,7 +196,7 @@ class ZorkDataset(MinRLDataset):
         """
         Get a sample from the dataset.
         """
-        return {"index": index, "run_id": str(uuid.uuid4())}
+        return {"index": index}
 
     def post_rollout(self, sample_index: int, model_response: str) -> bool:
         """

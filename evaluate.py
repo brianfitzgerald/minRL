@@ -19,6 +19,7 @@ from pathlib import Path
 from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
+    Conversation,
     ModelName,
     INFERENCE_MODELS,
 )
@@ -32,7 +33,7 @@ load_dotenv(".env")
 
 class OutRow(TypedDict):
     model: str
-    response: str
+    conversation: Conversation
     score: float
     sample: dict[str, Any]
 
@@ -190,14 +191,16 @@ async def main(
                 assert response_content is not None, "No response content"
                 sample_done[i] = dataset.post_rollout(i, response_content)
 
-                score = reward_function(
-                    [{"role": "assistant", "content": response_content}], sample
-                )
+                conv_with_response = conv_batch[i] + [
+                    {"role": "assistant", "content": response_content}
+                ]
+
+                score = reward_function(conv_with_response, sample)
                 logger.info(f"Score: {score}")
                 out_rows.append(
                     {
                         "model": model_name,
-                        "response": response_content,
+                        "conversation": conv_with_response,
                         "score": score,
                         "sample": sample,
                     }
