@@ -80,7 +80,7 @@ async def _openrouter_request(
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
-    batch_size: int = 1,
+    batch_size: int = 4,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
@@ -100,9 +100,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert (
-                "base_model_id" in model
-            ), "Base model ID is required for finetuned models"
+            assert "base_model_id" in model, (
+                "Base model ID is required for finetuned models"
+            )
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -128,16 +128,15 @@ async def main(
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
-    out_rows: list[OutRow] = []
-
     os.makedirs("eval_results", exist_ok=True)
-    sample_done: list[bool] = []
     reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
         sample_done = []
+        sample_saved = []  # Track which samples have been saved
         for sample in batch:
             sample_done.append(False)
+            sample_saved.append(False)
 
         while not all(sample_done):
             conv_batch = []
@@ -173,6 +172,7 @@ async def main(
                 raise ValueError(f"Invalid model type: {model_type}")
 
             # Process responses
+            batch_out_rows: list[OutRow] = []
             for i, (response, is_done, sample) in enumerate(
                 zip(responses, sample_done, batch)
             ):
@@ -188,29 +188,40 @@ async def main(
                 elif model_type == "openrouter":
                     assert isinstance(response, dict)
                     response_content = response["choices"][0]["message"]["content"]
+                    reasoning_content = None
+                    if "reasoning" in response["choices"][0]["message"]:
+                        reasoning_content = response["choices"][0]["message"][
+                            "reasoning"
+                        ]
+
                 assert response_content is not None, "No response content"
-                sample_done[i] = dataset.post_rollout(i, response_content)
 
                 conv_with_response = conv_batch[i] + [
                     {"role": "assistant", "content": response_content}
                 ]
 
-                score = reward_function(conv_with_response, sample)
-                logger.info(f"Score: {score}")
-                out_rows.append(
-                    {
-                        "model": model_name,
-                        "conversation": conv_with_response,
-                        "score": score,
-                        "sample": sample,
-                    }
-                )
+                sample_done[i] = dataset.post_generation(i, response_content)
 
-    out_rows_pd = pd.DataFrame(out_rows)
+                # Only save output row when trajectory is finished and not already saved
+                if sample_done[i] and not sample_saved[i]:
+                    score = reward_function(conv_with_response, sample)
+                    logger.info(f"Score: {score}")
+                    batch_out_rows.append(
+                        {
+                            "model": model_name,
+                            "conversation": conv_with_response,
+                            "score": score,
+                            "sample": sample,
+                        }
+                    )
+                    sample_saved[i] = True
 
-    file_path = f"eval_results/eval_{task}_{model_name}.parquet"
-    logger.info(f"Saving results to {file_path}")
-    out_rows_pd.to_parquet(file_path)
+        # Save results after each batch is completed
+        if batch_out_rows:
+            batch_df = pd.DataFrame(batch_out_rows)
+            file_path = f"eval_results/eval_{task}_{model_name}_batch_{i}.parquet"
+            logger.info(f"Saving batch {i} results to {file_path}")
+            batch_df.to_parquet(file_path)
 
 
 if __name__ == "__main__":

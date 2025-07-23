@@ -198,7 +198,7 @@ class ZorkDataset(MinRLDataset):
         """
         return {"index": index}
 
-    def post_rollout(self, sample_index: int, model_response: str) -> bool:
+    def post_generation(self, sample_index: int, model_response: str) -> bool:
         """
         After rollout, update any state needed for the next rollout.
         Returns whether the episode is done.
