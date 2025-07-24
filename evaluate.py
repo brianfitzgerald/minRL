@@ -20,6 +20,7 @@ from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
     Conversation,
+    ConversationMessage,
     ModelName,
     INFERENCE_MODELS,
 )
@@ -33,9 +34,14 @@ load_dotenv(".env")
 
 class OutRow(TypedDict):
     model: str
-    conversation: Conversation
     score: float
     sample: dict[str, Any]
+    # Parsed actions
+    actions: list[str]
+    # Outputs from the environment
+    observations: list[str]
+    # Full responses from inference
+    full_responses: list[ConversationMessage]
 
 
 def _download_checkpoint_from_modal(checkpoint_name: str):
@@ -129,7 +135,6 @@ async def main(
         raise ValueError(f"Invalid model type: {model_type}")
 
     os.makedirs("eval_results", exist_ok=True)
-    reward_function = TASK_DATASETS[task]["reward_function"]
 
     for i, batch in enumerate(tqdm(loader)):
         sample_done = []
@@ -138,17 +143,34 @@ async def main(
             sample_done.append(False)
             sample_saved.append(False)
 
+        # Process responses
+        batch_out_rows: list[OutRow] = [
+            {
+                "model": model_name,
+                "actions": [],
+                "observations": [],
+                "score": 0,
+                "sample": {},
+                "full_responses": [],
+            }
+            for _ in batch
+        ]
+
         while not all(sample_done):
-            conv_batch = []
+            conversation_batch: list[Conversation] = []
             for j, (sample, is_done) in enumerate(zip(batch, sample_done)):
                 if is_done:
                     continue
-                conv_batch.append(dataset.conversation(sample, j))
+                conversation_batch.append(dataset.conversation(sample, j))
 
             # Perform inference
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
-                responses = vllm_model.chat(conv_batch, sampling_params=sampling_params)  # type: ignore
+                assert vllm_model is not None, "VLLM model is not initialized"
+                responses = vllm_model.chat(
+                    conversation_batch,  # type: ignore
+                    sampling_params=sampling_params,
+                )
             elif model_type == "openai":
                 assert openai_client is not None, "OpenAI client is not initialized"
                 responses = await asyncio.gather(
@@ -157,25 +179,22 @@ async def main(
                             model=model["model_id"],
                             messages=conv,  # type: ignore
                         )
-                        for conv in conv_batch
+                        for conv in conversation_batch
                     ]
                 )
             elif model_type == "openrouter":
                 assert api_key is not None, "OpenRouter API key is not set"
                 responses = await asyncio.gather(
                     *[
-                        _openrouter_request(model["model_id"], conv, api_key, "medium")
-                        for conv in conv_batch
+                        _openrouter_request(model["model_id"], conv, api_key, "medium")  # type: ignore
+                        for conv in conversation_batch
                     ]
                 )
             else:
                 raise ValueError(f"Invalid model type: {model_type}")
 
-            # Process responses
-            batch_out_rows: list[OutRow] = []
-            for i, (response, is_done, sample) in enumerate(
-                zip(responses, sample_done, batch)
-            ):
+            for i, (response, is_done) in enumerate(zip(responses, sample_done)):
+                reasoning_content = None
                 if is_done:
                     continue
                 response_content = ""
@@ -193,28 +212,19 @@ async def main(
                         reasoning_content = response["choices"][0]["message"][
                             "reasoning"
                         ]
-
                 assert response_content is not None, "No response content"
 
-                conv_with_response = conv_batch[i] + [
-                    {"role": "assistant", "content": response_content}
-                ]
+                batch_out_rows[i]["full_responses"].append(
+                    {
+                        "role": "assistant",
+                        "content": response_content,
+                        "reasoning": reasoning_content,
+                    }
+                )
 
-                sample_done[i] = dataset.post_generation(i, response_content)
-
-                # Only save output row when trajectory is finished and not already saved
-                if sample_done[i] and not sample_saved[i]:
-                    score = reward_function(conv_with_response, sample)
-                    logger.info(f"Score: {score}")
-                    batch_out_rows.append(
-                        {
-                            "model": model_name,
-                            "conversation": conv_with_response,
-                            "score": score,
-                            "sample": sample,
-                        }
-                    )
-                    sample_saved[i] = True
+                obs, sample_done[i] = dataset.post_generation(i, response_content)
+                batch_out_rows[i]["observations"].append(obs)
+                batch_out_rows[i]["actions"].append(response_content)
 
         # Save results after each batch is completed
         if batch_out_rows:

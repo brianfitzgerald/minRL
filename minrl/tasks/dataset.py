@@ -60,9 +60,11 @@ class MinRLDataset(Dataset):
         Given a sample, format the conversation for inference.
         """
 
-    def post_generation(self, sample_index: int, model_response: str) -> bool:
+    def post_generation(
+        self, sample_index: int, model_response: str
+    ) -> tuple[str, bool]:
         """
         After rollout, update any state needed for the next rollout.
         Return whether the episode is done, true by default for single turn inference.
         """
-        return True
+        raise NotImplementedError("post_generation is not implemented")

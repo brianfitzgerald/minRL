@@ -198,7 +198,9 @@ class ZorkDataset(MinRLDataset):
         """
         return {"index": index}
 
-    def post_generation(self, sample_index: int, model_response: str) -> bool:
+    def post_generation(
+        self, sample_index: int, model_response: str
+    ) -> tuple[str, bool]:
         """
         After rollout, update any state needed for the next rollout.
         Returns whether the episode is done.
@@ -209,7 +211,7 @@ class ZorkDataset(MinRLDataset):
             action = parse_command(model_response)
         except Exception as e:
             logger.error(f"Error parsing command from {model_response}: {e}")
-            return True
+            return "", True
         obs, score, done, infos = env.step(action)  # type: ignore
         obs = obs.strip("\n")
         logger.info(f"Action: {action}\n Observation: {obs}")
@@ -219,7 +221,7 @@ class ZorkDataset(MinRLDataset):
         else:
             del self.envs[sample_index]
             del self.agents[sample_index]
-        return done
+        return obs, done
 
     def __len__(self) -> int:
         return 1000
