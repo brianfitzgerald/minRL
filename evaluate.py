@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 import aiohttp
 from tqdm import tqdm
 
@@ -31,17 +31,26 @@ Evaluate against any task in the minrl.tasks module.
 
 load_dotenv(".env")
 
+Status = Literal["running", "done", "error"]
+
 
 class OutRow(TypedDict):
     model: str
-    score: float
-    sample: dict[str, Any]
     # Parsed actions
     actions: list[str]
     # Outputs from the environment
     observations: list[str]
     # Full responses from inference
     full_responses: list[ConversationMessage]
+    status: Status
+
+
+def _save_results(out_rows: list[OutRow], task: TaskChoice, model_name: ModelName):
+    out_rows = [row for row in out_rows if row["status"] == "done"]
+    df = pd.DataFrame(out_rows)
+    file_path = f"eval_results/eval_{task}_{model_name}.parquet"
+    logger.info(f"Saving results to {file_path}")
+    df.to_parquet(file_path)
 
 
 def _download_checkpoint_from_modal(checkpoint_name: str):
@@ -85,7 +94,7 @@ async def _openrouter_request(
 
 async def main(
     task: TaskChoice = "zork",
-    model_name: ModelName = "gemini_2.5_flash",
+    model_name: ModelName = "gpt-4.1-mini",
     batch_size: int = 4,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
@@ -137,29 +146,23 @@ async def main(
     os.makedirs("eval_results", exist_ok=True)
 
     for i, batch in enumerate(tqdm(loader)):
-        sample_done = []
-        sample_saved = []  # Track which samples have been saved
-        for sample in batch:
-            sample_done.append(False)
-            sample_saved.append(False)
-
         # Process responses
         batch_out_rows: list[OutRow] = [
             {
                 "model": model_name,
                 "actions": [],
                 "observations": [],
-                "score": 0,
-                "sample": {},
                 "full_responses": [],
+                "status": "running",
             }
             for _ in batch
         ]
 
-        while not all(sample_done):
+        while not all(row["status"] == "done" for row in batch_out_rows):
+            # Create batch of conversations
             conversation_batch: list[Conversation] = []
-            for j, (sample, is_done) in enumerate(zip(batch, sample_done)):
-                if is_done:
+            for j, (sample, row) in enumerate(zip(batch, batch_out_rows)):
+                if row["status"] == "done":
                     continue
                 conversation_batch.append(dataset.conversation(sample, j))
 
@@ -193,9 +196,10 @@ async def main(
             else:
                 raise ValueError(f"Invalid model type: {model_type}")
 
-            for i, (response, is_done) in enumerate(zip(responses, sample_done)):
+            # Process responses
+            for i, (response, row) in enumerate(zip(responses, batch_out_rows)):
                 reasoning_content = None
-                if is_done:
+                if row["status"] == "done":
                     continue
                 response_content = ""
                 if model_type in ["finetuned", "huggingface"]:
@@ -222,16 +226,14 @@ async def main(
                     }
                 )
 
-                obs, sample_done[i] = dataset.post_generation(i, response_content)
+                obs, done = dataset.post_generation(i, response_content)
                 batch_out_rows[i]["observations"].append(obs)
                 batch_out_rows[i]["actions"].append(response_content)
+                if done and row["status"] == "running":
+                    _save_results(batch_out_rows, task, model_name)
+                    batch_out_rows[i]["status"] = "done"
 
-        # Save results after each batch is completed
-        if batch_out_rows:
-            batch_df = pd.DataFrame(batch_out_rows)
-            file_path = f"eval_results/eval_{task}_{model_name}_batch_{i}.parquet"
-            logger.info(f"Saving batch {i} results to {file_path}")
-            batch_df.to_parquet(file_path)
+        _save_results(batch_out_rows, task, model_name)
 
 
 if __name__ == "__main__":
