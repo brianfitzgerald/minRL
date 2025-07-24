@@ -1,12 +1,16 @@
 import os
+from typing import Any
+import fire
 import pandas as pd
 from pathlib import Path
 from loguru import logger
 import matplotlib.pyplot as plt
+from minrl.constants import EvalsOutRow, TaskChoice
 
 
-def main():
-    eval_results_path = Path("eval_results")
+def eval_single_step(task: TaskChoice = "connections"):
+    """Function to evaluate single step inference on the connections task."""
+    eval_results_path = Path(f"eval_results/{task}")
 
     if not eval_results_path.exists():
         logger.error(f"Error: {eval_results_path} folder not found")
@@ -50,9 +54,197 @@ def main():
     for i, v in enumerate(avg_scores["average_score"]):
         plt.text(i, v + 0.01, f"{v:.3f}", ha="center", va="bottom", fontweight="bold")
 
-    os.makedirs("eval_results/figures", exist_ok=True)
-    plt.savefig("eval_results/figures/average_scores.png")
+    os.makedirs(f"eval_results/{task}/figures", exist_ok=True)
+    plt.savefig(f"eval_results/{task}/figures/average_scores.png")
+
+
+def render_zork_trajectories():
+    """Function to render trajectories of the zork task."""
+    eval_results_path = Path("eval_results/zork/eval_zork_gpt-4.1-mini.parquet")
+    if not eval_results_path.exists():
+        logger.error(f"Error: {eval_results_path} folder not found")
+        return
+    df = pd.read_parquet(eval_results_path)
+    out_rows: list[EvalsOutRow] = []
+    for index, row in df.iterrows():
+        out_row: EvalsOutRow = row.to_dict()  # type: ignore
+        out_rows.append(out_row)
+
+    # Generate HTML visualization
+    html_content = _generate_trajectory_html(out_rows)
+
+    # Save to HTML file
+    output_path = Path("eval_results/zork/trajectories.html")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    logger.info(f"HTML trajectory visualization saved to {output_path}")
+
+
+def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
+    """Generate HTML content for trajectory visualization."""
+
+    # Calculate statistics
+    if not out_rows:
+        stats = {
+            "total_trajectories": 0,
+            "done_count": 0,
+            "error_count": 0,
+            "avg_steps": 0,
+        }
+        trajectories = []
+    else:
+        done_count = sum(1 for row in out_rows if row["status"] == "done")
+        error_count = sum(1 for row in out_rows if row["status"] == "error")
+        total_steps = sum(len(row["actions"]) for row in out_rows)
+        avg_steps = total_steps / len(out_rows) if out_rows else 0
+
+        stats = {
+            "total_trajectories": len(out_rows),
+            "done_count": done_count,
+            "error_count": error_count,
+            "avg_steps": avg_steps,
+        }
+
+        trajectories = [
+            _build_trajectory_data(i, row) for i, row in enumerate(out_rows)
+        ]
+
+    return _render_html_template(stats, trajectories)
+
+
+def _build_trajectory_data(index: int, row: EvalsOutRow) -> dict:
+    """Build structured data for a single trajectory."""
+    max_steps = max(
+        len(row["actions"]), len(row["observations"]), len(row["full_responses"])
+    )
+
+    steps = []
+    for step in range(max_steps):
+        step_data: dict[str, Any] = {"step_num": step + 1}
+
+        if step < len(row["actions"]):
+            step_data["action"] = row["actions"][step]
+
+        if step < len(row["observations"]):
+            step_data["observation"] = row["observations"][step]
+
+        if step < len(row["full_responses"]):
+            response = row["full_responses"][step]
+            step_data["response"] = {
+                "role": response.get("role", "unknown"),
+                "content": response.get("content", ""),
+            }
+
+        steps.append(step_data)
+
+    return {
+        "index": index + 1,
+        "model": row["model"],
+        "status": row["status"],
+        "steps": steps,
+    }
+
+
+def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
+    """Render the complete HTML template."""
+
+    css = """
+        body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .trajectory { border: 1px solid #ddd; margin-bottom: 20px; }
+        .trajectory-header { background: #f5f5f5; padding: 10px; font-weight: bold; }
+        .status-done { color: green; }
+        .status-error { color: red; }
+        .status-running { color: orange; }
+        .step { border-left: 3px solid #eee; padding-left: 15px; margin: 15px 0; }
+        .action { background: #e3f2fd; padding: 8px; margin: 5px 0; font-family: monospace; }
+        .observation { background: #f3e5f5; padding: 8px; margin: 5px 0; white-space: pre-wrap; }
+        .response { background: #fff3e0; padding: 8px; margin: 5px 0; }
+        .stats { display: flex; gap: 20px; margin: 20px 0; }
+        .stat { text-align: center; }
+    """
+
+    header = "<h1>Zork Trajectories</h1>"
+
+    stats_html = f"""
+    <div class="stats">
+        <div class="stat"><strong>{stats["total_trajectories"]}</strong><br>Total</div>
+        <div class="stat"><strong>{stats["done_count"]}</strong><br>Done</div>
+        <div class="stat"><strong>{stats["error_count"]}</strong><br>Errors</div>
+        <div class="stat"><strong>{stats["avg_steps"]:.1f}</strong><br>Avg Steps</div>
+    </div>
+    """
+
+    trajectories_html = ""
+    if not trajectories:
+        trajectories_html = "<p>No trajectories found.</p>"
+    else:
+        for traj in trajectories:
+            trajectories_html += _render_trajectory(traj)
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Zork Trajectories</title>
+    <style>{css}</style>
+</head>
+<body>
+    {header}
+    {stats_html}
+    {trajectories_html}
+</body>
+</html>
+"""
+
+
+def _render_trajectory(traj: dict) -> str:
+    """Render a single trajectory."""
+    status_class = f"status-{traj['status']}"
+
+    steps_html = ""
+    for step in traj["steps"]:
+        step_html = f"<h4>Step {step['step_num']}</h4>"
+
+        if "action" in step:
+            step_html += (
+                f'<div class="action"><strong>Action:</strong> {step["action"]}</div>'
+            )
+
+        if "observation" in step:
+            step_html += f'<div class="observation"><strong>Observation:</strong>\n{step["observation"]}</div>'
+
+        if "response" in step:
+            resp = step["response"]
+            step_html += f"""<div class="response">
+                <strong>Response ({resp["role"]}):</strong><br>
+                <pre>{resp["content"]}</pre>
+            </div>"""
+
+        steps_html += f'<div class="step">{step_html}</div>'
+
+    return f'''
+    <div class="trajectory">
+        <div class="trajectory-header">
+            Trajectory #{traj["index"]} - {traj["model"]} 
+            <span class="{status_class}">[{traj["status"].upper()}]</span>
+        </div>
+        <div style="padding: 15px;">
+            {steps_html}
+        </div>
+    </div>
+    '''
+
+
+def main(task: TaskChoice = "connections"):
+    if task == "connections":
+        eval_single_step(task)
+    elif task == "zork":
+        render_zork_trajectories()
 
 
 if __name__ == "__main__":
-    main()
+    fire.Fire(main)

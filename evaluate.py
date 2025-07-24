@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, Literal, TypedDict
+from typing import Literal, TypedDict
 import aiohttp
 from tqdm import tqdm
 
@@ -20,7 +20,7 @@ from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
     MODAL_MODELS_VOLUME_NAME,
     Conversation,
-    ConversationMessage,
+    EvalsOutRow,
     ModelName,
     INFERENCE_MODELS,
 )
@@ -31,21 +31,8 @@ Evaluate against any task in the minrl.tasks module.
 
 load_dotenv(".env")
 
-Status = Literal["running", "done", "error"]
 
-
-class OutRow(TypedDict):
-    model: str
-    # Parsed actions
-    actions: list[str]
-    # Outputs from the environment
-    observations: list[str]
-    # Full responses from inference
-    full_responses: list[ConversationMessage]
-    status: Status
-
-
-def _save_results(out_rows: list[OutRow], task: TaskChoice, model_name: ModelName):
+def _save_results(out_rows: list[EvalsOutRow], task: TaskChoice, model_name: ModelName):
     out_rows = [row for row in out_rows if row["status"] == "done"]
     df = pd.DataFrame(out_rows)
     file_path = f"eval_results/eval_{task}_{model_name}.parquet"
@@ -147,7 +134,7 @@ async def main(
 
     for i, batch in enumerate(tqdm(loader)):
         # Process responses
-        batch_out_rows: list[OutRow] = [
+        batch_out_rows: list[EvalsOutRow] = [
             {
                 "model": model_name,
                 "actions": [],
