@@ -121,15 +121,12 @@ class ZorkDataset(MinRLDataset):
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
-        game_names: list[str] | None = None,
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        
-        # Default games if none specified
-        if game_names is None:
-            game_names = ["zork", "zork1"]
-        self.game_names = game_names
+
+        games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
+        self.game_names = os.listdir(games_directory)
 
         self.infos = textworld.EnvInfos(
             feedback=True,
@@ -141,22 +138,17 @@ class ZorkDataset(MinRLDataset):
             facts=True,
         )
 
-        games_dir_str = os.getenv("INFORM_GAMES_DIRECTORY")
-        if games_dir_str is None:
-            games_dir_str = "./games"  # Default fallback
-        games_directory = Path(games_dir_str)
-        
         # Register all available games
         self.env_ids: dict[str, str] = {}
         for game_name in self.game_names:
-            game_path = games_directory / f"{game_name}.z5"
+            game_path = games_directory / game_name
             if game_path.exists():
                 self.env_ids[game_name] = textworld.gym.register_game(
                     game_path.as_posix(), self.infos
                 )
             else:
                 logger.warning(f"Game file not found: {game_path}")
-        
+
         if not self.env_ids:
             raise ValueError(f"No valid game files found for games: {self.game_names}")
 
@@ -175,14 +167,16 @@ class ZorkDataset(MinRLDataset):
             # Randomly select a game for this trajectory
             selected_game = random.choice(list(self.env_ids.keys()))
             env_id = self.env_ids[selected_game]
-            
+
             env: TextworldGymEnv = textworld.gym.make(env_id)
             agent = TextWorldAgent()
             self.envs[sample_index] = env
             self.sample_games[sample_index] = selected_game
             obs, info = env.reset()
             self.agents[sample_index] = agent
-            logger.info(f"Started new trajectory {sample_index} with game: {selected_game}")
+            logger.info(
+                f"Started new trajectory {sample_index} with game: {selected_game}"
+            )
         agent = self.agents[sample_index]
         conv = agent.format_conversation()
         return conv
@@ -216,7 +210,9 @@ class ZorkDataset(MinRLDataset):
         else:
             # Clean up completed episode
             game_name = self.sample_games[sample_index]
-            logger.info(f"Completed trajectory {sample_index} with game: {game_name}, final score: {score}")
+            logger.info(
+                f"Completed trajectory {sample_index} with game: {game_name}, final score: {score}"
+            )
             del self.envs[sample_index]
             del self.agents[sample_index]
             del self.sample_games[sample_index]
