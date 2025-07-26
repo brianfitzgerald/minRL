@@ -1,14 +1,15 @@
+from pathlib import Path
 from loguru import logger
 from minrl.constants import Conversation, HostType, Sample
 from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
 import textworld.gym
-from typing import Any, Literal, TypedDict
-import requests
-from pathlib import Path
+from typing import Any, TypedDict
 from textworld.gym.envs import TextworldGymEnv
 import re
+import os
+import random
 
 SYSTEM_PROMPT = """
 You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
@@ -30,21 +31,6 @@ INSTRUCTIONS:
 
 """
 
-ZGameName = Literal["zork1"]
-
-
-class ZGame(TypedDict):
-    url: str
-    filename: str
-
-
-TEXTWORLD_GAMES: dict[ZGameName, ZGame] = {
-    "zork1": {
-        "url": "https://github.com/danielricks/textplayer/raw/refs/heads/master/games/zork1.z5",
-        "filename": "zork1.z5",
-    }
-}
-
 
 class ZorkSample(TypedDict):
     index: int
@@ -61,7 +47,6 @@ class TextWorldAgent:
         self.observation_history = []
         self.description = None
         self.action_history = []
-        self.game_name: ZGameName = "zork1"
         self.done = False
         self.score = 0
 
@@ -136,12 +121,16 @@ class ZorkDataset(MinRLDataset):
         split: Split,
         host: HostType,
         tokenizer: PreTrainedTokenizerBase | None = None,
+        game_names: list[str] | None = None,
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        self.game_name: ZGameName = "zork1"
-        self.game_metadata = TEXTWORLD_GAMES[self.game_name]
-        self._download_game_if_needed(self.game_name)
+        
+        # Default games if none specified
+        if game_names is None:
+            game_names = ["zork", "zork1"]
+        self.game_names = game_names
+
         self.infos = textworld.EnvInfos(
             feedback=True,
             description=True,
@@ -151,43 +140,49 @@ class ZorkDataset(MinRLDataset):
             entities=True,
             facts=True,
         )
-        self.env_id = textworld.gym.register_game(
-            f"games/{self.game_metadata['filename']}", self.infos
-        )
+
+        games_dir_str = os.getenv("INFORM_GAMES_DIRECTORY")
+        if games_dir_str is None:
+            games_dir_str = "./games"  # Default fallback
+        games_directory = Path(games_dir_str)
+        
+        # Register all available games
+        self.env_ids: dict[str, str] = {}
+        for game_name in self.game_names:
+            game_path = games_directory / f"{game_name}.z5"
+            if game_path.exists():
+                self.env_ids[game_name] = textworld.gym.register_game(
+                    game_path.as_posix(), self.infos
+                )
+            else:
+                logger.warning(f"Game file not found: {game_path}")
+        
+        if not self.env_ids:
+            raise ValueError(f"No valid game files found for games: {self.game_names}")
 
         self.envs: dict[int, TextworldGymEnv] = {}
         self.agents: dict[int, TextWorldAgent] = {}
+        self.sample_games: dict[int, str] = {}  # Track which game each sample uses
 
         self.completed_episodes = []
-
-    def _download_game_if_needed(self, game_name: ZGameName):
-        games_dir = Path.cwd() / "games"
-        games_dir.mkdir(exist_ok=True)
-
-        game_path = games_dir / self.game_metadata["filename"]
-
-        if game_path.exists():
-            logger.info(f"Game {game_name} already exists at {game_path}")
-            return
-
-        logger.info(f"Downloading game {game_name} to {game_path}")
-
-        response = requests.get(self.game_metadata["url"])
-        response.raise_for_status()
-
-        with open(game_path, "wb") as f:
-            f.write(response.content)
 
     def conversation(self, _: Sample, sample_index: int) -> Conversation:
         """
         Return the inference conversation for a single turn.
+        For new trajectories, randomly selects a game from available games.
         """
         if sample_index not in self.envs:
-            env: TextworldGymEnv = textworld.gym.make(self.env_id)
+            # Randomly select a game for this trajectory
+            selected_game = random.choice(list(self.env_ids.keys()))
+            env_id = self.env_ids[selected_game]
+            
+            env: TextworldGymEnv = textworld.gym.make(env_id)
             agent = TextWorldAgent()
             self.envs[sample_index] = env
+            self.sample_games[sample_index] = selected_game
             obs, info = env.reset()
             self.agents[sample_index] = agent
+            logger.info(f"Started new trajectory {sample_index} with game: {selected_game}")
         agent = self.agents[sample_index]
         conv = agent.format_conversation()
         return conv
@@ -219,8 +214,12 @@ class ZorkDataset(MinRLDataset):
         if not done:
             agent.update(action, obs, inventory, done, score)  # type: ignore
         else:
+            # Clean up completed episode
+            game_name = self.sample_games[sample_index]
+            logger.info(f"Completed trajectory {sample_index} with game: {game_name}, final score: {score}")
             del self.envs[sample_index]
             del self.agents[sample_index]
+            del self.sample_games[sample_index]
         return obs, done
 
     def __len__(self) -> int:
