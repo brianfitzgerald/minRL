@@ -60,7 +60,7 @@ def eval_single_step(task: TaskChoice = "connections"):
 
 def render_zork_trajectories():
     """Function to render trajectories of the zork task."""
-    eval_results_path = Path("eval_results/zork/eval_zork_gpt-4.1-mini.parquet")
+    eval_results_path = Path("eval_results/eval_zork_gpt-4.1-mini.parquet")
     if not eval_results_path.exists():
         logger.error(f"Error: {eval_results_path} folder not found")
         return

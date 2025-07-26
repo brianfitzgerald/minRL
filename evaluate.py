@@ -31,7 +31,7 @@ load_dotenv(".env")
 def _save_results(out_rows: list[EvalsOutRow], task: TaskChoice, model_name: ModelName):
     out_rows = [row for row in out_rows if row["status"] == "done"]
     df = pd.DataFrame(out_rows)
-    file_path = f"eval_results/eval_{task}_{model_name}.parquet"
+    file_path = f"eval_results/{task}/eval_{model_name}.parquet"
     logger.info(f"Saving results to {file_path}")
     df.to_parquet(file_path)
 
