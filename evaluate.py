@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 
 import aiohttp
 import fire
@@ -32,6 +33,8 @@ def _save_results(out_rows: list[EvalsOutRow], task: TaskChoice, model_name: Mod
     out_rows = [row for row in out_rows if row["status"] == "done"]
     df = pd.DataFrame(out_rows)
     file_path = f"eval_results/{task}/eval_{model_name}.parquet"
+    if not Path(file_path).parent.exists():
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving results to {file_path}")
     df.to_parquet(file_path)
 
@@ -78,9 +81,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert "base_model_id" in model, (
-                "Base model ID is required for finetuned models"
-            )
+            assert (
+                "base_model_id" in model
+            ), "Base model ID is required for finetuned models"
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
