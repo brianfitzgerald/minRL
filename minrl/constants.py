@@ -14,9 +14,6 @@ Conversation: TypeAlias = list[ConversationMessage]
 Sample: TypeAlias = dict[str, Any]
 RewardFunction: TypeAlias = Callable[[Conversation, Sample], float]
 
-MODAL_MODELS_VOLUME_NAME = "minrl-models"
-MODAL_DATASET_VOLUME_NAME = "minrl-datasets"
-
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"
 QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"

@@ -1,14 +1,15 @@
 from modal import Image, App
 import modal
-from pathlib import Path
 
-from minrl.constants import MODAL_DATASET_VOLUME_NAME, MODAL_MODELS_VOLUME_NAME
 from minrl.trainer import Trainer
+from minrl.modal_utils import (
+    MODELS_VOLUME_PATH,
+    DATASET_VOLUME_PATH,
+    MODEL_WEIGHTS_VOLUME,
+    DATASET_VOLUME,
+)
 
 APP_NAME = "minRL"
-MODELS_VOLUME_PATH = Path(f"/{MODAL_MODELS_VOLUME_NAME}")
-DATASET_VOLUME_PATH = Path(f"/{MODAL_DATASET_VOLUME_NAME}")
-
 app = App(APP_NAME)
 
 
@@ -47,14 +48,6 @@ MODAL_IMAGE = (
 
 def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     return seconds + (minutes * 60) + (hours * 60 * 60)
-
-
-MODEL_WEIGHTS_VOLUME = modal.Volume.from_name(
-    MODAL_MODELS_VOLUME_NAME, create_if_missing=True
-)
-DATASET_VOLUME = modal.Volume.from_name(
-    MODAL_DATASET_VOLUME_NAME, create_if_missing=True
-)
 
 
 @app.function(

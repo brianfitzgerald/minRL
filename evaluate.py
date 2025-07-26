@@ -1,9 +1,7 @@
 import asyncio
 import os
-from typing import Literal, TypedDict
-import aiohttp
-from tqdm import tqdm
 
+import aiohttp
 import fire
 import pandas as pd
 from dotenv import load_dotenv
@@ -11,19 +9,17 @@ from loguru import logger
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from vllm import LLM, RequestOutput, SamplingParams
-import modal
-from modal.volume import FileEntryType
-from pathlib import Path
 
-from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.constants import (
-    MODAL_MODELS_VOLUME_NAME,
+    INFERENCE_MODELS,
     Conversation,
     EvalsOutRow,
     ModelName,
-    INFERENCE_MODELS,
 )
+from minrl.tasks import TASK_DATASETS, TaskChoice
+from minrl.modal_utils import download_checkpoint_from_modal
 
 """
 Evaluate against any task in the minrl.tasks module.
@@ -38,26 +34,6 @@ def _save_results(out_rows: list[EvalsOutRow], task: TaskChoice, model_name: Mod
     file_path = f"eval_results/eval_{task}_{model_name}.parquet"
     logger.info(f"Saving results to {file_path}")
     df.to_parquet(file_path)
-
-
-def _download_checkpoint_from_modal(checkpoint_name: str):
-    vol = modal.Volume.from_name(MODAL_MODELS_VOLUME_NAME)
-    for file in vol.iterdir(f"checkpoints/{checkpoint_name}"):
-        if file.type == FileEntryType.FILE:
-            # remove checkpoints/ from the path as it's already in the path
-            local_path = os.path.join(".", file.path)
-            if os.path.exists(local_path):
-                logger.info(f"Skipping {file.path} as it already exists locally.")
-                continue
-            logger.info(f"Downloading {file.path} to {local_path}")
-            Path(local_path).parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with open(local_path, "wb") as file_obj:
-                    for chunk in tqdm(vol.read_file(file.path), desc="Downloading"):
-                        file_obj.write(chunk)
-            except Exception as e:
-                logger.error(f"Error downloading {file.path}: {e}")
-                raise e
 
 
 async def _openrouter_request(
@@ -110,7 +86,7 @@ async def main(
                 logger.info(
                     f"{model['model_id']} not found locally, downloading from modal"
                 )
-                _download_checkpoint_from_modal(model["model_id"])
+                download_checkpoint_from_modal(model["model_id"])
         else:
             model_path = model["model_id"]
         vllm_model = LLM(
