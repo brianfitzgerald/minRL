@@ -187,7 +187,7 @@ class ZorkDataset(MinRLDataset):
         """
         return {"index": index}
 
-    def post_generation(
+    def get_next_state(
         self, sample_index: int, model_response: str
     ) -> tuple[str, bool]:
         """

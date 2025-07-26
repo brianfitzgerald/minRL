@@ -61,7 +61,7 @@ def test_rollout_with_sample_batch(
         tokenizer=tokenizer,
         batch=sample_batch,
         max_new_tokens=50,
-        num_answers_per_question=1,
+        group_size=1,
         max_turns=1,
         reward_function=lambda x, y: 0.5,
         vllm_model=vllm_model,

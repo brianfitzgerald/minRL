@@ -55,16 +55,17 @@ class MinRLDataset(Dataset):
         self.host = host
 
     @abstractmethod
-    def conversation(self, sample: Sample, sample_index: int) -> Conversation:
+    def format_initial_conversation(
+        self, sample: Sample, sample_index: int
+    ) -> Conversation:
         """
         Given a sample, format the conversation for inference.
         """
 
-    def post_generation(
+    def get_next_state(
         self, sample_index: int, model_response: str
     ) -> tuple[str, bool]:
         """
-        After rollout, update any state needed for the next rollout.
-        Return whether the episode is done, true by default for single turn inference.
+        After each turn, get the next state of the environment based on the model response.
         """
         raise NotImplementedError("post_generation is not implemented")

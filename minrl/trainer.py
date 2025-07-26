@@ -24,9 +24,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -159,7 +157,7 @@ class Trainer:
             4. Saves checkpoints periodically
             5. Logs metrics to TensorBoard or Weights & Biases
         """
-        
+
         prev_reward_std: float | None = None
 
         for step, batch in enumerate(self.train_dataloader, start=1):
@@ -173,7 +171,7 @@ class Trainer:
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
-                num_answers_per_question=self.config.num_answers_per_question,
+                group_size=self.config.num_answers_per_question,
                 reward_function=self.train_dataset.reward_function,
                 vllm_model=self.vllm_model,
                 prev_reward_std=prev_reward_std,
@@ -198,7 +196,7 @@ class Trainer:
             # Compute current reward std for next iteration
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
-            
+
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             if step % self.config.eval_interval == 0:
@@ -206,12 +204,18 @@ class Trainer:
 
             # Get temperature used for logging
             from minrl.algorithms import compute_scaled_temperature
+
             temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
-            
+
             compute_metrics(
-                episodes, results, self.metrics_wrapper, step, self.optimizer, temperature_used
+                episodes,
+                results,
+                self.metrics_wrapper,
+                step,
+                self.optimizer,
+                temperature_used,
             )
-            
+
             # Update prev_reward_std for next iteration
             prev_reward_std = current_reward_std
             # save checkpoint
@@ -246,7 +250,7 @@ class Trainer:
                 tokenizer=self.tokenizer,
                 batch=batch,
                 max_new_tokens=self.config.max_new_tokens,
-                num_answers_per_question=1,
+                group_size=1,
                 reward_function=self.eval_dataset.reward_function,
                 vllm_model=self.vllm_model,
             )

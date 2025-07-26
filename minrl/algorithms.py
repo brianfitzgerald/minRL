@@ -57,13 +57,16 @@ def rollout(
     tokenizer: PreTrainedTokenizerBase,
     batch: MiniBatch,
     max_new_tokens: int,
-    num_answers_per_question: int,
+    group_size: int,
     max_turns: int,
     reward_function: RewardFunction,
     vllm_model: LLM,
     prev_reward_std: float | None = None,
 ) -> List[Episode]:
-    """Generate multiple responses for each prompt in the batch."""
+    """
+    Generate completions for each turn in a batch of conversations.
+    Runs for max_turns turns, and generates num_answers_per_question completions for each turn.
+    """
     end_token_id: int = tokenizer.eos_token_id  # type: ignore
     pad_token_id: int = tokenizer.pad_token_id  # type: ignore
 
@@ -73,17 +76,14 @@ def rollout(
     temperature = compute_scaled_temperature(config, prev_reward_std)
 
     logger.info(
-        f"Generating responses for {len(batch.prefixes)} prompts, max_tokens={max_new_tokens}, n={num_answers_per_question}, temperature={temperature:.3f}"
+        f"Generating responses for {len(batch.conversations)} prompts, max_tokens={max_new_tokens}, n={group_size}, temperature={temperature:.3f}"
     )
-
-    conversations: list[Conversation] = []
 
     # Perform N rounds of rollout for the max turn count
     for _ in range(max_turns):
-        conversations: List[List[Dict[str, str]]] = batch.conversations  # type: ignore
 
         prefixes_batch = tokenizer.apply_chat_template(
-            conversations, tokenize=True, enable_thinking=False
+            batch.conversations, tokenize=True, enable_thinking=False  # type: ignore
         )
 
         prefixes_prompts: list[TokensPrompt] = [
@@ -95,7 +95,7 @@ def rollout(
             sampling_params=SamplingParams(
                 max_tokens=max_new_tokens,
                 temperature=config.temperature,
-                n=num_answers_per_question,
+                n=group_size,
             ),
         )
 
@@ -105,7 +105,7 @@ def rollout(
 
     episodes: List[Episode] = []
     for i in range(len(outputs)):
-        for j in range(num_answers_per_question):
+        for j in range(group_size):
             # idx of the j-th answer for the i-th prompt
             generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
 
@@ -119,10 +119,7 @@ def rollout(
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
             # Calculate rewards
-            # TODO store and send the whole conversation
-            reward = reward_function(
-                [{"role": "assistant", "content": generated_text}], batch.samples[i]
-            )
+            reward = reward_function(conversations[i], batch.samples[i])
 
             # Create episode
             episode = Episode(
