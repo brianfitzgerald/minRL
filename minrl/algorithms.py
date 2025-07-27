@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loguru import logger
+from tqdm import tqdm
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM, TokensPrompt
@@ -16,7 +17,7 @@ from vllm.sampling_params import (
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
 
-from minrl.constants import AlgorithmChoice, Conversation, TrainerConfig
+from minrl.constants import AlgorithmChoice, Conversation, Sample, TrainerConfig
 from minrl.constants import RewardFunction
 from minrl.tasks.dataset import Episode
 from minrl.metrics import MetricsWrapper
@@ -58,6 +59,7 @@ def rollout(
     group_size: int,
     max_turns: int,
     conversations: list[Conversation],
+    samples: list[Sample],
     reward_function: RewardFunction,
     vllm_model: LLM,
     prev_reward_std: float | None = None,
@@ -67,7 +69,6 @@ def rollout(
     Runs for max_turns turns, and generates num_answers_per_question completions for each turn.
     """
     end_token_id: int = tokenizer.eos_token_id  # type: ignore
-    pad_token_id: int = tokenizer.pad_token_id  # type: ignore
 
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
@@ -76,59 +77,63 @@ def rollout(
         f"Generating responses for {len(conversations)} prompts, max_tokens={config.max_new_tokens}, n={config.group_size}, temp={temperature:.3f}"
     )
 
-    for _ in range(max_turns):
+    # For each turn, generate responses, add to conversation
+    for turn_idx in tqdm(range(max_turns), desc="Turns"):
+
+        # Tokenize the conversations
         prefixes_batch = tokenizer.apply_chat_template(
-            conversations,
+            conversations,  # type: ignore
             tokenize=True,
             enable_thinking=False,  # type: ignore
         )
-
         prefixes_prompts: list[TokensPrompt] = [
-            {"prompt_token_ids": prefix} for prefix in prefixes_batch
+            {"prompt_token_ids": prefix} for prefix in prefixes_batch  # type: ignore
         ]
-
+        # Generate list of n_conversations * group_size responses
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
                 temperature=temperature,
-                n=group_size,
+                # If past the first turn, only generate one response per conversation
+                n=group_size if turn_idx == 0 else 1,
             ),
         )
+
+        # Parse out the responses, and add to conversation
+        for i in range(len(outputs)):
+            if turn_idx == 0:
+                # If first turn, add all responses to conversation
+                for j in range(group_size):
+                    generated_text = outputs[i].outputs[j].text
+                    logger.info(f"\nText for response {i}.{j}: {generated_text}")
+                    conversations[i].append(
+                        {"role": "assistant", "content": generated_text}
+                    )
+            else:
+                # Otherwise, add the first response to the conversation
+                generated_text = outputs[i].outputs[0].text
+                conversations[i].append(
+                    {"role": "assistant", "content": generated_text}
+                )
 
         # Clear CUDA cache
         gc.collect()
         torch.cuda.empty_cache()
 
     episodes: List[Episode] = []
-    for i in range(len(outputs)):
-        for j in range(config.group_size):
-            # idx of the j-th answer for the i-th prompt
-            generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
-
-            # Remove padding tokens
-            if pad_token_id in generated_token_ids:
-                pad_token_idx = generated_token_ids.index(pad_token_id)
-                generated_token_ids = generated_token_ids[:pad_token_idx]
-
-            generated_text = outputs[i].outputs[j].text
-
-            logger.info(f"\nText for response {i}.{j}: {generated_text}")
-
-            reward = reward_function(conversations[i], batch.samples[i])
-
-            # Create episode
-            episode = Episode(
-                group_index=i,
-                answer_index=j,
-                finished=end_token_id in generated_token_ids,
-                reward=reward,
-                conversation=[
-                    {"role": "user", "content": batch.prefixes[i]},
-                    {"role": "assistant", "content": generated_text},
-                ],
-            )
-            episodes.append(episode)
+    for i, (conversation, sample) in enumerate(zip(conversations, samples)):
+        # Calculate rewards
+        reward = reward_function(conversation, sample)
+        # Create episode
+        episode = Episode(
+            group_index=i,
+            answer_index=0,
+            sample=sample,
+            reward=reward,
+            conversation=conversation,
+        )
+        episodes.append(episode)
 
     return episodes
 

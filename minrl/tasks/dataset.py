@@ -10,6 +10,8 @@ from minrl.constants import Conversation, HostType, Sample
 
 Split = Literal["train", "test", "eval"]
 
+EpisodeStatus = Literal["finished", "terminated"]
+
 
 @dataclass
 class Episode:
@@ -19,9 +21,10 @@ class Episode:
     group_index: int
     # Index of answer in group
     answer_index: int
-    finished: bool
+    # Whether the episode finished or terminated early
     reward: float
     conversation: Conversation
+    sample: Sample
 
 
 class MinRLDataset(Dataset):
