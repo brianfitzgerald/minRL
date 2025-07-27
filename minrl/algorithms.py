@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 from minrl.constants import AlgorithmChoice, Conversation, Sample, TrainerConfig
 from minrl.constants import RewardFunction
-from minrl.tasks.dataset import Episode
+from minrl.tasks.dataset import Episode, MinRLDataset
 from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
@@ -58,7 +58,7 @@ def rollout(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
     group_size: int,
-    max_turns: int,
+    dataset: MinRLDataset,
     conversations: list[Conversation],
     samples: list[Sample],
     reward_function: RewardFunction,
@@ -77,7 +77,7 @@ def rollout(
     )
 
     # For each turn, generate responses, add to conversation
-    for turn_idx in tqdm(range(max_turns), desc="Turns"):
+    for step_idx in tqdm(range(dataset.max_steps), desc="Steps"):
         # Tokenize the conversations
         prefixes_batch = tokenizer.apply_chat_template(
             conversations,  # type: ignore
@@ -95,13 +95,13 @@ def rollout(
                 max_tokens=config.max_new_tokens,
                 temperature=temperature,
                 # If past the first turn, only generate one response per conversation
-                n=group_size if turn_idx == 0 else 1,
+                n=group_size if step_idx == 0 else 1,
             ),
         )
 
         # Parse out the responses, and add to conversation
         for i in range(len(outputs)):
-            if turn_idx == 0:
+            if step_idx == 0:
                 # If first turn, add all responses to conversation
                 for j in range(group_size):
                     generated_text = outputs[i].outputs[j].text
@@ -175,7 +175,7 @@ def get_token_ids_and_role_mask(
             tokenize=True,
             enable_thinking=False,
         )
-        all_token_ids.extend(msg_token_ids)
+        all_token_ids.extend(msg_token_ids)  # type: ignore
         role_mask.extend([role] * len(msg_token_ids))
 
     return all_token_ids, role_mask
@@ -244,9 +244,6 @@ def update_policy(
         )
         episode_tokens.append((episode, token_ids, role_mask))
 
-    # Sort by total length
-    episode_tokens.sort(key=lambda x: len(x[1]), reverse=True)
-
     episodes = [x[0] for x in episode_tokens]
     n_target_tokens = sum(len(x[1]) for x in episode_tokens)
     entropy = torch.tensor(0.0, device=device)
@@ -277,30 +274,22 @@ def update_policy(
                 batch_episode_tokens
             )
         ]
-
-        batch_mask = F.one_hot(
-            torch.tensor(batch_role_masks, device=device, dtype=torch.long),
-            num_classes=2,
+        batch_token_ids_t = torch.tensor(
+            batch_token_ids, device=device, dtype=torch.long
         )
+        target_token_ids = batch_token_ids_t[:, 1:]
+        target_masks = target_token_ids != pad_token_id
 
         # advantage is just normalized reward
         batch_rewards = [episode.reward for episode in batch_episodes]
-        batch_token_ids_tensor = torch.tensor(
-            batch_token_ids, device=device, dtype=torch.long
-        )
-        batch_masks_t = torch.tensor(batch_masks, device=device, dtype=torch.bool)
         batch_rewards_t = torch.tensor(
             batch_rewards, device=device, dtype=torch.float32
         )
-
-        input_token_ids = batch_token_ids_tensor[:, :-1]
-        target_token_ids = batch_token_ids_tensor[:, 1:]
-        target_masks = batch_masks_t[:, 1:]
         # Often OOMs here, so clear cache
         gc.collect()
         torch.cuda.empty_cache()
         # TODO only compute logits for the target tokens, not the input tokens
-        logits: torch.Tensor = model(input_token_ids).logits.float()
+        logits: torch.Tensor = model(batch_token_ids_t).logits.float()
 
         # Get the cross entropy loss of the label and generated tokens
         logprobs = -torch.nn.functional.cross_entropy(
@@ -308,7 +297,7 @@ def update_policy(
             target_token_ids.reshape(-1),
             ignore_index=pad_token_id,
             reduction="none",
-        ).reshape(input_token_ids.shape[0], -1)
+        ).reshape(batch_token_ids_t.shape[0], -1)
 
         with torch.no_grad():
             logits = logits.reshape(-1, logits.size(-1))
@@ -386,9 +375,9 @@ def compute_metrics(
         np.mean(
             [
                 len(
-                    extract_prefix_and_generated_tokens(
-                        episode.conversation, debug_tokenizer
-                    )[1]
+                    get_token_ids_and_role_mask(episode.conversation, debug_tokenizer)[
+                        1
+                    ]
                 )
                 for episode in episodes
             ]

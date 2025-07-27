@@ -4,7 +4,7 @@ from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal, Re
 
 class ConversationMessage(TypedDict, total=False):
     role: Required[Literal["system", "user", "assistant"]]
-    content: str
+    content: Required[str]
     reasoning: NotRequired[str | None]
 
 
