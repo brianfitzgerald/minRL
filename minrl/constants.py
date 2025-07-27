@@ -95,7 +95,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 class TrainerConfig(BaseModel):
     model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10
-    num_answers_per_question: int = 4
+    group_size: int = 4
     max_new_tokens: int = 512
     train_batch_size: int = 4
     eval_batch_size: int = 16

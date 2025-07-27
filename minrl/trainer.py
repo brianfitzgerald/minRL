@@ -16,7 +16,7 @@ from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 
 from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.dataset import Episode, MinRLDataset, MiniBatch
+from minrl.tasks.dataset import Episode, MinRLDataset
 from vllm.envs import set_vllm_use_v1
 
 
@@ -24,7 +24,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -35,30 +37,6 @@ def simple_timestamp() -> str:
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # type: ignore
-
-
-def collate_fn(self, batch: list[dict[str, Any]]) -> MiniBatch:
-    """
-    Collate examples into a batch.
-    Used during training / only, requires a tokenizer.
-    """
-    if self.tokenizer is None:
-        raise ValueError("Tokenizer is not set")
-    prefixes, prefix_token_ids = [], []
-    for sample in batch:
-        prefix: str = self.tokenizer.apply_chat_template(
-            self.conversation(sample),  # type: ignore
-            tokenize=False,
-            enable_thinking=False,
-        )  # type: ignore
-        tokens = self.tokenizer.encode(prefix)
-        prefixes.append(prefix)
-        prefix_token_ids.append(tokens)
-    return MiniBatch(
-        prefixes=prefixes,
-        prefix_token_ids=prefix_token_ids,
-        samples=batch,
-    )
 
 
 class Trainer:
@@ -110,6 +88,7 @@ class Trainer:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
         dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
+        self.reward_function = TASK_DATASETS[self.config.task]["reward_function"]
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )
@@ -120,9 +99,9 @@ class Trainer:
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
-            collate_fn=collate_fn,
             generator=generator,
             batch_size=self.config.train_batch_size,
+            collate_fn=lambda x: x,
         )
 
         if self.config.optimizer == "adamw":
@@ -166,13 +145,18 @@ class Trainer:
             assert self.model is not None
             assert self.tokenizer is not None
 
+            conversations = [
+                self.train_dataset.format_initial_conversation(sample, i)
+                for i, sample in enumerate(batch)
+            ]
+
             episodes = rollout(
-                config=self.config,
-                tokenizer=self.tokenizer,
-                batch=batch,
-                max_new_tokens=self.config.max_new_tokens,
-                group_size=self.config.num_answers_per_question,
-                reward_function=self.train_dataset.reward_function,
+                self.config,
+                self.tokenizer,
+                self.config.group_size,
+                self.train_dataset.max_steps,
+                conversations,
+                reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
                 prev_reward_std=prev_reward_std,
             )
@@ -236,8 +220,8 @@ class Trainer:
         eval_loader = DataLoader(
             self.eval_dataset,
             shuffle=False,
-            collate_fn=self.eval_dataset.collate_fn,
             batch_size=self.config.eval_batch_size,
+            collate_fn=lambda x: x,
         )
         assert self.model is not None
 
@@ -245,16 +229,17 @@ class Trainer:
         mean_reward = 0
         episodes: list[Episode] = []
         for batch in tqdm(eval_loader):
-            eval_rollout = rollout(
-                config=self.config,
-                tokenizer=self.tokenizer,
-                batch=batch,
-                max_new_tokens=self.config.max_new_tokens,
-                group_size=1,
-                reward_function=self.eval_dataset.reward_function,
+            episodes = rollout(
+                self.config,
+                self.tokenizer,
+                1,
+                self.train_dataset.max_steps,
+                batch,
+                reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
             )
-            episodes.extend(eval_rollout)
+
+            episodes.extend(episodes)
 
         reward = [episode.reward for episode in episodes]
         mean_reward = sum(reward) / len(reward)

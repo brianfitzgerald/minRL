@@ -4,8 +4,6 @@ import pandas as pd
 from typing import Any, List, TypedDict
 from torch.utils.data import Dataset
 
-from minrl.tasks.dataset import MiniBatch
-
 SYSTEM_MESSAGE = (
     "You are a helpful assistant. You first think about the reasoning process "
     "in your mind and then provide the user with the answer."
@@ -147,14 +145,3 @@ class CountdownTasksDataset(Dataset):
             "prefix_tokens": tokens.tokens,
             "prefix_token_ids": tokens.ids,
         }
-
-    @staticmethod
-    def collate_fn(batch: List[dict[str, Any]]) -> MiniBatch:
-        """Collate examples into a batch."""
-        prefix = [item["prefix"] for item in batch]
-        prefix_token_ids = [item["prefix_token_ids"] for item in batch]
-        return MiniBatch(
-            samples=batch,
-            prefixes=prefix,
-            prefix_token_ids=prefix_token_ids,
-        )

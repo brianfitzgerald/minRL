@@ -81,9 +81,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert (
-                "base_model_id" in model
-            ), "Base model ID is required for finetuned models"
+            assert "base_model_id" in model, (
+                "Base model ID is required for finetuned models"
+            )
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -130,7 +130,9 @@ async def main(
             for j, (sample, row) in enumerate(zip(batch, batch_out_rows)):
                 if row["status"] == "done":
                     continue
-                conversation_batch.append(dataset.conversation(sample, j))
+                conversation_batch.append(
+                    dataset.format_initial_conversation(sample, j)
+                )
 
             # Perform inference
             if model_type in ("finetuned", "huggingface"):

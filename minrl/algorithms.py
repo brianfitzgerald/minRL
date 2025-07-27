@@ -18,7 +18,7 @@ from vllm.worker.model_runner_base import ModelRunnerBase
 
 from minrl.constants import AlgorithmChoice, Conversation, TrainerConfig
 from minrl.constants import RewardFunction
-from minrl.tasks.dataset import Episode, MiniBatch
+from minrl.tasks.dataset import Episode
 from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
@@ -55,10 +55,9 @@ def compute_scaled_temperature(
 def rollout(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
-    batch: MiniBatch,
-    max_new_tokens: int,
     group_size: int,
     max_turns: int,
+    conversations: list[Conversation],
     reward_function: RewardFunction,
     vllm_model: LLM,
     prev_reward_std: float | None = None,
@@ -70,20 +69,18 @@ def rollout(
     end_token_id: int = tokenizer.eos_token_id  # type: ignore
     pad_token_id: int = tokenizer.pad_token_id  # type: ignore
 
-    # Convert to tensor and move to device
-
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
 
     logger.info(
-        f"Generating responses for {len(batch.conversations)} prompts, max_tokens={max_new_tokens}, n={group_size}, temperature={temperature:.3f}"
+        f"Generating responses for {len(conversations)} prompts, max_tokens={config.max_new_tokens}, n={config.group_size}, temp={temperature:.3f}"
     )
 
-    # Perform N rounds of rollout for the max turn count
     for _ in range(max_turns):
-
         prefixes_batch = tokenizer.apply_chat_template(
-            batch.conversations, tokenize=True, enable_thinking=False  # type: ignore
+            conversations,
+            tokenize=True,
+            enable_thinking=False,  # type: ignore
         )
 
         prefixes_prompts: list[TokensPrompt] = [
@@ -93,8 +90,8 @@ def rollout(
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
-                max_tokens=max_new_tokens,
-                temperature=config.temperature,
+                max_tokens=config.max_new_tokens,
+                temperature=temperature,
                 n=group_size,
             ),
         )
@@ -105,7 +102,7 @@ def rollout(
 
     episodes: List[Episode] = []
     for i in range(len(outputs)):
-        for j in range(group_size):
+        for j in range(config.group_size):
             # idx of the j-th answer for the i-th prompt
             generated_token_ids: list[int] = list(outputs[i].outputs[j].token_ids)
 
@@ -118,7 +115,6 @@ def rollout(
 
             logger.info(f"\nText for response {i}.{j}: {generated_text}")
 
-            # Calculate rewards
             reward = reward_function(conversations[i], batch.samples[i])
 
             # Create episode
@@ -154,7 +150,7 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     If std is 0, returns the original rewards.
     """
     # Group episodes by prefix and calculate stats
-    groups: Dict[str, List[Episode]] = defaultdict(list)
+    groups: Dict[int, List[Episode]] = defaultdict(list)
     for episode in episodes:
         groups[episode.group_index].append(episode)
 

@@ -24,17 +24,6 @@ class Episode:
     conversation: Conversation
 
 
-@dataclass
-class MiniBatch:
-    """Batch of data for each training step."""
-
-    conversations: list[Conversation]
-    samples: list[Sample]
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-
 class MinRLDataset(Dataset):
     """
     Base class for all datasets.
@@ -59,11 +48,13 @@ class MinRLDataset(Dataset):
         self, sample: Sample, sample_index: int
     ) -> Conversation:
         """
-        Given a sample, format the conversation for inference.
+        Given a sample, format the initial conversation for inference.
         """
+        raise NotImplementedError("format_initial_conversation is not implemented")
 
+    @abstractmethod
     def get_next_state(
-        self, sample_index: int, model_response: str
+        self, sample_index: int, conversation: Conversation
     ) -> tuple[str, bool]:
         """
         After each turn, get the next state of the environment based on the model response.
