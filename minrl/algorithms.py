@@ -78,7 +78,6 @@ def rollout(
 
     # For each turn, generate responses, add to conversation
     for turn_idx in tqdm(range(max_turns), desc="Turns"):
-
         # Tokenize the conversations
         prefixes_batch = tokenizer.apply_chat_template(
             conversations,  # type: ignore
@@ -86,7 +85,8 @@ def rollout(
             enable_thinking=False,  # type: ignore
         )
         prefixes_prompts: list[TokensPrompt] = [
-            {"prompt_token_ids": prefix} for prefix in prefixes_batch  # type: ignore
+            {"prompt_token_ids": prefix}
+            for prefix in prefixes_batch  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
         outputs = vllm_model.generate(

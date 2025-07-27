@@ -1,7 +1,7 @@
 from typing import Any, List, Dict, Tuple, Union, TypedDict
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import random
-from minrl.tasks.dataset import MinRLDataset, MiniBatch, Split
+from minrl.tasks.dataset import MinRLDataset, Split
 from loguru import logger
 import re
 import ast
@@ -177,10 +177,10 @@ def extract_result_list(s: str) -> list[list[int]]:
     return ast.literal_eval(m.group(1))
 
 
-def hanoi_reward_func(conversation: Conversation, sample: dict[str, Any]) -> float:
+def hanoi_reward_func(conversation: Conversation, sample: HanoiSample) -> float:
     try:
         game = TowerOfHanoi(sample["n_disks"])
-        moves = extract_result_list(conversation[-1]["content"])
+        moves = extract_result_list(conversation[-1]["content"])  # type: ignore
         n_valid_moves, required_moves, solved = 0, game.get_minimum_moves(), False
         for i, move in enumerate(moves):
             from_stack, to_stack = move[1], move[2]

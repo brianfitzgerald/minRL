@@ -3,7 +3,6 @@ import torch
 from minrl.algorithms import rollout
 from minrl.constants import SMOL_LM_2_135M, TrainerConfig, Conversation
 from vllm import LLM
-from minrl.tasks.dataset import MiniBatch
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from loguru import logger
 
@@ -17,7 +16,6 @@ def vllm_model():
     model = LLM(
         model=SMOL_LM_2_135M,
         device="cuda:0" if torch.cuda.is_available() else "cpu",
-        dtype="bfloat16",
         enforce_eager=True,
         gpu_memory_utilization=0.2,
     )
@@ -37,32 +35,56 @@ def config():
     return TrainerConfig()
 
 
-@pytest.fixture
-def sample_batch():
-    """Fixture that creates a sample MiniBatch with conversations."""
+def test_rollout_with_sample_batch(
+    config: TrainerConfig,
+    tokenizer: PreTrainedTokenizerBase,
+    vllm_model: LLM,
+):
+    """Test rollout with a sample batch containing conversations."""
     conversations: list[Conversation] = [
         [
             {"role": "user", "content": "Hello, how are you?"},
         ]
     ]
     samples = [{"id": 0, "prompt": "Hello, how are you?"}]
-    return MiniBatch(conversations=conversations, samples=samples)
-
-
-def test_rollout_with_sample_batch(
-    config: TrainerConfig,
-    tokenizer: PreTrainedTokenizerBase,
-    sample_batch: MiniBatch,
-    vllm_model: LLM,
-):
-    """Test rollout with a sample batch containing conversations."""
     episodes = rollout(
         config=config,
         tokenizer=tokenizer,
-        batch=sample_batch,
-        max_new_tokens=50,
         group_size=1,
         max_turns=1,
+        conversations=conversations,
+        samples=samples,
+        reward_function=lambda x, y: 0.5,
+        vllm_model=vllm_model,
+    )
+
+    assert isinstance(episodes, list)
+    assert len(episodes) > 0
+
+    # Check episode structure
+    episode = episodes[0]
+    assert episode.reward == 0.5
+
+
+def test_rollout_with_multiple_turns(
+    config: TrainerConfig,
+    tokenizer: PreTrainedTokenizerBase,
+    vllm_model: LLM,
+):
+    """Test rollout with a sample batch containing conversations."""
+    conversations: list[Conversation] = [
+        [
+            {"role": "user", "content": "Hello, how are you?"},
+        ]
+    ]
+    samples = [{"id": 0, "prompt": "Hello, how are you?"}]
+    episodes = rollout(
+        config=config,
+        tokenizer=tokenizer,
+        group_size=4,
+        max_turns=3,
+        conversations=conversations,
+        samples=samples,
         reward_function=lambda x, y: 0.5,
         vllm_model=vllm_model,
     )
