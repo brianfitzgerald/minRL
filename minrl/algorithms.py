@@ -16,6 +16,7 @@ from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
+import torch.nn.functional as F
 
 from minrl.constants import AlgorithmChoice, Conversation, Sample, TrainerConfig
 from minrl.constants import RewardFunction
@@ -68,8 +69,6 @@ def rollout(
     Generate completions for each turn in a batch of conversations.
     Runs for max_turns turns, and generates num_answers_per_question completions for each turn.
     """
-    end_token_id: int = tokenizer.eos_token_id  # type: ignore
-
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
 
@@ -148,6 +147,40 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     return entropy
 
 
+def get_token_ids_and_role_mask(
+    conversation: Conversation,
+    tokenizer: PreTrainedTokenizerBase,
+) -> tuple[list[int], list[str]]:
+    if len(conversation) < 2:
+        raise ValueError("Conversation must have at least 2 messages")
+
+    # Split conversation into prefix (everything except last assistant message) and generated part
+    prefix_conversation = conversation[:-1]
+    last_message = conversation[-1]
+
+    if last_message.get("role") != "assistant":
+        raise ValueError("Last message in conversation must be from assistant")
+
+    # Build the full conversation (prefix + last assistant message)
+    full_conversation = prefix_conversation + [last_message]
+
+    # Tokenize each message individually to build the role mask
+    all_token_ids: list[int] = []
+    role_mask: list[str] = []
+    for msg in full_conversation:
+        role = msg["role"]
+        # Use the chat template for user/assistant, or fallback to encode
+        msg_token_ids = tokenizer.apply_chat_template(
+            [msg],  # type: ignore
+            tokenize=True,
+            enable_thinking=False,
+        )
+        all_token_ids.extend(msg_token_ids)
+        role_mask.extend([role] * len(msg_token_ids))
+
+    return all_token_ids, role_mask
+
+
 def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     """
     Normalize rewards per group.
@@ -192,6 +225,7 @@ def update_policy(
     device: torch.device,
     vllm_model: LLM,
     algorithm: AlgorithmChoice,
+    tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
 ) -> dict[str, float]:
     """
@@ -201,11 +235,20 @@ def update_policy(
     """
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
-    # sort episodes by length, for more efficient batching
-    episodes.sort(
-        key=lambda x: len(x.prefix_token_ids) + len(x.generated_token_ids), reverse=True
-    )
-    n_target_tokens = sum(len(episode.generated_token_ids) for episode in episodes)
+
+    # Extract token IDs from conversations and sort episodes by length for more efficient batching
+    episode_tokens = []
+    for episode in episodes:
+        token_ids, role_mask = get_token_ids_and_role_mask(
+            episode.conversation, tokenizer
+        )
+        episode_tokens.append((episode, token_ids, role_mask))
+
+    # Sort by total length
+    episode_tokens.sort(key=lambda x: len(x[1]), reverse=True)
+
+    episodes = [x[0] for x in episode_tokens]
+    n_target_tokens = sum(len(x[1]) for x in episode_tokens)
     entropy = torch.tensor(0.0, device=device)
 
     logger.info(
@@ -220,26 +263,25 @@ def update_policy(
         j = min(i + micro_batch_size, len(episodes))
 
         batch_episodes = episodes[i:j]
-        batch_lengths = [
-            len(episode.prefix_token_ids) + len(episode.generated_token_ids)
-            for episode in batch_episodes
-        ]
+        batch_episode_tokens = episode_tokens[i:j]
+
+        batch_lengths = [len(token_ids) for _, token_ids, _ in batch_episode_tokens]
         batch_max_length = max(batch_lengths)
 
         # pad all token ids (prefix + generated) to the same length
         batch_token_ids = [
-            episode.prefix_token_ids
-            + episode.generated_token_ids
-            + [pad_token_id] * (batch_max_length - batch_lengths[i])
-            for i, episode in enumerate(batch_episodes)
+            prefix_tokens
+            + generated_tokens
+            + [pad_token_id] * (batch_max_length - batch_lengths[idx])
+            for idx, (_, prefix_tokens, generated_tokens) in enumerate(
+                batch_episode_tokens
+            )
         ]
-        # Mask out the input tokens, and the padding tokens
-        batch_masks = [
-            [0] * len(episode.prefix_token_ids)
-            + [1] * len(episode.generated_token_ids)
-            + [0] * (batch_max_length - batch_lengths[i])
-            for i, episode in enumerate(batch_episodes)
-        ]
+
+        batch_mask = F.one_hot(
+            torch.tensor(batch_role_masks, device=device, dtype=torch.long),
+            num_classes=2,
+        )
 
         # advantage is just normalized reward
         batch_rewards = [episode.reward for episode in batch_episodes]
@@ -332,7 +374,8 @@ def compute_metrics(
     temperature: float | None = None,
 ) -> Dict[str, float]:
     reward = [episode.reward for episode in episodes]
-    num_finished_episodes = sum(episode.finished for episode in episodes)
+    # Assume all episodes are finished since rollout completes them
+    num_finished_episodes = len(episodes)
     mean_reward = float(np.mean(reward))
     std_reward = float(np.std(reward))
     grad_norm = results["grad_norm"]
@@ -340,7 +383,16 @@ def compute_metrics(
     lr = optimizer.param_groups[0]["lr"]
     loss = results["loss"]
     mean_response_len = float(
-        np.mean([len(episode.generated_token_ids) for episode in episodes])
+        np.mean(
+            [
+                len(
+                    extract_prefix_and_generated_tokens(
+                        episode.conversation, debug_tokenizer
+                    )[1]
+                )
+                for episode in episodes
+            ]
+        )
     )
 
     metrics_wrapper.add_scalar("train/loss", loss, step)
@@ -356,7 +408,11 @@ def compute_metrics(
     if temperature is not None:
         metrics_wrapper.add_scalar("train/temperature", temperature, step)
     for i, episode in enumerate(episodes):
-        text = html.escape(episode.text)
+        # Convert conversation to text format for logging
+        conversation_text = "\n".join(
+            [f"{msg['role']}: {msg['content']}" for msg in episode.conversation]
+        )
+        text = html.escape(conversation_text)
         metrics_wrapper.add_text(f"sample_{i}", text, step)
 
     log_dict = {

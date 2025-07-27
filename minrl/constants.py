@@ -1,9 +1,9 @@
 from pydantic import BaseModel
-from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal
+from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal, Required
 
 
 class ConversationMessage(TypedDict, total=False):
-    role: Literal["system", "user", "assistant"]
+    role: Required[Literal["system", "user", "assistant"]]
     content: str
     reasoning: NotRequired[str | None]
 
