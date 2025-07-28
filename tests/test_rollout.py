@@ -1,38 +1,9 @@
 import pytest
-import torch
 from minrl.algorithms import rollout
-from minrl.constants import SMOL_LM_2_135M, TrainerConfig, Conversation
+from minrl.constants import Conversation
 from vllm import LLM
-from transformers.models.auto.tokenization_auto import AutoTokenizer
-from loguru import logger
-
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-
-
-@pytest.fixture(scope="session")
-def vllm_model():
-    """Fixture that creates a vLLM model instance once per test session."""
-    logger.info("Creating vLLM model")
-    model = LLM(
-        model=SMOL_LM_2_135M,
-        device="cuda:0" if torch.cuda.is_available() else "cpu",
-        enforce_eager=True,
-        gpu_memory_utilization=0.2,
-    )
-    logger.info("vLLM model created")
-    return model
-
-
-@pytest.fixture
-def tokenizer():
-    """Fixture that creates a tokenizer for testing."""
-    return AutoTokenizer.from_pretrained(SMOL_LM_2_135M)
-
-
-@pytest.fixture
-def config():
-    """Fixture that creates a TrainerConfig for testing."""
-    return TrainerConfig()
+from minrl.constants import TrainerConfig
 
 
 def test_rollout_with_sample_batch(
@@ -51,7 +22,7 @@ def test_rollout_with_sample_batch(
         config=config,
         tokenizer=tokenizer,
         group_size=1,
-        max_turns=1,
+        max_steps=1,
         conversations=conversations,
         samples=samples,
         reward_function=lambda x, y: 0.5,
@@ -82,7 +53,7 @@ def test_rollout_with_multiple_turns(
         config=config,
         tokenizer=tokenizer,
         group_size=4,
-        max_turns=3,
+        max_steps=3,
         conversations=conversations,
         samples=samples,
         reward_function=lambda x, y: 0.5,

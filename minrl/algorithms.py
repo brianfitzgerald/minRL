@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 from minrl.constants import AlgorithmChoice, Conversation, Sample, TrainerConfig
 from minrl.constants import RewardFunction
-from minrl.tasks.dataset import Episode, MinRLDataset
+from minrl.tasks.dataset import Episode
 from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
@@ -58,7 +58,7 @@ def rollout(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
     group_size: int,
-    dataset: MinRLDataset,
+    max_steps: int,
     conversations: list[Conversation],
     samples: list[Sample],
     reward_function: RewardFunction,
@@ -77,7 +77,7 @@ def rollout(
     )
 
     # For each turn, generate responses, add to conversation
-    for step_idx in tqdm(range(dataset.max_steps), desc="Steps"):
+    for step_idx in tqdm(range(max_steps), desc="Steps"):
         # Tokenize the conversations
         prefixes_batch = tokenizer.apply_chat_template(
             conversations,  # type: ignore

@@ -24,9 +24,7 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps"
-        if torch.mps.is_available()
-        else "cpu"
+        else "mps" if torch.mps.is_available() else "cpu"
     )
 
 
@@ -156,13 +154,11 @@ class Trainer:
                 self.config.group_size,
                 self.train_dataset.max_steps,
                 conversations,
+                samples=batch,
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
                 prev_reward_std=prev_reward_std,
             )
-
-            if self.config.skip_unfinished_episodes:
-                episodes = [episode for episode in episodes if episode.finished]
 
             logger.info(f"Updating policy for step {step}")
 
@@ -170,6 +166,7 @@ class Trainer:
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,
+                tokenizer=self.tokenizer,
                 micro_batch_size=self.config.train_batch_size,
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
@@ -229,12 +226,17 @@ class Trainer:
         mean_reward = 0
         episodes: list[Episode] = []
         for batch in tqdm(eval_loader):
+            conversations = [
+                self.eval_dataset.format_initial_conversation(sample, i)
+                for i, sample in enumerate(batch)
+            ]
             episodes = rollout(
                 self.config,
                 self.tokenizer,
                 1,
-                self.train_dataset.max_steps,
-                batch,
+                self.eval_dataset.max_steps,
+                conversations,
+                samples=batch,
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
             )

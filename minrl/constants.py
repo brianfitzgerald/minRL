@@ -20,6 +20,7 @@ QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
 TINY_LLAMA_V0 = "Maykeye/TinyLLama-v0"
 SMOL_LM_2_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
 SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
+QWEN_TINY_TESTING = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
 
 
 OptimizerChoice = Literal["adamw", "adamw_8bit"]
@@ -102,7 +103,6 @@ class TrainerConfig(BaseModel):
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
     lr: float = 5e-6
-    skip_unfinished_episodes: bool = True
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "zork"
