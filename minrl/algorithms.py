@@ -85,8 +85,7 @@ def rollout(
             enable_thinking=False,  # type: ignore
         )
         prefixes_prompts: list[TokensPrompt] = [
-            {"prompt_token_ids": prefix}
-            for prefix in prefixes_batch  # type: ignore
+            {"prompt_token_ids": prefix} for prefix in prefixes_batch  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
         outputs = vllm_model.generate(

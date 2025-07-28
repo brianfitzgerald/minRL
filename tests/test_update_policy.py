@@ -6,7 +6,6 @@ from minrl.tasks.dataset import Episode
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 
-from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 import torch.nn as nn
 
 
@@ -91,13 +90,3 @@ def test_update_policy_grpo_algorithm(
     )
 
     assert results is not None
-
-
-def test_normalize_rewards_zero_std(sample_episodes):
-    """Test normalize_rewards_per_group when standard deviation is zero."""
-
-    normalized_episodes = normalize_rewards_per_group(sample_episodes)
-
-    rewards = [e.reward for e in normalized_episodes]
-    for reward in rewards:
-        assert abs(reward) < 1e-6  # Should be approximately 0

@@ -1,4 +1,3 @@
-import pytest
 from minrl.algorithms import rollout
 from minrl.constants import Conversation
 from vllm import LLM

@@ -22,6 +22,7 @@ def vllm_model():
     return model
 
 
+@pytest.fixture(scope="session")
 def hf_model() -> nn.Module:
     """Fixture that creates a Hugging Face model instance once per test session."""
     logger.info("Creating Hugging Face model")
