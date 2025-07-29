@@ -16,12 +16,14 @@ from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
-import torch.nn.functional as F
 
 from minrl.constants import AlgorithmChoice, Conversation, Sample, TrainerConfig
 from minrl.constants import RewardFunction
 from minrl.tasks.dataset import Episode
 from minrl.metrics import MetricsWrapper
+
+# Constants
+NEWLINE_TOKEN_ID = 198  # Token ID for newline character
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -67,13 +69,16 @@ def rollout(
 ) -> List[Episode]:
     """
     Generate completions for each turn in a batch of conversations.
-    Runs for max_turns turns, and generates num_answers_per_question completions for each turn.
+    Runs for max_turns turns, and generates num_answers_per_question completions
+    for each turn.
     """
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
 
     logger.info(
-        f"Generating responses for {len(conversations)} prompts, max_tokens={config.max_new_tokens}, n={config.group_size}, temp={temperature:.3f}"
+        f"Generating responses for {len(conversations)} prompts, "
+        f"max_tokens={config.max_new_tokens}, n={config.group_size}, "
+        f"temp={temperature:.3f}"
     )
 
     # For each turn, generate responses, add to conversation
@@ -85,7 +90,8 @@ def rollout(
             enable_thinking=False,  # type: ignore
         )
         prefixes_prompts: list[TokensPrompt] = [
-            {"prompt_token_ids": prefix} for prefix in prefixes_batch  # type: ignore
+            {"prompt_token_ids": prefix}
+            for prefix in prefixes_batch  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
         outputs = vllm_model.generate(
@@ -146,45 +152,97 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     return entropy
 
 
-def get_token_ids_and_role_mask(
+def _find_assistant_sections(
+    all_token_ids: list[int],
+    im_start_token: list[int],
+    assistant_role_tokens: list[int],
+    im_end_token: list[int],
+) -> list[tuple[int, int]]:
+    """Find all assistant sections in tokenized conversation."""
+    sections = []
+    i = 0
+
+    while i < len(all_token_ids):
+        # Look for <|im_start|>assistant pattern
+        start_pattern_len = len(im_start_token) + len(assistant_role_tokens)
+        if (
+            i + start_pattern_len < len(all_token_ids)
+            and all_token_ids[i : i + len(im_start_token)] == im_start_token
+        ):
+            next_pos = i + len(im_start_token)
+            role_end = next_pos + len(assistant_role_tokens)
+            if all_token_ids[next_pos:role_end] == assistant_role_tokens:
+                # Found assistant section start
+                mark_start = i
+                search_pos = role_end
+
+                # Find the end of this assistant section
+                end_pos = len(all_token_ids)  # Default to end of sequence
+                while search_pos + len(im_end_token) <= len(all_token_ids):
+                    end_token_end = search_pos + len(im_end_token)
+                    if all_token_ids[search_pos:end_token_end] == im_end_token:
+                        end_pos = end_token_end
+
+                        # Include trailing newline if it's the last token
+                        is_last_token = end_pos == len(all_token_ids) - 1
+                        is_newline = (
+                            end_pos < len(all_token_ids)
+                            and all_token_ids[end_pos] == NEWLINE_TOKEN_ID
+                        )
+                        if is_last_token and is_newline:
+                            end_pos += 1
+                        break
+                    search_pos += 1
+
+                sections.append((mark_start, end_pos))
+                i = end_pos
+            else:
+                i += 1
+        else:
+            i += 1
+
+    return sections
+
+
+def get_token_ids_and_assistant_mask(
     conversation: Conversation,
     tokenizer: PreTrainedTokenizerBase,
-) -> tuple[list[int], list[str]]:
-    if len(conversation) < 2:
-        raise ValueError("Conversation must have at least 2 messages")
+) -> tuple[list[int], list[bool]]:
+    if len(conversation) < 1:
+        raise ValueError("Conversation must have at least 1 message")
 
-    # Split conversation into prefix (everything except last assistant message) and generated part
-    prefix_conversation = conversation[:-1]
-    last_message = conversation[-1]
+    # Apply chat template to get the full formatted conversation
+    all_token_ids = tokenizer.apply_chat_template(
+        conversation,  # type: ignore
+        tokenize=True,
+        enable_thinking=False,
+    )
 
-    if last_message.get("role") != "assistant":
-        raise ValueError("Last message in conversation must be from assistant")
+    # Create assistant mask - initially all False
+    assistant_mask = [False] * len(all_token_ids)
 
-    # Build the full conversation (prefix + last assistant message)
-    full_conversation = prefix_conversation + [last_message]
+    # Get special tokens for pattern matching
+    assistant_role_tokens = tokenizer.encode("assistant", add_special_tokens=False)
+    im_start_token = tokenizer.encode("<|im_start|>", add_special_tokens=False)
+    im_end_token = tokenizer.encode("<|im_end|>", add_special_tokens=False)
 
-    # Tokenize each message individually to build the role mask
-    all_token_ids: list[int] = []
-    role_mask: list[str] = []
-    for msg in full_conversation:
-        role = msg["role"]
-        # Use the chat template for user/assistant, or fallback to encode
-        msg_token_ids = tokenizer.apply_chat_template(
-            [msg],  # type: ignore
-            tokenize=True,
-            enable_thinking=False,
-        )
-        all_token_ids.extend(msg_token_ids)  # type: ignore
-        role_mask.extend([role] * len(msg_token_ids))
+    # Find all assistant sections and mark them
+    assistant_sections = _find_assistant_sections(
+        all_token_ids, im_start_token, assistant_role_tokens, im_end_token
+    )
 
-    return all_token_ids, role_mask
+    for start, end in assistant_sections:
+        for j in range(start, end):
+            assistant_mask[j] = True
+
+    return all_token_ids, assistant_mask
 
 
 def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     """
     Normalize rewards per group.
-    This is done by subtracting the mean and dividing by the standard deviation of the rewards in each group.
-    If std is 0, returns the original rewards.
+    This is done by subtracting the mean and dividing by the standard deviation
+    of the rewards in each group. If std is 0, returns the original rewards.
     """
     # Group episodes by prefix and calculate stats
     groups: Dict[int, List[Episode]] = defaultdict(list)
@@ -235,20 +293,22 @@ def update_policy(
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
-    # Extract token IDs from conversations and sort episodes by length for more efficient batching
-    episode_tokens = []
+    # Extract token IDs from conversations and sort episodes by length
+    # for more efficient batching
+    episode_tokens: list[tuple[Episode, list[int], list[bool]]] = []
     for episode in episodes:
-        token_ids, role_mask = get_token_ids_and_role_mask(
+        token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer
         )
-        episode_tokens.append((episode, token_ids, role_mask))
+        episode_tokens.append((episode, token_ids, assistant_mask))
 
-    episodes = [x[0] for x in episode_tokens]
-    n_target_tokens = sum(len(x[1]) for x in episode_tokens)
+    episodes = [episode_data[0] for episode_data in episode_tokens]
+    n_target_tokens = sum(len(token_data[1]) for token_data in episode_tokens)
     entropy = torch.tensor(0.0, device=device)
 
     logger.info(
-        f"Updating policy with {len(episodes)} episodes, {n_target_tokens} target tokens"
+        f"Updating policy with {len(episodes)} episodes, "
+        f"{n_target_tokens} target tokens"
     )
 
     loss, grad_norm, entropy = 0, 0, 0
@@ -264,20 +324,31 @@ def update_policy(
         batch_lengths = [len(token_ids) for _, token_ids, _ in batch_episode_tokens]
         batch_max_length = max(batch_lengths)
 
-        # pad all token ids (prefix + generated) to the same length
+        # Pad all token ids to the same length
         batch_token_ids = [
-            prefix_tokens
-            + generated_tokens
-            + [pad_token_id] * (batch_max_length - batch_lengths[idx])
-            for idx, (_, prefix_tokens, generated_tokens) in enumerate(
-                batch_episode_tokens
-            )
+            token_ids + [pad_token_id] * (batch_max_length - batch_lengths[idx])
+            for idx, (_, token_ids, _) in enumerate(batch_episode_tokens)
         ]
         batch_token_ids_t = torch.tensor(
             batch_token_ids, device=device, dtype=torch.long
         )
+
+        # Create assistant masks for each sequence in the batch
+        batch_assistant_masks = [
+            assistant_mask + [False] * (batch_max_length - batch_lengths[idx])
+            for idx, (_, _, assistant_mask) in enumerate(batch_episode_tokens)
+        ]
+        batch_assistant_masks_t = torch.tensor(
+            batch_assistant_masks, device=device, dtype=torch.bool
+        )
+
+        # Shift tokens and masks for next-token prediction
         target_token_ids = batch_token_ids_t[:, 1:]
-        target_masks = target_token_ids != pad_token_id
+        target_assistant_masks = batch_assistant_masks_t[:, 1:]
+        pad_masks = target_token_ids != pad_token_id
+
+        # Combine assistant mask with padding mask
+        target_masks = target_assistant_masks & pad_masks
 
         # advantage is just normalized reward
         batch_rewards = [episode.reward for episode in batch_episodes]
@@ -374,9 +445,9 @@ def compute_metrics(
         np.mean(
             [
                 len(
-                    get_token_ids_and_role_mask(episode.conversation, debug_tokenizer)[
-                        1
-                    ]
+                    get_token_ids_and_assistant_mask(
+                        episode.conversation, debug_tokenizer
+                    )[1]
                 )
                 for episode in episodes
             ]

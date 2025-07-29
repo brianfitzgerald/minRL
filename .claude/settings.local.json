@@ -5,7 +5,8 @@
       "Bash(rm:*)",
       "Bash(find:*)",
       "Bash(ruff check:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }
