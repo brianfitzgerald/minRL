@@ -24,7 +24,9 @@ def get_available_device() -> str:
     return (
         "cuda:0"
         if torch.cuda.is_available()
-        else "mps" if torch.mps.is_available() else "cpu"
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
     )
 
 
@@ -144,7 +146,7 @@ class Trainer:
             assert self.tokenizer is not None
 
             conversations = [
-                self.train_dataset.format_initial_conversation(sample, i)
+                self.train_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
             ]
 
@@ -227,7 +229,7 @@ class Trainer:
         episodes: list[Episode] = []
         for batch in tqdm(eval_loader):
             conversations = [
-                self.eval_dataset.format_initial_conversation(sample, i)
+                self.eval_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
             ]
             episodes = rollout(

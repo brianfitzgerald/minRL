@@ -47,9 +47,7 @@ class MinRLDataset(Dataset):
         self.host = host
 
     @abstractmethod
-    def format_initial_conversation(
-        self, sample: Sample, sample_index: int
-    ) -> Conversation:
+    def initial_conversation(self, sample: Sample, sample_index: int) -> Conversation:
         """
         Given a sample, format the initial conversation for inference.
         """
@@ -61,5 +59,6 @@ class MinRLDataset(Dataset):
     ) -> tuple[str, bool]:
         """
         After each turn, get the next state of the environment based on the model response.
+        Returns (obs, done)
         """
         raise NotImplementedError("post_generation is not implemented")

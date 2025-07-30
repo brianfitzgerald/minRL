@@ -72,8 +72,6 @@ class TextWorldAgent:
         conv: Conversation = [
             {"role": "system", "content": SYSTEM_PROMPT},
         ]
-        if user_message:
-            conv.append({"role": "user", "content": user_message})
         return conv
 
     def update(
@@ -158,10 +156,9 @@ class ZorkDataset(MinRLDataset):
 
         self.completed_episodes = []
 
-    def conversation(self, _: Sample, sample_index: int) -> Conversation:
+    def initial_conversation(self, sample: Sample, sample_index: int) -> Conversation:
         """
-        Return the inference conversation for a single turn.
-        For new trajectories, randomly selects a game from available games.
+        Format the initial conversation for inference.
         """
         if sample_index not in self.envs:
             # Randomly select a game for this trajectory

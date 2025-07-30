@@ -36,12 +36,7 @@ EvalsOutStatus = Literal["running", "done", "error"]
 
 class EvalsOutRow(TypedDict):
     model: str
-    # Parsed actions
-    actions: list[str]
-    # Outputs from the environment
-    observations: list[str]
-    # Full responses from inference
-    full_responses: list[ConversationMessage]
+    conversation: Conversation
     status: EvalsOutStatus
 
 

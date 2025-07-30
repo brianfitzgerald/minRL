@@ -112,13 +112,10 @@ async def main(
     os.makedirs("eval_results", exist_ok=True)
 
     for i, batch in enumerate(tqdm(loader)):
-        # Process responses
         batch_out_rows: list[EvalsOutRow] = [
             {
                 "model": model_name,
-                "actions": [],
-                "observations": [],
-                "full_responses": [],
+                "conversation": [],
                 "status": "running",
             }
             for _ in batch
@@ -130,11 +127,8 @@ async def main(
             for j, (sample, row) in enumerate(zip(batch, batch_out_rows)):
                 if row["status"] == "done":
                     continue
-                conversation_batch.append(
-                    dataset.format_initial_conversation(sample, j)
-                )
+                conversation_batch.append(dataset.initial_conversation(sample, j))
 
-            # Perform inference
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
                 assert vllm_model is not None, "VLLM model is not initialized"
@@ -186,7 +180,7 @@ async def main(
                         ]
                 assert response_content is not None, "No response content"
 
-                batch_out_rows[i]["full_responses"].append(
+                batch_out_rows[i]["conversation"].append(
                     {
                         "role": "assistant",
                         "content": response_content,
@@ -194,9 +188,7 @@ async def main(
                     }
                 )
 
-                obs, done = dataset.post_generation(i, response_content)
-                batch_out_rows[i]["observations"].append(obs)
-                batch_out_rows[i]["actions"].append(response_content)
+                obs, done = dataset.get_next_state(i, batch_out_rows[i]["conversation"])
                 if done and row["status"] == "running":
                     _save_results(batch_out_rows, task, model_name)
                     batch_out_rows[i]["status"] = "done"
