@@ -138,7 +138,7 @@ class ZorkDataset(MinRLDataset):
         return {"index": index}
 
     def get_next_state(
-        self, sample_index: int, model_response: str
+        self, sample_index: int, conversation: Conversation
     ) -> tuple[str, bool]:
         """
         After rollout, update any state needed for the next rollout.
@@ -150,14 +150,13 @@ class ZorkDataset(MinRLDataset):
         env: TextworldGymEnv = self.envs[sample_index]
         conversation = self.sample_conversations[sample_index]
 
-        try:
-            action = parse_command(model_response)
-        except Exception as e:
-            logger.error(f"Error parsing command from {model_response}: {e}")
-            return "", True
+        last_msg = conversation[-1]["content"]
 
-        # Add the assistant's action to the conversation
-        conversation.append({"role": "assistant", "content": model_response})
+        try:
+            action = parse_command(last_msg)
+        except Exception as e:
+            logger.error(f"Error parsing command from {last_msg}: {e}")
+            return "", True
 
         obs, score, done, infos = env.step(action)  # type: ignore
         obs = obs.strip()
