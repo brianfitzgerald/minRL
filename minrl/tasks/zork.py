@@ -36,66 +36,6 @@ class ZorkSample(TypedDict):
     index: int
 
 
-class TextWorldAgent:
-    """
-    Wrapper for an agent that plays an adventure game.
-    Stores any state required for the agent to play the game.
-    """
-
-    def __init__(self):
-        self.inventory = None
-        self.observation_history = []
-        self.description = None
-        self.action_history = []
-        self.done = False
-        self.score = 0
-
-    def format_conversation(self) -> Conversation:
-        """Format conversation used for inference, given current state"""
-        user_message = ""
-        if self.inventory and len(self.inventory) > 0:
-            inventory_formatted = self.inventory.strip("\n") if self.inventory else ""
-            user_message += f"\n### Inventory\n{inventory_formatted}"
-        if len(self.action_history) > 0:
-            action_history_formatted = []
-            for action, description in zip(
-                self.action_history, self.observation_history
-            ):
-                action_history_formatted.append(
-                    f"Observation: {description}\nCommand: {action}"
-                )
-            action_history_formatted = "\n".join(action_history_formatted)
-            user_message += f"\n### History\n{action_history_formatted}\n"
-        if len(self.observation_history) > 0 and self.description:
-            last_obs = self.observation_history[-1]
-            user_message += f"\n###Description\n{self.description}\n### Current Observation\n{last_obs}\n"
-        conv: Conversation = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-        ]
-        return conv
-
-    def update(
-        self,
-        command: str | None,
-        observation: str,
-        inventory: str,
-        done: bool,
-        score: int,
-    ):
-        """
-        Update agent state after a command and the resulting observation.
-        """
-        if self.done:
-            raise ValueError("Agent is done")
-        observation = observation.strip("\n")
-        if command is not None:
-            self.action_history.append(command)
-        self.observation_history.append(observation)
-        self.inventory = inventory
-        self.done = done
-        self.score = score
-
-
 def parse_command(input_string: str) -> str:
     input_string = input_string.strip("\n").replace("COMMAND: ", "")
     command_contents = re.findall(r"<command>(.*?)</command>", input_string, re.DOTALL)
@@ -151,10 +91,16 @@ class ZorkDataset(MinRLDataset):
             raise ValueError(f"No valid game files found for games: {self.game_names}")
 
         self.envs: dict[int, TextworldGymEnv] = {}
-        self.agents: dict[int, TextWorldAgent] = {}
+        self.sample_conversations: dict[int, Conversation] = {}
         self.sample_games: dict[int, str] = {}  # Track which game each sample uses
+        self.sample_done: dict[int, bool] = {}
+        self.sample_scores: dict[int, int] = {}
 
         self.completed_episodes = []
+
+    def format_conversation(self, conversation: Conversation) -> Conversation:
+        """Format conversation used for inference"""
+        return conversation
 
     def initial_conversation(self, sample: Sample, sample_index: int) -> Conversation:
         """
@@ -166,17 +112,24 @@ class ZorkDataset(MinRLDataset):
             env_id = self.env_ids[selected_game]
 
             env: TextworldGymEnv = textworld.gym.make(env_id)
-            agent = TextWorldAgent()
             self.envs[sample_index] = env
             self.sample_games[sample_index] = selected_game
             obs, info = env.reset()
-            self.agents[sample_index] = agent
+
+            # Initialize conversation with system prompt and first observation
+            conversation: Conversation = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"### Current Observation\n{obs.strip()}"},
+            ]
+
+            self.sample_conversations[sample_index] = conversation
+            self.sample_done[sample_index] = False
+            self.sample_scores[sample_index] = 0
             logger.info(
                 f"Started new trajectory {sample_index} with game: {selected_game}"
             )
-        agent = self.agents[sample_index]
-        conv = agent.format_conversation()
-        return conv
+
+        return self.sample_conversations[sample_index]
 
     def __getitem__(self, index: int) -> ZorkSample:
         """
@@ -191,28 +144,48 @@ class ZorkDataset(MinRLDataset):
         After rollout, update any state needed for the next rollout.
         Returns whether the episode is done.
         """
-        agent = self.agents[sample_index]
+        if self.sample_done[sample_index]:
+            raise ValueError("Episode is already done")
+
         env: TextworldGymEnv = self.envs[sample_index]
+        conversation = self.sample_conversations[sample_index]
+
         try:
             action = parse_command(model_response)
         except Exception as e:
             logger.error(f"Error parsing command from {model_response}: {e}")
             return "", True
+
+        # Add the assistant's action to the conversation
+        conversation.append({"role": "assistant", "content": model_response})
+
         obs, score, done, infos = env.step(action)  # type: ignore
-        obs = obs.strip("\n")
+        obs = obs.strip()
         logger.info(f"Action: {action}\n Observation: {obs}")
         inventory = infos["inventory"]
+
         if not done:
-            agent.update(action, obs, inventory, done, score)  # type: ignore
+            # Add the new observation as a user message
+            user_content = f"### Current Observation\n{obs}"
+            if inventory and len(inventory.strip()) > 0:
+                inventory_formatted = inventory.strip()
+                user_content += f"\n\n### Inventory\n{inventory_formatted}"
+
+            conversation.append({"role": "user", "content": user_content})
+            self.sample_scores[sample_index] = score  # type: ignore
         else:
             # Clean up completed episode
             game_name = self.sample_games[sample_index]
             logger.info(
                 f"Completed trajectory {sample_index} with game: {game_name}, final score: {score}"
             )
+            self.sample_done[sample_index] = True
             del self.envs[sample_index]
-            del self.agents[sample_index]
+            del self.sample_conversations[sample_index]
             del self.sample_games[sample_index]
+            del self.sample_done[sample_index]
+            del self.sample_scores[sample_index]
+
         return obs, done
 
     def __len__(self) -> int:

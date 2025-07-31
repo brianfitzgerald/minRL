@@ -1,3 +1,4 @@
+import pytest
 from minrl.algorithms import rollout
 from minrl.constants import Conversation
 from vllm import LLM
@@ -5,6 +6,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import TrainerConfig
 
 
+@pytest.mark.slow
 def test_rollout_with_sample_batch(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
@@ -36,6 +38,7 @@ def test_rollout_with_sample_batch(
     assert episode.reward == 0.5
 
 
+@pytest.mark.slow
 def test_rollout_with_multiple_turns(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,

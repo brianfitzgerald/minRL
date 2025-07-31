@@ -53,3 +53,9 @@ torchaudio = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
+
+[tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: marks tests as slow (deselected by default)",
+]
