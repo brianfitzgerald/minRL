@@ -163,27 +163,27 @@ async def main(
                 reasoning_content = None
                 if row["status"] == "done":
                     continue
-                response_content = ""
+                response_str = ""
                 if model_type in ["finetuned", "huggingface"]:
                     assert isinstance(response, RequestOutput)
-                    response_content = response.outputs[0].text
+                    response_str = response.outputs[0].text
                 elif model_type == "openai":
                     assert isinstance(response, ChatCompletion)
-                    response_content = response.choices[0].message.content
+                    response_str = response.choices[0].message.content
                 elif model_type == "openrouter":
                     assert isinstance(response, dict)
-                    response_content = response["choices"][0]["message"]["content"]
+                    response_str = response["choices"][0]["message"]["content"]
                     reasoning_content = None
                     if "reasoning" in response["choices"][0]["message"]:
                         reasoning_content = response["choices"][0]["message"][
                             "reasoning"
                         ]
-                assert response_content is not None, "No response content"
+                assert response_str is not None, "No response content"
 
                 batch_out_rows[i]["conversation"].append(
                     {
                         "role": "assistant",
-                        "content": response_content,
+                        "content": response_str,
                         "reasoning": reasoning_content,
                     }
                 )

@@ -65,6 +65,7 @@ class ZorkDataset(MinRLDataset):
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         self.game_names = os.listdir(games_directory)
+        random.seed(42)
 
         self.infos = textworld.EnvInfos(
             feedback=True,
