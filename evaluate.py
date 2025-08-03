@@ -81,9 +81,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert "base_model_id" in model, (
-                "Base model ID is required for finetuned models"
-            )
+            assert (
+                "base_model_id" in model
+            ), "Base model ID is required for finetuned models"
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -112,7 +112,7 @@ async def main(
     os.makedirs("eval_results", exist_ok=True)
 
     for i, batch in enumerate(tqdm(loader)):
-        batch_out_rows: list[EvalsOutRow] = [
+        batch_out: list[EvalsOutRow] = [
             {
                 "model": model_name,
                 "conversation": [],
@@ -121,10 +121,10 @@ async def main(
             for _ in batch
         ]
 
-        while not all(row["status"] == "done" for row in batch_out_rows):
+        while not all(row["status"] == "done" for row in batch_out):
             # Create batch of conversations
             conversation_batch: list[Conversation] = []
-            for j, (sample, row) in enumerate(zip(batch, batch_out_rows)):
+            for j, (sample, row) in enumerate(zip(batch, batch_out)):
                 if row["status"] == "done":
                     continue
                 conversation_batch.append(dataset.initial_conversation(sample, j))
@@ -159,7 +159,7 @@ async def main(
                 raise ValueError(f"Invalid model type: {model_type}")
 
             # Process responses
-            for i, (response, row) in enumerate(zip(responses, batch_out_rows)):
+            for i, (response, row) in enumerate(zip(responses, batch_out)):
                 reasoning_content = None
                 if row["status"] == "done":
                     continue
@@ -180,7 +180,7 @@ async def main(
                         ]
                 assert response_str is not None, "No response content"
 
-                batch_out_rows[i]["conversation"].append(
+                conversation_batch[i].append(
                     {
                         "role": "assistant",
                         "content": response_str,
@@ -188,12 +188,19 @@ async def main(
                     }
                 )
 
-                obs, done = dataset.get_next_state(i, batch_out_rows[i]["conversation"])
+                obs, done = dataset.get_next_state(i, conversation_batch[i])
                 if done and row["status"] == "running":
-                    _save_results(batch_out_rows, task, model_name)
-                    batch_out_rows[i]["status"] = "done"
+                    _save_results(batch_out, task, model_name)
+                    batch_out[i]["status"] = "done"
+                    batch_out[i]["conversation"] = conversation_batch[i]
+                conversation_batch[i].append(
+                    {
+                        "role": "user",
+                        "content": obs,
+                    }
+                )
 
-        _save_results(batch_out_rows, task, model_name)
+        _save_results(batch_out, task, model_name)
 
 
 if __name__ == "__main__":

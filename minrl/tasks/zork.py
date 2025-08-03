@@ -10,6 +10,7 @@ from textworld.gym.envs import TextworldGymEnv
 import re
 import os
 import random
+from typing import Literal
 
 SYSTEM_PROMPT = """
 You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
@@ -46,6 +47,9 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
     return 0.0
 
 
+GameSelectMode = Literal["zork", "random", "zork_series"]
+
+
 class ZorkDataset(MinRLDataset):
     """
     Dataset where the agent plays multiple steps of a text adventure game,
@@ -63,8 +67,18 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
 
+        self.game_select_mode: GameSelectMode = "zork"
+
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
-        self.game_names = os.listdir(games_directory)
+        game_files_found = os.listdir(games_directory)
+        selected_games = []
+        if self.game_select_mode == "zork_series":
+            selected_games = ["zork1.z5", "zork2.z5", "zork3.z5"]
+        elif self.game_select_mode == "zork":
+            selected_games = ["zork1.z5"]
+        elif self.game_select_mode == "random":
+            selected_games = random.sample(game_files_found, 10)
+
         random.seed(42)
 
         self.infos = textworld.EnvInfos(
@@ -79,23 +93,18 @@ class ZorkDataset(MinRLDataset):
 
         # Register all available games
         self.env_ids: dict[str, str] = {}
-        for game_name in self.game_names:
+        for game_name in selected_games:
             game_path = games_directory / game_name
             if game_path.exists():
+                logger.info(f"Registering game: {game_name}")
                 self.env_ids[game_name] = textworld.gym.register_game(
                     game_path.as_posix(), self.infos
                 )
             else:
                 logger.warning(f"Game file not found: {game_path}")
 
-        if not self.env_ids:
-            raise ValueError(f"No valid game files found for games: {self.game_names}")
-
         self.envs: dict[int, TextworldGymEnv] = {}
-        self.sample_conversations: dict[int, Conversation] = {}
         self.sample_games: dict[int, str] = {}  # Track which game each sample uses
-        self.sample_done: dict[int, bool] = {}
-        self.sample_scores: dict[int, int] = {}
 
         self.completed_episodes = []
 
@@ -107,30 +116,24 @@ class ZorkDataset(MinRLDataset):
         """
         Format the initial conversation for inference.
         """
-        if sample_index not in self.envs:
-            # Randomly select a game for this trajectory
-            selected_game = random.choice(list(self.env_ids.keys()))
-            env_id = self.env_ids[selected_game]
+        # Randomly select a game for this trajectory
+        selected_game = random.choice(list(self.env_ids.keys()))
+        env_id = self.env_ids[selected_game]
 
-            env: TextworldGymEnv = textworld.gym.make(env_id)
-            self.envs[sample_index] = env
-            self.sample_games[sample_index] = selected_game
-            obs, info = env.reset()
+        env: TextworldGymEnv = textworld.gym.make(env_id)
+        self.envs[sample_index] = env
+        self.sample_games[sample_index] = selected_game
+        obs, info = env.reset()
 
-            # Initialize conversation with system prompt and first observation
-            conversation: Conversation = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"### Current Observation\n{obs.strip()}"},
-            ]
+        # Initialize conversation with system prompt and first observation
+        conversation: Conversation = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"### Current Observation\n{obs.strip()}"},
+        ]
 
-            self.sample_conversations[sample_index] = conversation
-            self.sample_done[sample_index] = False
-            self.sample_scores[sample_index] = 0
-            logger.info(
-                f"Started new trajectory {sample_index} with game: {selected_game}"
-            )
+        logger.info(f"Started new trajectory {sample_index} with game: {selected_game}")
 
-        return self.sample_conversations[sample_index]
+        return conversation
 
     def __getitem__(self, index: int) -> ZorkSample:
         """
@@ -145,11 +148,7 @@ class ZorkDataset(MinRLDataset):
         After rollout, update any state needed for the next rollout.
         Returns whether the episode is done.
         """
-        if self.sample_done[sample_index]:
-            raise ValueError("Episode is already done")
-
         env: TextworldGymEnv = self.envs[sample_index]
-        conversation = self.sample_conversations[sample_index]
 
         last_msg = conversation[-1]["content"]
 
@@ -172,19 +171,14 @@ class ZorkDataset(MinRLDataset):
                 user_content += f"\n\n### Inventory\n{inventory_formatted}"
 
             conversation.append({"role": "user", "content": user_content})
-            self.sample_scores[sample_index] = score  # type: ignore
         else:
             # Clean up completed episode
             game_name = self.sample_games[sample_index]
             logger.info(
                 f"Completed trajectory {sample_index} with game: {game_name}, final score: {score}"
             )
-            self.sample_done[sample_index] = True
             del self.envs[sample_index]
-            del self.sample_conversations[sample_index]
             del self.sample_games[sample_index]
-            del self.sample_done[sample_index]
-            del self.sample_scores[sample_index]
 
         return obs, done
 
