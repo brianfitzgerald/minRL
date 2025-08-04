@@ -183,4 +183,4 @@ class ZorkDataset(MinRLDataset):
         return obs, done
 
     def __len__(self) -> int:
-        return 1000
+        return 32

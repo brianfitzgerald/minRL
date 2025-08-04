@@ -120,14 +120,16 @@ async def main(
             }
             for _ in batch
         ]
+        # Create batch of conversations
+        conversation_batch: list[Conversation] = []
+        for j, sample in enumerate(batch):
+            conversation_batch.append(dataset.initial_conversation(sample, j))
 
+        # iterate through conversation steps
         while not all(row["status"] == "done" for row in batch_out):
-            # Create batch of conversations
-            conversation_batch: list[Conversation] = []
             for j, (sample, row) in enumerate(zip(batch, batch_out)):
                 if row["status"] == "done":
                     continue
-                conversation_batch.append(dataset.initial_conversation(sample, j))
 
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)

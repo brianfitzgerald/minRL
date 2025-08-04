@@ -60,7 +60,7 @@ def eval_single_step(task: TaskChoice = "connections"):
 
 def render_zork_trajectories():
     """Function to render trajectories of the zork task."""
-    eval_results_path = Path("eval_results/eval_zork_gpt-4.1-mini.parquet")
+    eval_results_path = Path("eval_results/zork/eval_gpt-4.1-mini.parquet")
     if not eval_results_path.exists():
         logger.error(f"Error: {eval_results_path} folder not found")
         return
@@ -70,10 +70,8 @@ def render_zork_trajectories():
         out_row: EvalsOutRow = row.to_dict()  # type: ignore
         out_rows.append(out_row)
 
-    # Generate HTML visualization
     html_content = _generate_trajectory_html(out_rows)
 
-    # Save to HTML file
     output_path = Path("eval_results/zork/trajectories.html")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -98,7 +96,7 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
     else:
         done_count = sum(1 for row in out_rows if row["status"] == "done")
         error_count = sum(1 for row in out_rows if row["status"] == "error")
-        total_steps = sum(len(row["actions"]) for row in out_rows)
+        total_steps = sum(len(row["conversation"]) for row in out_rows)
         avg_steps = total_steps / len(out_rows) if out_rows else 0
 
         stats = {
@@ -117,26 +115,21 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
 
 def _build_trajectory_data(index: int, row: EvalsOutRow) -> dict:
     """Build structured data for a single trajectory."""
-    max_steps = max(
-        len(row["actions"]), len(row["observations"]), len(row["full_responses"])
-    )
+    conversation = row["conversation"]
 
     steps = []
-    for step in range(max_steps):
-        step_data: dict[str, Any] = {"step_num": step + 1}
+    for i, message in enumerate(conversation):
+        step_data: dict[str, Any] = {
+            "step_num": i + 1,
+            "message": {
+                "role": message["role"],
+                "content": message["content"],
+            },
+        }
 
-        if step < len(row["actions"]):
-            step_data["action"] = row["actions"][step]
-
-        if step < len(row["observations"]):
-            step_data["observation"] = row["observations"][step]
-
-        if step < len(row["full_responses"]):
-            response = row["full_responses"][step]
-            step_data["response"] = {
-                "role": response.get("role", "unknown"),
-                "content": response.get("content", ""),
-            }
+        # Add reasoning if present
+        if "reasoning" in message and message["reasoning"]:
+            step_data["message"]["reasoning"] = message["reasoning"]
 
         steps.append(step_data)
 
@@ -154,7 +147,29 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
     css = """
         body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
         .trajectory { border: 1px solid #ddd; margin-bottom: 20px; }
-        .trajectory-header { background: #f5f5f5; padding: 10px; font-weight: bold; }
+        .trajectory-header { 
+            background: #f5f5f5; 
+            padding: 10px; 
+            font-weight: bold; 
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trajectory-header:hover { background: #e8e8e8; }
+        .toggle-button {
+            font-size: 14px;
+            color: #666;
+            font-weight: normal;
+        }
+        .trajectory-content {
+            padding: 15px;
+            display: block;
+        }
+        .trajectory-content.collapsed {
+            display: none;
+        }
         .status-done { color: green; }
         .status-error { color: red; }
         .status-running { color: orange; }
@@ -184,6 +199,37 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
         for traj in trajectories:
             trajectories_html += _render_trajectory(traj)
 
+    javascript = """
+        function toggleTrajectory(trajectoryId) {
+            const content = document.getElementById('content-' + trajectoryId);
+            const button = document.getElementById('button-' + trajectoryId);
+            
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                button.textContent = '▼ Collapse';
+            } else {
+                content.classList.add('collapsed');
+                button.textContent = '▶ Expand';
+            }
+        }
+        
+        function collapseAll() {
+            const contents = document.querySelectorAll('.trajectory-content');
+            const buttons = document.querySelectorAll('.toggle-button');
+            
+            contents.forEach(content => content.classList.add('collapsed'));
+            buttons.forEach(button => button.textContent = '▶ Expand');
+        }
+        
+        function expandAll() {
+            const contents = document.querySelectorAll('.trajectory-content');
+            const buttons = document.querySelectorAll('.toggle-button');
+            
+            contents.forEach(content => content.classList.remove('collapsed'));
+            buttons.forEach(button => button.textContent = '▼ Collapse');
+        }
+    """
+
     return f"""
 <!DOCTYPE html>
 <html>
@@ -191,9 +237,14 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
     <meta charset="UTF-8">
     <title>Zork Trajectories</title>
     <style>{css}</style>
+    <script>{javascript}</script>
 </head>
 <body>
     {header}
+    <div style="margin: 10px 0;">
+        <button onclick="expandAll()">Expand All</button>
+        <button onclick="collapseAll()">Collapse All</button>
+    </div>
     {stats_html}
     {trajectories_html}
 </body>
@@ -207,36 +258,42 @@ def _render_trajectory(traj: dict) -> str:
 
     steps_html = ""
     for step in traj["steps"]:
-        step_html = f"<h4>Step {step['step_num']}</h4>"
+        step_html = ""
 
-        if "action" in step:
-            step_html += (
-                f'<div class="action"><strong>Action:</strong> {step["action"]}</div>'
-            )
+        message = step["message"]
+        role = message["role"]
+        content = message["content"]
 
-        if "observation" in step:
-            step_html += f'<div class="observation"><strong>Observation:</strong>\n{step["observation"]}</div>'
+        # Choose background color based on role
+        if role == "user":
+            bg_class = "action"  # Blue background for user messages
+        elif role == "assistant":
+            bg_class = "response"  # Orange background for assistant messages
+        else:
+            bg_class = "observation"  # Purple background for system messages
 
-        if "response" in step:
-            resp = step["response"]
-            step_html += f"""<div class="response">
-                <strong>Response ({resp["role"]}):</strong><br>
-                <pre>{resp["content"]}</pre>
-            </div>"""
+        step_html += f'<div class="{bg_class}"><strong>{role.title()}:</strong><br><pre>{content}</pre></div>'
+
+        # Add reasoning if present
+        if "reasoning" in message:
+            step_html += f'<div class="observation"><strong>Reasoning:</strong><br><pre>{message["reasoning"]}</pre></div>'
 
         steps_html += f'<div class="step">{step_html}</div>'
 
-    return f'''
+    return f"""
     <div class="trajectory">
-        <div class="trajectory-header">
-            Trajectory #{traj["index"]} - {traj["model"]} 
-            <span class="{status_class}">[{traj["status"].upper()}]</span>
+        <div class="trajectory-header" onclick="toggleTrajectory({traj["index"]})">
+            <span>
+                Trajectory #{traj["index"]} - {traj["model"]} 
+                <span class="{status_class}">[{traj["status"].upper()}]</span>
+            </span>
+            <span class="toggle-button" id="button-{traj["index"]}">▼ Collapse</span>
         </div>
-        <div style="padding: 15px;">
+        <div class="trajectory-content" id="content-{traj["index"]}">
             {steps_html}
         </div>
     </div>
-    '''
+    """
 
 
 def main(task: TaskChoice = "connections"):
