@@ -68,6 +68,7 @@ class ZorkDataset(MinRLDataset):
         self.tokenizer = tokenizer
 
         self.game_select_mode: GameSelectMode = "random"
+        random.seed(42)
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)
@@ -79,13 +80,10 @@ class ZorkDataset(MinRLDataset):
         elif self.game_select_mode == "random":
             selected_games = random.sample(game_files_found, 10)
 
-        random.seed(42)
-
         self.infos = textworld.EnvInfos(
             feedback=True,
             description=True,
             inventory=True,
-            verbs=True,
             intermediate_reward=True,
             entities=True,
             facts=True,
@@ -162,6 +160,7 @@ class ZorkDataset(MinRLDataset):
         obs = obs.strip()
         logger.info(f"Action: {action}")
         inventory = infos["inventory"]
+        user_content = obs
 
         if not done:
             # Add the new observation as a user message
@@ -170,7 +169,6 @@ class ZorkDataset(MinRLDataset):
                 inventory_formatted = inventory.strip()
                 user_content += f"\n\n### Inventory\n{inventory_formatted}"
 
-            conversation.append({"role": "user", "content": user_content})
         else:
             # Clean up completed episode
             game_name = self.sample_games[sample_index]
@@ -180,7 +178,7 @@ class ZorkDataset(MinRLDataset):
             del self.envs[sample_index]
             del self.sample_games[sample_index]
 
-        return obs, done
+        return user_content, done
 
     def __len__(self) -> int:
         return 32
