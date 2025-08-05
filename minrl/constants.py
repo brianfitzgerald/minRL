@@ -1,4 +1,3 @@
-from pydantic import BaseModel
 from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal, Required
 
 
@@ -38,6 +37,7 @@ class EvalsOutRow(TypedDict):
     model: str
     conversation: Conversation
     status: EvalsOutStatus
+    game: NotRequired[str]
 
 
 class EvalModel(TypedDict):
@@ -88,7 +88,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 }
 
 
-class TrainerConfig(BaseModel):
+class TrainerConfig:
     model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10
     group_size: int = 4

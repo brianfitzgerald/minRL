@@ -137,6 +137,7 @@ def _build_trajectory_data(index: int, row: EvalsOutRow) -> dict:
         "index": index + 1,
         "model": row["model"],
         "status": row["status"],
+        "game": row.get("game", "Unknown"),
         "steps": steps,
     }
 
@@ -145,7 +146,17 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
     """Render the complete HTML template."""
 
     css = """
-        body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        body {
+            font-family: sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            font-size: 14px;
+        }
+        pre {
+            white-space: pre-wrap;
+            text-wrap: auto;
+        }
         .trajectory { border: 1px solid #ddd; margin-bottom: 20px; }
         .trajectory-header { 
             background: #f5f5f5; 
@@ -284,7 +295,7 @@ def _render_trajectory(traj: dict) -> str:
     <div class="trajectory">
         <div class="trajectory-header" onclick="toggleTrajectory({traj["index"]})">
             <span>
-                Trajectory #{traj["index"]} - {traj["model"]} 
+                Trajectory #{traj["index"]} - {traj["model"]} - Game: {traj["game"]}
                 <span class="{status_class}">[{traj["status"].upper()}]</span>
             </span>
             <span class="toggle-button" id="button-{traj["index"]}">▼ Collapse</span>

@@ -67,7 +67,7 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
 
-        self.game_select_mode: GameSelectMode = "zork"
+        self.game_select_mode: GameSelectMode = "random"
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)
@@ -160,7 +160,7 @@ class ZorkDataset(MinRLDataset):
 
         obs, score, done, infos = env.step(action)  # type: ignore
         obs = obs.strip()
-        logger.info(f"Action: {action}\n Observation: {obs}")
+        logger.info(f"Action: {action}")
         inventory = infos["inventory"]
 
         if not done:

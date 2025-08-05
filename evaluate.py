@@ -1,6 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
+from typing import cast
 
 import aiohttp
 import fire
@@ -20,6 +21,7 @@ from minrl.constants import (
     ModelName,
 )
 from minrl.tasks import TASK_DATASETS, TaskChoice
+from minrl.tasks.zork import ZorkDataset
 from minrl.modal_utils import download_checkpoint_from_modal
 
 """
@@ -61,7 +63,7 @@ async def _openrouter_request(
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gpt-4.1-mini",
-    batch_size: int = 4,
+    batch_size: int = 8,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
@@ -81,9 +83,9 @@ async def main(
         if model_type == "finetuned":
             model_path = os.path.join(".", "checkpoints", model["model_id"])
             logger.info(f"Loading finetuned model from {model_path}")
-            assert (
-                "base_model_id" in model
-            ), "Base model ID is required for finetuned models"
+            assert "base_model_id" in model, (
+                "Base model ID is required for finetuned models"
+            )
             tokenizer_model_id = model["base_model_id"]
             if not os.path.exists(model_path):
                 logger.info(
@@ -111,12 +113,15 @@ async def main(
 
     os.makedirs("eval_results", exist_ok=True)
 
+    all_out: list[EvalsOutRow] = []
+
     for i, batch in enumerate(tqdm(loader)):
         batch_out: list[EvalsOutRow] = [
             {
                 "model": model_name,
                 "conversation": [],
                 "status": "running",
+                "game": "",
             }
             for _ in batch
         ]
@@ -124,6 +129,13 @@ async def main(
         conversation_batch: list[Conversation] = []
         for j, sample in enumerate(batch):
             conversation_batch.append(dataset.initial_conversation(sample, j))
+            # Capture game information if available (for zork task)
+            if task == "zork":
+                dataset = cast(ZorkDataset, dataset)
+                game_name = dataset.sample_games.get(j)
+                if game_name:
+                    batch_out[j]["game"] = game_name
+                    logger.info(f"Game: {game_name}")
 
         # iterate through conversation steps
         while not all(row["status"] == "done" for row in batch_out):
@@ -192,9 +204,10 @@ async def main(
 
                 obs, done = dataset.get_next_state(i, conversation_batch[i])
                 if done and row["status"] == "running":
-                    _save_results(batch_out, task, model_name)
                     batch_out[i]["status"] = "done"
                     batch_out[i]["conversation"] = conversation_batch[i]
+                    all_out.append(batch_out[i])
+                    _save_results(all_out, task, model_name)
                 conversation_batch[i].append(
                     {
                         "role": "user",
@@ -202,7 +215,7 @@ async def main(
                     }
                 )
 
-        _save_results(batch_out, task, model_name)
+        _save_results(all_out, task, model_name)
 
 
 if __name__ == "__main__":
