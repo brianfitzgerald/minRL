@@ -1,11 +1,14 @@
 import os
-from typing import Any
 import fire
 import pandas as pd
 from pathlib import Path
 from loguru import logger
 import matplotlib.pyplot as plt
 from minrl.constants import EvalsOutRow, TaskChoice
+import json
+import numpy as np
+
+from minrl.utils import clean_observation
 
 
 def eval_single_step(task: TaskChoice = "connections"):
@@ -112,35 +115,6 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
     return _render_html_template(stats, trajectories)
 
 
-def _build_trajectory_data(index: int, row: EvalsOutRow) -> dict:
-    """Build structured data for a single trajectory."""
-    conversation = row["conversation"]
-
-    steps = []
-    for i, message in enumerate(conversation):
-        step_data: dict[str, Any] = {
-            "step_num": i + 1,
-            "message": {
-                "role": message["role"],
-                "content": message["content"],
-            },
-        }
-
-        # Add reasoning if present
-        if "reasoning" in message and message["reasoning"]:
-            step_data["message"]["reasoning"] = message["reasoning"]
-
-        steps.append(step_data)
-
-    return {
-        "index": index + 1,
-        "model": row["model"],
-        "status": row["status"],
-        "game": row.get("game", "Unknown"),
-        "steps": steps,
-    }
-
-
 def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
     """Render the complete HTML template."""
 
@@ -226,9 +200,7 @@ def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
     trajectories_html = '<div id="trajectory-container" class="trajectory"></div>'
 
     # Convert trajectories to JavaScript data, properly handling numpy arrays
-    import json
-    import numpy as np
-    
+
     def convert_numpy_arrays(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -238,11 +210,15 @@ def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
             return [convert_numpy_arrays(item) for item in obj]
         else:
             return obj
-    
+
     # Convert each trajectory, handling numpy arrays properly
+    for row in trajectories:
+        for message in row["conversation"]:
+            if message["role"] == "user":
+                message["content"] = clean_observation(message["content"])
     converted_trajectories = [convert_numpy_arrays(dict(row)) for row in trajectories]
     trajectories_json = json.dumps(converted_trajectories, indent=None)
-    
+
     javascript = f"""
         let currentTrajectory = 0;
         let totalTrajectories = 0;
@@ -358,8 +334,6 @@ def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
 </body>
 </html>
 """
-
-
 
 
 def main(task: TaskChoice = "connections"):

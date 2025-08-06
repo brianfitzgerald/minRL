@@ -1,11 +1,20 @@
 from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal, Required
 
 
+class StepMetadata(TypedDict):
+    observation: str
+    inventory: list[str]
+    reward: float
+
+
 class ConversationMessage(TypedDict, total=False):
     role: Required[Literal["system", "user", "assistant"]]
     content: Required[str]
     reasoning: NotRequired[str | None]
+    step_metadata: NotRequired[StepMetadata | None]
 
+
+HIGH_QUALITY_GAMES = ["temple.z5", "zork1.z5", "zork2.z5", "zork3.z5"]
 
 Conversation: TypeAlias = list[ConversationMessage]
 

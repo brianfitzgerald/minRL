@@ -12,8 +12,10 @@ import os
 import random
 from typing import Literal
 
+from minrl.utils import clean_observation
+
 SYSTEM_PROMPT = """
-You are an AI agent whose sole task is to play the text-adventure game Zork.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
+You are an AI agent whose sole task is to play a text adventure game.  Your primary goal is to explore, solve puzzles, and collect treasures without dying.
 
 INSTRUCTIONS:
 1. After each game response, parse the text to update:
@@ -140,6 +142,9 @@ class ZorkDataset(MinRLDataset):
         """
         return {"index": index}
 
+    def __len__(self) -> int:
+        return 128
+
     def get_next_state(
         self, sample_index: int, conversation: Conversation
     ) -> tuple[str, bool]:
@@ -158,7 +163,9 @@ class ZorkDataset(MinRLDataset):
             return "", True
 
         obs, score, done, infos = env.step(action)  # type: ignore
-        obs = obs.strip()
+
+        obs = clean_observation(obs)
+
         logger.info(f"Action: {action}")
         inventory = infos["inventory"]
         user_content = obs
@@ -180,6 +187,3 @@ class ZorkDataset(MinRLDataset):
             del self.sample_games[sample_index]
 
         return user_content, done
-
-    def __len__(self) -> int:
-        return 128
