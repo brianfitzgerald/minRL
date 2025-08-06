@@ -16,11 +16,14 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Visualize Results",
+            "name": "Visualize Evals",
             "type": "debugpy",
             "request": "launch",
-            "program": "visualize_results.py",
-            "console": "integratedTerminal"
+            "program": "visualize_evals.py",
+            "console": "integratedTerminal",
+            "args": [
+                "zork",
+            ]
         },
         {
             "name": "Test Agent",

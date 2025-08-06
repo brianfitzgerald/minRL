@@ -72,13 +72,14 @@ class ZorkDataset(MinRLDataset):
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)
+        logger.info(f"Found {len(game_files_found)} games in {games_directory}")
         selected_games = []
         if self.game_select_mode == "zork_series":
             selected_games = ["zork1.z5", "zork2.z5", "zork3.z5"]
         elif self.game_select_mode == "zork":
             selected_games = ["zork1.z5"]
         elif self.game_select_mode == "random":
-            selected_games = random.sample(game_files_found, 10)
+            selected_games = random.sample(game_files_found, 128)
 
         self.infos = textworld.EnvInfos(
             feedback=True,
@@ -181,4 +182,4 @@ class ZorkDataset(MinRLDataset):
         return user_content, done
 
     def __len__(self) -> int:
-        return 32
+        return 128

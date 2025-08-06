@@ -106,9 +106,8 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
             "avg_steps": avg_steps,
         }
 
-        trajectories = [
-            _build_trajectory_data(i, row) for i, row in enumerate(out_rows)
-        ]
+        # Store raw data for JavaScript rendering instead of pre-building all trajectories
+        trajectories = out_rows
 
     return _render_html_template(stats, trajectories)
 
@@ -142,7 +141,7 @@ def _build_trajectory_data(index: int, row: EvalsOutRow) -> dict:
     }
 
 
-def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
+def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
     """Render the complete HTML template."""
 
     css = """
@@ -157,29 +156,47 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
             white-space: pre-wrap;
             text-wrap: auto;
         }
-        .trajectory { border: 1px solid #ddd; margin-bottom: 20px; }
-        .trajectory-header { 
-            background: #f5f5f5; 
-            padding: 10px; 
-            font-weight: bold; 
-            cursor: pointer;
-            user-select: none;
+        .navigation {
+            background: #f8f9fa;
+            padding: 15px;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+            border-radius: 5px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .trajectory-header:hover { background: #e8e8e8; }
-        .toggle-button {
+        .nav-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
             font-size: 14px;
-            color: #666;
-            font-weight: normal;
         }
-        .trajectory-content {
-            padding: 15px;
-            display: block;
+        .nav-button:hover {
+            background: #0056b3;
         }
-        .trajectory-content.collapsed {
-            display: none;
+        .nav-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .trajectory-info {
+            font-weight: bold;
+            color: #495057;
+        }
+        .trajectory { 
+            border: 1px solid #ddd; 
+            margin-bottom: 20px;
+        }
+        .trajectory-header { 
+            background: #f5f5f5; 
+            padding: 15px; 
+            font-weight: bold; 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .status-done { color: green; }
         .status-error { color: red; }
@@ -190,6 +207,9 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
         .response { background: #fff3e0; padding: 8px; margin: 5px 0; }
         .stats { display: flex; gap: 20px; margin: 20px 0; }
         .stat { text-align: center; }
+        .trajectory-content {
+            padding: 15px;
+        }
     """
 
     header = "<h1>Zork Trajectories</h1>"
@@ -203,42 +223,118 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
     </div>
     """
 
-    trajectories_html = ""
-    if not trajectories:
-        trajectories_html = "<p>No trajectories found.</p>"
-    else:
-        for traj in trajectories:
-            trajectories_html += _render_trajectory(traj)
+    trajectories_html = '<div id="trajectory-container" class="trajectory"></div>'
 
-    javascript = """
-        function toggleTrajectory(trajectoryId) {
-            const content = document.getElementById('content-' + trajectoryId);
-            const button = document.getElementById('button-' + trajectoryId);
-            
-            if (content.classList.contains('collapsed')) {
-                content.classList.remove('collapsed');
-                button.textContent = '▼ Collapse';
-            } else {
-                content.classList.add('collapsed');
-                button.textContent = '▶ Expand';
-            }
-        }
+    # Convert trajectories to JavaScript data, properly handling numpy arrays
+    import json
+    import numpy as np
+    
+    def convert_numpy_arrays(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: convert_numpy_arrays(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_arrays(item) for item in obj]
+        else:
+            return obj
+    
+    # Convert each trajectory, handling numpy arrays properly
+    converted_trajectories = [convert_numpy_arrays(dict(row)) for row in trajectories]
+    trajectories_json = json.dumps(converted_trajectories, indent=None)
+    
+    javascript = f"""
+        let currentTrajectory = 0;
+        let totalTrajectories = 0;
+        let trajectoryData = {trajectories_json};
         
-        function collapseAll() {
-            const contents = document.querySelectorAll('.trajectory-content');
-            const buttons = document.querySelectorAll('.toggle-button');
+        function initializeTrajectories() {{
+            totalTrajectories = trajectoryData.length;
             
-            contents.forEach(content => content.classList.add('collapsed'));
-            buttons.forEach(button => button.textContent = '▶ Expand');
-        }
+            if (totalTrajectories > 0) {{
+                showTrajectory(0);
+            }}
+            
+            updateNavigation();
+        }}
         
-        function expandAll() {
-            const contents = document.querySelectorAll('.trajectory-content');
-            const buttons = document.querySelectorAll('.toggle-button');
+        function buildTrajectoryHTML(index, row) {{
+            const conversation = row.conversation;
+            const statusClass = `status-${{row.status}}`;
             
-            contents.forEach(content => content.classList.remove('collapsed'));
-            buttons.forEach(button => button.textContent = '▼ Collapse');
-        }
+            let stepsHtml = '';
+            for (let i = 0; i < conversation.length; i++) {{
+                const message = conversation[i];
+                const role = message.role;
+                const content = message.content;
+                
+                let bgClass = 'observation';
+                if (role === 'user') {{
+                    bgClass = 'action';
+                }} else if (role === 'assistant') {{
+                    bgClass = 'response';
+                }}
+                
+                let stepHtml = `<div class="${{bgClass}}"><strong>${{role.charAt(0).toUpperCase() + role.slice(1)}}:</strong><br><pre>${{content}}</pre></div>`;
+                
+                if (message.reasoning) {{
+                    stepHtml += `<div class="observation"><strong>Reasoning:</strong><br><pre>${{message.reasoning}}</pre></div>`;
+                }}
+                
+                stepsHtml += `<div class="step">${{stepHtml}}</div>`;
+            }}
+            
+            return `
+                <div class="trajectory-header">
+                    <span>
+                        Trajectory #${{index + 1}} - ${{row.model}} - Game: ${{row.game}}
+                        <span class="${{statusClass}}">[${{row.status.toUpperCase()}}]</span>
+                    </span>
+                </div>
+                <div class="trajectory-content">
+                    ${{stepsHtml}}
+                </div>
+            `;
+        }}
+        
+        function showTrajectory(index) {{
+            if (index < 0 || index >= totalTrajectories) return;
+            
+            const container = document.getElementById('trajectory-container');
+            const row = trajectoryData[index];
+            
+            container.innerHTML = buildTrajectoryHTML(index, row);
+            currentTrajectory = index;
+            updateNavigation();
+        }}
+        
+        function nextTrajectory() {{
+            if (currentTrajectory < totalTrajectories - 1) {{
+                showTrajectory(currentTrajectory + 1);
+            }}
+        }}
+        
+        function previousTrajectory() {{
+            if (currentTrajectory > 0) {{
+                showTrajectory(currentTrajectory - 1);
+            }}
+        }}
+        
+        function updateNavigation() {{
+            const prevButton = document.getElementById('prev-button');
+            const nextButton = document.getElementById('next-button');
+            const trajectoryInfo = document.getElementById('trajectory-info');
+            
+            if (prevButton) prevButton.disabled = (currentTrajectory === 0);
+            if (nextButton) nextButton.disabled = (currentTrajectory === totalTrajectories - 1);
+            
+            if (trajectoryInfo) {{
+                trajectoryInfo.textContent = `Trajectory ${{currentTrajectory + 1}} of ${{totalTrajectories}}`;
+            }}
+        }}
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initializeTrajectories);
     """
 
     return f"""
@@ -252,59 +348,18 @@ def _render_html_template(stats: dict, trajectories: list[dict]) -> str:
 </head>
 <body>
     {header}
-    <div style="margin: 10px 0;">
-        <button onclick="expandAll()">Expand All</button>
-        <button onclick="collapseAll()">Collapse All</button>
-    </div>
     {stats_html}
+    <div class="navigation">
+        <button id="prev-button" class="nav-button" onclick="previousTrajectory()">← Previous</button>
+        <span id="trajectory-info" class="trajectory-info">Loading...</span>
+        <button id="next-button" class="nav-button" onclick="nextTrajectory()">Next →</button>
+    </div>
     {trajectories_html}
 </body>
 </html>
 """
 
 
-def _render_trajectory(traj: dict) -> str:
-    """Render a single trajectory."""
-    status_class = f"status-{traj['status']}"
-
-    steps_html = ""
-    for step in traj["steps"]:
-        step_html = ""
-
-        message = step["message"]
-        role = message["role"]
-        content = message["content"]
-
-        # Choose background color based on role
-        if role == "user":
-            bg_class = "action"  # Blue background for user messages
-        elif role == "assistant":
-            bg_class = "response"  # Orange background for assistant messages
-        else:
-            bg_class = "observation"  # Purple background for system messages
-
-        step_html += f'<div class="{bg_class}"><strong>{role.title()}:</strong><br><pre>{content}</pre></div>'
-
-        # Add reasoning if present
-        if "reasoning" in message:
-            step_html += f'<div class="observation"><strong>Reasoning:</strong><br><pre>{message["reasoning"]}</pre></div>'
-
-        steps_html += f'<div class="step">{step_html}</div>'
-
-    return f"""
-    <div class="trajectory">
-        <div class="trajectory-header" onclick="toggleTrajectory({traj["index"]})">
-            <span>
-                Trajectory #{traj["index"]} - {traj["model"]} - Game: {traj["game"]}
-                <span class="{status_class}">[{traj["status"].upper()}]</span>
-            </span>
-            <span class="toggle-button" id="button-{traj["index"]}">▼ Collapse</span>
-        </div>
-        <div class="trajectory-content" id="content-{traj["index"]}">
-            {steps_html}
-        </div>
-    </div>
-    """
 
 
 def main(task: TaskChoice = "connections"):
