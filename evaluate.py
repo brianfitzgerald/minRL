@@ -62,7 +62,7 @@ async def _openrouter_request(
 
 async def main(
     task: TaskChoice = "zork",
-    model_name: ModelName = "gpt-4.1-mini",
+    model_name: ModelName = "gemini_2.5_flash",
     batch_size: int = 4,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]

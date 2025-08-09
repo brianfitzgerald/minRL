@@ -49,7 +49,7 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
     return 0.0
 
 
-GameSelectMode = Literal["zork", "random", "zork_series"]
+GameSelectMode = Literal["zork", "random", "zork_series", "full"]
 
 
 class ZorkDataset(MinRLDataset):
@@ -71,6 +71,7 @@ class ZorkDataset(MinRLDataset):
 
         self.game_select_mode: GameSelectMode = "random"
         random.seed(42)
+        self.samples_per_game = 4
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)
@@ -82,6 +83,8 @@ class ZorkDataset(MinRLDataset):
             selected_games = ["zork1.z5"]
         elif self.game_select_mode == "random":
             selected_games = random.sample(game_files_found, 128)
+        elif self.game_select_mode == "full":
+            selected_games = game_files_found
 
         self.infos = textworld.EnvInfos(
             feedback=True,
@@ -143,7 +146,7 @@ class ZorkDataset(MinRLDataset):
         return {"index": index}
 
     def __len__(self) -> int:
-        return 128
+        return len(self.env_ids) * self.samples_per_game
 
     def get_next_state(
         self, sample_index: int, conversation: Conversation
