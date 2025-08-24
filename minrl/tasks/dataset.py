@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from dataclasses import dataclass
 from typing import Literal
 
 from torch.utils.data import Dataset
@@ -11,20 +10,6 @@ from minrl.constants import Conversation, HostType, Sample
 Split = Literal["train", "test", "eval"]
 
 EpisodeStatus = Literal["finished", "terminated"]
-
-
-@dataclass
-class Episode:
-    """Store all relevant information of an episode."""
-
-    # Index of group in batch
-    group_index: int
-    # Index of answer in group
-    answer_index: int
-    # Whether the episode finished or terminated early
-    reward: float
-    conversation: Conversation
-    sample: Sample
 
 
 class MinRLDataset(Dataset):

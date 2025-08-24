@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from loguru import logger
 
+from minrl.constants import Episode
 from minrl.metrics import MetricsWrapper
-from minrl.tasks.dataset import Episode
 
 
 def clean_observation(obs: str) -> str:

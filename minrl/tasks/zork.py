@@ -71,7 +71,7 @@ class ZorkDataset(MinRLDataset):
 
         self.game_select_mode: GameSelectMode = "random"
         random.seed(42)
-        self.samples_per_game = 4
+        self.samples_per_game = 1
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)
@@ -120,8 +120,10 @@ class ZorkDataset(MinRLDataset):
         """
         Format the initial conversation for inference.
         """
-        # Randomly select a game for this trajectory
-        selected_game = random.choice(list(self.env_ids.keys()))
+        # Deterministically select a game for this trajectory to ensure N samples per game
+        game_names = list(self.env_ids.keys())
+        game_index = sample_index // self.samples_per_game
+        selected_game = game_names[game_index % len(game_names)]
         env_id = self.env_ids[selected_game]
 
         env: TextworldGymEnv = textworld.gym.make(env_id)

@@ -6,7 +6,7 @@ from loguru import logger
 import re
 import ast
 import numpy as np
-from minrl.constants import Conversation, HostType
+from minrl.constants import Conversation, HostType, Sample
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
@@ -177,7 +177,7 @@ def extract_result_list(s: str) -> list[list[int]]:
     return ast.literal_eval(m.group(1))
 
 
-def hanoi_reward_func(conversation: Conversation, sample: HanoiSample) -> float:
+def hanoi_reward_func(conversation: Conversation, sample: Sample) -> float:
     try:
         game = TowerOfHanoi(sample["n_disks"])
         moves = extract_result_list(conversation[-1]["content"])  # type: ignore

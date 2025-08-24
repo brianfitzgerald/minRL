@@ -1,4 +1,5 @@
-from typing import Any, Callable, NotRequired, TypeAlias, TypedDict, Literal, Required
+from dataclasses import dataclass
+from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, TypedDict
 
 
 class StepMetadata(TypedDict):
@@ -21,6 +22,21 @@ Conversation: TypeAlias = list[ConversationMessage]
 
 Sample: TypeAlias = dict[str, Any]
 RewardFunction: TypeAlias = Callable[[Conversation, Sample], float]
+
+
+@dataclass
+class Episode:
+    """Store all relevant information of an episode."""
+
+    # Index of group in batch
+    group_index: int
+    # Index of answer in group
+    answer_index: int
+    # Whether the episode finished or terminated early
+    reward: float
+    conversation: Conversation
+    sample: Sample
+
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
 QWEN_3_1_7_B = "Qwen/Qwen3-1.7B"

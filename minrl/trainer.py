@@ -1,23 +1,25 @@
 import time
 from pathlib import Path
 from typing import Any, cast
-from vllm import LLM
-from tqdm import tqdm
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from loguru import logger
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.constants import LoggerChoice, HostType, TrainerConfig
+from vllm import LLM
+from vllm.envs import set_vllm_use_v1
+
+from minrl.algorithms import rollout, update_policy
+from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
-
-from minrl.algorithms import compute_metrics, rollout, update_policy
-from minrl.tasks.dataset import Episode, MinRLDataset
-from vllm.envs import set_vllm_use_v1
+from minrl.tasks.dataset import MinRLDataset
+from minrl.utils import compute_metrics
 
 
 def get_available_device() -> str:

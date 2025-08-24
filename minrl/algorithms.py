@@ -25,7 +25,7 @@ from minrl.constants import (
     TrainerConfig,
 )
 from minrl.metrics import MetricsWrapper
-from minrl.tasks.dataset import Episode
+from minrl.constants import Episode
 from minrl.utils import NEWLINE_TOKEN_ID, find_assistant_sections
 
 debug_tokenizer = AutoTokenizer.from_pretrained(

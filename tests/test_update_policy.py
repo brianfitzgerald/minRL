@@ -2,7 +2,7 @@ import pytest
 import torch
 from minrl.algorithms import update_policy, normalize_rewards_per_group
 from minrl.constants import TrainerConfig, Conversation
-from minrl.tasks.dataset import Episode
+from minrl.constants import Episode
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 
