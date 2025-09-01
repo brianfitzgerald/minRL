@@ -1,4 +1,5 @@
 import asyncio
+import random
 import os
 from pathlib import Path
 from typing import cast
@@ -70,6 +71,7 @@ async def main(
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
+    random.seed(42)
 
     openai_client = None
     api_key = None
@@ -127,19 +129,19 @@ async def main(
         ]
         # Create batch of conversations
         conversation_batch: list[Conversation] = []
-        for j, sample in enumerate(batch):
-            conversation_batch.append(dataset.initial_conversation(sample, j))
+        for i, sample in enumerate(batch):
+            conversation_batch.append(dataset.initial_conversation(sample, i))
             # Capture game information if available (for zork task)
             if task == "zork":
                 dataset = cast(ZorkDataset, dataset)
-                game_name = dataset.sample_games.get(j)
+                game_name = dataset.sample_games.get(i)
                 if game_name:
-                    batch_out[j]["game"] = game_name
-                    logger.info(f"Game: {game_name}")
+                    batch_out[i]["game"] = game_name
 
-        # iterate through conversation steps
+        # iterate through conversation steps for batch of initial conversations
+        step = 0
         while not all(row["status"] == "done" for row in batch_out):
-            for j, (sample, row) in enumerate(zip(batch, batch_out)):
+            for i, (sample, row) in enumerate(zip(batch, batch_out)):
                 if row["status"] == "done":
                     continue
 
@@ -172,7 +174,7 @@ async def main(
             else:
                 raise ValueError(f"Invalid model type: {model_type}")
 
-            # Process responses
+            # Process responses for a step
             for i, (response, row) in enumerate(zip(responses, batch_out)):
                 reasoning_content = None
                 if row["status"] == "done":
@@ -203,17 +205,31 @@ async def main(
                 )
 
                 obs, done = dataset.get_next_state(i, conversation_batch[i])
+
+                # if batch is done, save results and reset conversation
                 if done and row["status"] == "running":
                     batch_out[i]["status"] = "done"
                     batch_out[i]["conversation"] = conversation_batch[i]
                     all_out.append(batch_out[i])
                     _save_results(all_out, task, model_name)
+
                 conversation_batch[i].append(
                     {
                         "role": "user",
                         "content": obs,
                     }
                 )
+
+            all_row_statuses = [
+                "R"
+                if row["status"] == "running"
+                else "D"
+                if row["status"] == "done"
+                else "E"
+                for row in batch_out
+            ]
+            logger.info(f"Step: {step}, statuses: {all_row_statuses}")
+            step += 1
 
         _save_results(all_out, task, model_name)
 

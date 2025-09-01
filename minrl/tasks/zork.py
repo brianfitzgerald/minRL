@@ -19,17 +19,17 @@ You are an AI agent whose sole task is to play a text adventure game.  Your prim
 
 INSTRUCTIONS:
 1. After each game response, parse the text to update:
-   • Your current location  
-   • Inventory items  
-   • Visible exits and objects  
-   • Any puzzles or obstacles described  
+   • Your current location
+   • Inventory items
+   • Visible exits and objects
+   • Any puzzles or obstacles described
 
 2. Decide on exactly one text command per turn (e.g. "north", "take lantern", "open trapdoor").
 
 3. Always choose the highest-value action, balancing exploration, safety (avoid known hazards), and puzzle-solving.
 
 4. Output the next command, formatted as:
-   
+
    <command>your next command</command>
 
 """
@@ -70,7 +70,6 @@ class ZorkDataset(MinRLDataset):
         self.tokenizer = tokenizer
 
         self.game_select_mode: GameSelectMode = "random"
-        random.seed(42)
         self.samples_per_game = 1
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
@@ -124,6 +123,7 @@ class ZorkDataset(MinRLDataset):
         game_names = list(self.env_ids.keys())
         game_index = sample_index // self.samples_per_game
         selected_game = game_names[game_index % len(game_names)]
+        logger.info(f"Starting game {game_index}: {selected_game}")
         env_id = self.env_ids[selected_game]
 
         env: TextworldGymEnv = textworld.gym.make(env_id)
@@ -171,7 +171,6 @@ class ZorkDataset(MinRLDataset):
 
         obs = clean_observation(obs)
 
-        logger.info(f"Action: {action}")
         inventory = infos["inventory"]
         user_content = obs
 
