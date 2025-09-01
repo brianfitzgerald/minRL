@@ -64,7 +64,7 @@ async def _openrouter_request(
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
-    batch_size: int = 4,
+    batch_size: int = 8,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
