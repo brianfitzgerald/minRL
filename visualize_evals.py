@@ -97,10 +97,49 @@ def render_zork_trajectories():
         shutil.copy2(js_source, js_dest)
         logger.info(f"Copied JavaScript file to {js_dest}")
 
+    # Write trajectory data as separate JS file
+    _write_trajectory_data_js(out_rows, viewer_dir)
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
     logger.info(f"HTML trajectory visualization saved to {output_path}")
+
+
+def _write_trajectory_data_js(out_rows: list[EvalsOutRow], viewer_dir: Path):
+    """Write trajectory data as a separate JavaScript file."""
+
+    # Convert trajectories to JavaScript data, properly handling numpy arrays
+    def convert_numpy_arrays(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: convert_numpy_arrays(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_arrays(item) for item in obj]
+        else:
+            return obj
+
+    # Convert each trajectory, handling numpy arrays properly
+    for row in out_rows:
+        for message in row["conversation"]:
+            if message["role"] == "user":
+                message["content"] = clean_observation(message["content"])
+
+    converted_trajectories = [convert_numpy_arrays(dict(row)) for row in out_rows]
+    trajectories_json = json.dumps(converted_trajectories, indent=2)
+
+    # Write the data as a JS file
+    js_data_path = viewer_dir / "trajectory_data.js"
+    with open(js_data_path, "w", encoding="utf-8") as f:
+        f.write("// Trajectory data loaded from parquet file\n")
+        f.write(f"trajectoryData = {trajectories_json};\n")
+        f.write("\n// Initialize the trajectory viewer with the data\n")
+        f.write("if (typeof initializeTrajectories === 'function') {\n")
+        f.write("    initializeTrajectories();\n")
+        f.write("}\n")
+
+    logger.info(f"Trajectory data saved to {js_data_path}")
 
 
 def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
@@ -134,7 +173,7 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
     return _render_html_template(stats, trajectories)
 
 
-def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
+def _render_html_template(stats: dict, _: list[EvalsOutRow]) -> str:
     """Render the complete HTML template."""
 
     # Load external CSS and JS files
@@ -158,25 +197,6 @@ def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
     with open(template_path, "r", encoding="utf-8") as f:
         html_template = f.read()
 
-    # Convert trajectories to JavaScript data, properly handling numpy arrays
-    def convert_numpy_arrays(obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {k: convert_numpy_arrays(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_numpy_arrays(item) for item in obj]
-        else:
-            return obj
-
-    # Convert each trajectory, handling numpy arrays properly
-    for row in trajectories:
-        for message in row["conversation"]:
-            if message["role"] == "user":
-                message["content"] = clean_observation(message["content"])
-    converted_trajectories = [convert_numpy_arrays(dict(row)) for row in trajectories]
-    trajectories_json = json.dumps(converted_trajectories, indent=None)
-
     # Update stats in the template
     html_content = html_template.replace(
         '<strong id="total-trajectories">0</strong>',
@@ -195,10 +215,9 @@ def _render_html_template(stats: dict, trajectories: list[EvalsOutRow]) -> str:
         f'<strong id="avg-steps">{stats["avg_steps"]:.1f}</strong>',
     )
 
-    # Add the trajectory data to the script section
-    script_content = f"""
-        // Set trajectory data
-        setTrajectoryData({trajectories_json});
+    # Replace the inline script with a reference to the external data file
+    script_content = """
+        // Trajectory data will be loaded from trajectory_data.js
     """
     html_content = html_content.replace(
         "// This script will be replaced with actual data by Python\n        // The trajectoryData will be set here",

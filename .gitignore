@@ -16,3 +16,4 @@ checkpoints/
 eval_results/
 wandb/
 games/
+*.qzl
