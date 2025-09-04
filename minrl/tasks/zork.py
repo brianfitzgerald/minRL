@@ -49,7 +49,9 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
     return 0.0
 
 
-GameSelectMode = Literal["zork", "random", "zork_series", "full"]
+GameSelectMode = Literal["zork", "random", "zork_series", "full", "known_good_games"]
+
+KNOWN_GOOD_GAMES = ["zork1.z5", "zork2.z5", "zork3.z5", "Adventureland.z5"]
 
 
 class ZorkDataset(MinRLDataset):
@@ -81,7 +83,7 @@ class ZorkDataset(MinRLDataset):
         elif self.game_select_mode == "zork":
             selected_games = ["zork1.z5"]
         elif self.game_select_mode == "random":
-            selected_games = random.sample(game_files_found, 128)
+            selected_games = random.sample(game_files_found, 64)
         elif self.game_select_mode == "full":
             selected_games = game_files_found
 
@@ -89,8 +91,12 @@ class ZorkDataset(MinRLDataset):
             feedback=True,
             description=True,
             inventory=True,
+            location=True,
             intermediate_reward=True,
             entities=True,
+            moves=True,
+            score=True,
+            max_score=True,
             facts=True,
         )
 
@@ -109,8 +115,6 @@ class ZorkDataset(MinRLDataset):
         self.envs: dict[int, TextworldGymEnv] = {}
         self.sample_games: dict[int, str] = {}  # Track which game each sample uses
 
-        self.completed_episodes = []
-
     def format_conversation(self, conversation: Conversation) -> Conversation:
         """Format conversation used for inference"""
         return conversation
@@ -123,7 +127,6 @@ class ZorkDataset(MinRLDataset):
         game_names = list(self.env_ids.keys())
         game_index = sample_index // self.samples_per_game
         selected_game = game_names[game_index % len(game_names)]
-        logger.info(f"Starting game {game_index}: {selected_game}")
         env_id = self.env_ids[selected_game]
 
         env: TextworldGymEnv = textworld.gym.make(env_id)
@@ -134,7 +137,7 @@ class ZorkDataset(MinRLDataset):
         # Initialize conversation with system prompt and first observation
         conversation: Conversation = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"### Current Observation\n{obs.strip()}"},
+            {"role": "user", "content": obs},
         ]
 
         logger.info(f"Started new trajectory {sample_index} with game: {selected_game}")
@@ -169,6 +172,11 @@ class ZorkDataset(MinRLDataset):
 
         obs, score, done, infos = env.step(action)  # type: ignore
 
+        all_infos_str = "\n".join([f"{k}," for k, v in infos.items() if v is not None])
+        logger.info(
+            f"All infos for game {self.sample_games[sample_index]}: {all_infos_str}"
+        )
+
         obs = clean_observation(obs)
 
         inventory = infos["inventory"]
@@ -176,10 +184,10 @@ class ZorkDataset(MinRLDataset):
 
         if not done:
             # Add the new observation as a user message
-            user_content = f"### Current Observation\n{obs}"
+            user_content = obs
             if inventory and len(inventory.strip()) > 0:
                 inventory_formatted = inventory.strip()
-                user_content += f"\n\n### Inventory\n{inventory_formatted}"
+                user_content += f"\n\n Inventory: {inventory_formatted}"
 
         else:
             # Clean up completed episode

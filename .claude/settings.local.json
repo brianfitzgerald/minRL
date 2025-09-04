@@ -8,7 +8,11 @@
       "Bash(pytest:*)",
       "Bash(mv:*)",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(echo $INFORM_GAMES_DIRECTORY)",
+      "Bash(source .env)",
+      "Read(//Users/brianfitzgerald/Documents/inform_7_games/**)",
+      "Bash(INFORM_GAMES_DIRECTORY=\"/Users/brianfitzgerald/Documents/inform_7_games\" python list_z5_games.py)"
     ],
     "deny": []
   }

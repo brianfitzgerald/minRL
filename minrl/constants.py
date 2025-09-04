@@ -55,13 +55,13 @@ HostType = Literal["modal", "local"]
 TaskChoice = Literal["connections", "hanoi", "zork"]
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 
-EvalsOutStatus = Literal["running", "done", "error"]
+EvalSampleStatus = Literal["running", "done", "error"]
 
 
-class EvalsOutRow(TypedDict):
+class EvalSample(TypedDict):
     model: str
     conversation: Conversation
-    status: EvalsOutStatus
+    status: EvalSampleStatus
     game: NotRequired[str]
 
 

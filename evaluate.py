@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import random
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ from vllm import LLM, RequestOutput, SamplingParams
 from minrl.constants import (
     INFERENCE_MODELS,
     Conversation,
-    EvalsOutRow,
+    EvalSample,
     ModelName,
 )
 from minrl.tasks import TASK_DATASETS, TaskChoice
@@ -32,10 +33,11 @@ Evaluate against any task in the minrl.tasks module.
 load_dotenv(".env")
 
 
-def _save_results(out_rows: list[EvalsOutRow], task: TaskChoice, model_name: ModelName):
+def _save_results(out_rows: list[EvalSample], task: TaskChoice, model_name: ModelName):
     out_rows = [row for row in out_rows if row["status"] == "done"]
     df = pd.DataFrame(out_rows)
-    file_path = f"eval_results/{task}/eval_{model_name}.parquet"
+    timestamp_short_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = f"eval_results/{task}/eval_{model_name}_{timestamp_short_str}.parquet"
     if not Path(file_path).parent.exists():
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving results to {file_path}")
@@ -64,7 +66,7 @@ async def _openrouter_request(
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
-    batch_size: int = 4,
+    batch_size: int = 8,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
@@ -115,10 +117,10 @@ async def main(
 
     os.makedirs("eval_results", exist_ok=True)
 
-    all_out: list[EvalsOutRow] = []
+    all_out: list[EvalSample] = []
 
     for i, batch in enumerate(tqdm(loader)):
-        batch_out: list[EvalsOutRow] = [
+        batch_out: list[EvalSample] = [
             {
                 "model": model_name,
                 "conversation": [],

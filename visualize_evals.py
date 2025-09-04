@@ -4,7 +4,7 @@ import pandas as pd
 from pathlib import Path
 from loguru import logger
 import matplotlib.pyplot as plt
-from minrl.constants import EvalsOutRow, TaskChoice
+from minrl.constants import EvalSample, TaskChoice
 import json
 import numpy as np
 import shutil
@@ -69,9 +69,9 @@ def render_zork_trajectories():
         logger.error(f"Error: {eval_results_path} folder not found")
         return
     df = pd.read_parquet(eval_results_path)
-    out_rows: list[EvalsOutRow] = []
+    out_rows: list[EvalSample] = []
     for index, row in df.iterrows():
-        out_row: EvalsOutRow = row.to_dict()  # type: ignore
+        out_row: EvalSample = row.to_dict()  # type: ignore
         out_rows.append(out_row)
 
     html_content = _generate_trajectory_html(out_rows)
@@ -106,7 +106,7 @@ def render_zork_trajectories():
     logger.info(f"HTML trajectory visualization saved to {output_path}")
 
 
-def _write_trajectory_data_js(out_rows: list[EvalsOutRow], viewer_dir: Path):
+def _write_trajectory_data_js(out_rows: list[EvalSample], viewer_dir: Path):
     """Write trajectory data as a separate JavaScript file."""
 
     # Convert trajectories to JavaScript data, properly handling numpy arrays
@@ -142,7 +142,7 @@ def _write_trajectory_data_js(out_rows: list[EvalsOutRow], viewer_dir: Path):
     logger.info(f"Trajectory data saved to {js_data_path}")
 
 
-def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
+def _generate_trajectory_html(out_rows: list[EvalSample]) -> str:
     """Generate HTML content for trajectory visualization."""
 
     # Calculate statistics
@@ -173,7 +173,7 @@ def _generate_trajectory_html(out_rows: list[EvalsOutRow]) -> str:
     return _render_html_template(stats, trajectories)
 
 
-def _render_html_template(stats: dict, _: list[EvalsOutRow]) -> str:
+def _render_html_template(stats: dict, _: list[EvalSample]) -> str:
     """Render the complete HTML template."""
 
     # Load external CSS and JS files
