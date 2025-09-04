@@ -51,7 +51,51 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
 
 GameSelectMode = Literal["zork", "random", "zork_series", "full", "known_good_games"]
 
-KNOWN_GOOD_GAMES = ["zork1.z5", "zork2.z5", "zork3.z5", "Adventureland.z5"]
+KNOWN_GOOD_GAMES = {
+    "library.z5",
+    "pentari 2.z5",
+    "zenon.z5",
+    "Adventureland 2.z5",
+    "gold.z5",
+    "spirit.z5",
+    "Adventureland.z5",
+    "Balances.z5",
+    "deephome.z5",
+    "reverb 2.z5",
+    "Murdac.z5",
+    "zork3.z5",
+    "awaken.z5",
+    "zork2.z5",
+    "enter.z5",
+    "omniquest.z5",
+    "detective 2.z5",
+    "tryst205.z5",
+    "zork1.z5",
+    "Advent 2.z5",
+    "theatre.z5",
+    "Advent.z5",
+    "Balances 2.z5",
+    "pentari.z5",
+    "karn.z5",
+    "detective.z5",
+    "acorncourt 2.z5",
+    "loose 2.z5",
+    "jewel.z5",
+    "inhumane.z5",
+    "jewel 2.z5",
+    "loose.z5",
+    "curses.z5",
+    "ludicorp.z5",
+    "karn 2.z5",
+    "awaken 2.z5",
+    "night.z5",
+    "reverb.z5",
+    "ztuu.z5",
+    "905.z5",
+    "acorncourt.z5",
+    "sherbet.z5",
+    "temple.z5",
+}
 
 
 class ZorkDataset(MinRLDataset):
@@ -86,6 +130,8 @@ class ZorkDataset(MinRLDataset):
             selected_games = random.sample(game_files_found, 64)
         elif self.game_select_mode == "full":
             selected_games = game_files_found
+        elif self.game_select_mode == "known_good_games":
+            selected_games = list(KNOWN_GOOD_GAMES)
 
         self.infos = textworld.EnvInfos(
             feedback=True,
