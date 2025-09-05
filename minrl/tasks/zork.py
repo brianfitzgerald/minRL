@@ -52,49 +52,49 @@ def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> floa
 GameSelectMode = Literal["zork", "random", "zork_series", "full", "known_good_games"]
 
 KNOWN_GOOD_GAMES = {
-    "library.z5",
-    "pentari 2.z5",
+    "zork1.z5",
+    "zork3.z5",
+    "ztuu.z5",
+    "temple.z5",
+    "905.z5",
+    "omniquest.z5",
+    "jewel 2.z5",
+    "awaken 2.z5",
+    "Advent.z5",
     "zenon.z5",
-    "Adventureland 2.z5",
-    "gold.z5",
-    "spirit.z5",
-    "Adventureland.z5",
     "Balances.z5",
+    "Murdac.z5",
+    "reverb.z5",
+    "awaken.z5",
+    "spirit.z5",
+    "Balances 2.z5",
+    "pentari 2.z5",
+    "karn 2.z5",
+    "library.z5",
+    "loose 2.z5",
+    "tryst205.z5",
     "deephome.z5",
     "reverb 2.z5",
-    "Murdac.z5",
-    "zork3.z5",
-    "awaken.z5",
-    "zork2.z5",
-    "enter.z5",
-    "omniquest.z5",
     "detective 2.z5",
-    "tryst205.z5",
-    "zork1.z5",
-    "Advent 2.z5",
-    "theatre.z5",
-    "Advent.z5",
-    "Balances 2.z5",
-    "pentari.z5",
-    "karn.z5",
-    "detective.z5",
-    "acorncourt 2.z5",
-    "loose 2.z5",
-    "jewel.z5",
-    "inhumane.z5",
-    "jewel 2.z5",
-    "loose.z5",
-    "curses.z5",
-    "ludicorp.z5",
-    "karn 2.z5",
-    "awaken 2.z5",
-    "night.z5",
-    "reverb.z5",
-    "ztuu.z5",
-    "905.z5",
+    "gold.z5",
     "acorncourt.z5",
+    "enter.z5",
+    "theatre.z5",
+    "curses.z5",
+    "Adventureland 2.z5",
+    "zork2.z5",
+    "Advent 2.z5",
+    "jewel.z5",
     "sherbet.z5",
-    "temple.z5",
+    "karn.z5",
+    "inhumane.z5",
+    "acorncourt 2.z5",
+    "loose.z5",
+    "night.z5",
+    "pentari.z5",
+    "Adventureland.z5",
+    "detective.z5",
+    "ludicorp.z5",
 }
 
 
@@ -115,7 +115,7 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
 
-        self.game_select_mode: GameSelectMode = "random"
+        self.game_select_mode: GameSelectMode = "known_good_games"
         self.samples_per_game = 1
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
@@ -217,11 +217,6 @@ class ZorkDataset(MinRLDataset):
             return "", True
 
         obs, score, done, infos = env.step(action)  # type: ignore
-
-        all_infos_str = "\n".join([f"{k}," for k, v in infos.items() if v is not None])
-        logger.info(
-            f"All infos for game {self.sample_games[sample_index]}: {all_infos_str}"
-        )
 
         obs = clean_observation(obs)
 

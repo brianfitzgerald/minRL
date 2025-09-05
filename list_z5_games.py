@@ -47,12 +47,13 @@ def main():
 
     for game_file in sorted(game_files):
         game_path = games_directory / game_file
-        print(f"\n--- {game_file} ---")
-
+        print(f"Processing {game_file}")
         try:
             # Register and create the game environment
             # segfaults
-            if "SameGame.z5" in game_file or "ZTornado.z5" in game_file:
+            if any(
+                [k in game_file for k in ("SameGame.z5", "ZTornado.z5", "coloromc.z5")]
+            ):
                 continue
             env_id = textworld.gym.register_game(game_path.as_posix(), infos)
             env = textworld.gym.make(env_id)
@@ -61,21 +62,16 @@ def main():
             obs, info = env.reset()
 
             # Print all available information
-            print("Available Info Keys:")
-            for key, value in info.items():
-                if value is not None and key not in (
-                    "feedback",
-                    "description",
-                    "inventory",
-                ):
-                    if isinstance(value, str):
-                        display_value = (
-                            value[:100] + "..." if len(value) > 100 else value
-                        )
-                    else:
-                        display_value = str(value)
-                    print(f"  {key}: {display_value}")
-                    good.add(game_file)
+            valid_keys = [
+                k
+                for k in info.keys()
+                if k not in ("feedback", "description", "inventory")
+                and info[k] is not None
+            ]
+            print(f"{game_file}: {valid_keys}")
+            if any([k in valid_keys for k in ("score", "moves", "max_score")]):
+                print(f"Adding {game_file} to good games, keys: {valid_keys}")
+                good.add(game_file)
 
             # Try a simple action to see what happens
             try:
@@ -88,7 +84,6 @@ def main():
         except Exception as e:
             print(f"Error loading game {game_file}: {e}")
 
-        print("-" * 30)
     print(f"Good games: {good}")
 
 
