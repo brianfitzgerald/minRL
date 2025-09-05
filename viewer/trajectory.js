@@ -35,6 +35,19 @@ function buildTrajectoryHTML(index, row) {
             stepHtml += `<div class="observation"><strong>Reasoning:</strong><br><pre>${message.reasoning}</pre></div>`;
         }
 
+        if (message.step_metadata) {
+            const metadata = message.step_metadata;
+            let metadataHtml = '<div class="metadata"><strong>Step Metadata:</strong><br>';
+            metadataHtml += `<div class="metadata-item"><strong>Score:</strong> ${metadata.score}</div>`;
+            metadataHtml += `<div class="metadata-item"><strong>Moves:</strong> ${metadata.moves}</div>`;
+            metadataHtml += `<div class="metadata-item"><strong>Location:</strong> ${metadata.location}</div>`;
+            if (metadata.inventory && metadata.inventory.length > 0) {
+                metadataHtml += `<div class="metadata-item"><strong>Inventory:</strong> ${metadata.inventory.join(', ')}</div>`;
+            }
+            metadataHtml += '</div>';
+            stepHtml += metadataHtml;
+        }
+
         stepsHtml += `<div class="step">${stepHtml}</div>`;
     }
 

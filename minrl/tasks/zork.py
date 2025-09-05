@@ -1,6 +1,12 @@
 from pathlib import Path
 from loguru import logger
-from minrl.constants import Conversation, HostType, Sample
+from minrl.constants import (
+    Conversation,
+    ConversationMessage,
+    HostType,
+    Sample,
+    StepMetadata,
+)
 from minrl.tasks.dataset import MinRLDataset, Split
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import textworld
@@ -158,7 +164,10 @@ class ZorkDataset(MinRLDataset):
             else:
                 logger.warning(f"Game file not found: {game_path}")
 
+        # map of sample index to environment
         self.envs: dict[int, TextworldGymEnv] = {}
+        # max score for each game ID
+        self.max_scores: dict[str, int] = {}
         self.sample_games: dict[int, str] = {}  # Track which game each sample uses
 
     def format_conversation(self, conversation: Conversation) -> Conversation:
@@ -179,6 +188,8 @@ class ZorkDataset(MinRLDataset):
         self.envs[sample_index] = env
         self.sample_games[sample_index] = selected_game
         obs, info = env.reset()
+
+        self.max_scores[selected_game] = info["max_score"]
 
         # Initialize conversation with system prompt and first observation
         conversation: Conversation = [
@@ -201,7 +212,7 @@ class ZorkDataset(MinRLDataset):
 
     def step(
         self, sample_index: int, conversation: Conversation
-    ) -> tuple[str, bool, dict]:
+    ) -> tuple[ConversationMessage, bool]:
         """
         After rollout, update any state needed for the next rollout.
         Returns whether the episode is done and step metadata.
@@ -214,7 +225,7 @@ class ZorkDataset(MinRLDataset):
             action = parse_command(last_msg)
         except Exception as e:
             logger.error(f"Error parsing command from {last_msg}: {e}")
-            return "", True, {}
+            return {"role": "user", "content": last_msg}, True
 
         obs, score, done, infos = env.step(action)  # type: ignore
 
@@ -222,6 +233,13 @@ class ZorkDataset(MinRLDataset):
 
         inventory = infos["inventory"]
         user_content = obs
+        step_metadata: StepMetadata = {
+            "observation": obs,
+            "inventory": inventory,
+            "score": score,  # pyright: ignore[reportAssignmentType]
+            "moves": infos["moves"],
+            "location": infos["location"],
+        }
 
         if not done:
             # Add the new observation as a user message
@@ -238,5 +256,10 @@ class ZorkDataset(MinRLDataset):
             )
             del self.envs[sample_index]
             del self.sample_games[sample_index]
+            del self.max_scores[game_name]
 
-        return user_content, done, infos
+        return {
+            "role": "user",
+            "content": user_content,
+            "step_metadata": step_metadata,
+        }, done

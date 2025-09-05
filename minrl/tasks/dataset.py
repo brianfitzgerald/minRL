@@ -4,7 +4,12 @@ from typing import Literal
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.constants import Conversation, HostType, Sample, StepMetadata
+from minrl.constants import (
+    Conversation,
+    ConversationMessage,
+    HostType,
+    Sample,
+)
 
 
 Split = Literal["train", "test", "eval"]
@@ -15,7 +20,6 @@ EpisodeStatus = Literal["finished", "terminated"]
 class MinRLDataset(Dataset):
     """
     Base class for all datasets.
-    Each dataset has a step wise inference function and a max number of steps.
     """
 
     max_steps: int = 1
@@ -41,9 +45,9 @@ class MinRLDataset(Dataset):
     @abstractmethod
     def step(
         self, sample_index: int, conversation: Conversation
-    ) -> tuple[str, bool, StepMetadata]:
+    ) -> tuple[ConversationMessage, bool]:
         """
         After each turn, get the next state of the environment based on the model response.
         Returns (obs, done)
         """
-        raise NotImplementedError("post_generation is not implemented")
+        raise NotImplementedError("step is not implemented")

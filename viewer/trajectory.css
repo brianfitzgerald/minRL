@@ -111,3 +111,17 @@ pre {
 .trajectory-content {
     padding: 15px;
 }
+
+.metadata {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 5px 0;
+    font-size: 13px;
+}
+
+.metadata-item {
+    margin: 3px 0;
+    color: #495057;
+}

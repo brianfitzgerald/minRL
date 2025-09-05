@@ -63,10 +63,20 @@ async def _openrouter_request(
             return await response.json()
 
 
+def _sanitize_conversation(conversation: Conversation) -> Conversation:
+    return [
+        {
+            "role": message["role"],
+            "content": message["content"],
+        }
+        for message in conversation
+    ]
+
+
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
-    batch_size: int = 8,
+    batch_size: int = 4,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
@@ -146,12 +156,14 @@ async def main(
             for i, (sample, row) in enumerate(zip(batch, batch_out)):
                 if row["status"] == "done":
                     continue
-
+            conversation_batch_for_inference = [
+                _sanitize_conversation(conv) for conv in conversation_batch
+            ]
             if model_type in ("finetuned", "huggingface"):
                 sampling_params = SamplingParams(max_tokens=dataset.max_tokens)
                 assert vllm_model is not None, "VLLM model is not initialized"
                 responses = vllm_model.chat(
-                    conversation_batch,  # type: ignore
+                    conversation_batch_for_inference,  # type: ignore
                     sampling_params=sampling_params,
                 )
             elif model_type == "openai":
@@ -162,7 +174,7 @@ async def main(
                             model=model["model_id"],
                             messages=conv,  # type: ignore
                         )
-                        for conv in conversation_batch
+                        for conv in conversation_batch_for_inference
                     ]
                 )
             elif model_type == "openrouter":
@@ -170,7 +182,7 @@ async def main(
                 responses = await asyncio.gather(
                     *[
                         _openrouter_request(model["model_id"], conv, api_key, "medium")  # type: ignore
-                        for conv in conversation_batch
+                        for conv in conversation_batch_for_inference
                     ]
                 )
             else:
@@ -206,7 +218,7 @@ async def main(
                     }
                 )
 
-                obs, done, step_metadata = dataset.step(i, conversation_batch[i])
+                message, done = dataset.step(i, conversation_batch[i])
 
                 # if batch is done, save results and reset conversation
                 if done and row["status"] == "running":
@@ -215,13 +227,7 @@ async def main(
                     all_out.append(batch_out[i])
                     _save_results(all_out, task, model_name)
 
-                conversation_batch[i].append(
-                    {
-                        "role": "user",
-                        "content": obs,
-                        "step_metadata": step_metadata,  # type: ignore
-                    }
-                )
+                conversation_batch[i].append(message)
 
             all_row_statuses = [
                 "R"
