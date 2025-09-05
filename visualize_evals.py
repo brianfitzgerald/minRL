@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 from minrl.constants import EvalSample, TaskChoice
 import json
 import numpy as np
-import shutil
 
 from minrl.utils import clean_observation
 
@@ -63,7 +62,7 @@ def eval_single_step(task: TaskChoice = "connections"):
 
 
 def render_zork_trajectories():
-    """Function to render trajectories of the zork task."""
+    """Function to convert zork trajectories from parquet to JavaScript."""
     eval_results_path = Path(
         "eval_results/zork/eval_gemini_2.5_flash_20250905_113525.parquet"
     )
@@ -76,39 +75,16 @@ def render_zork_trajectories():
         out_row: EvalSample = row.to_dict()  # type: ignore
         out_rows.append(out_row)
 
-    html_content = _generate_trajectory_html(out_rows)
+    output_dir = Path("eval_results/zork")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    output_path = Path("eval_results/zork/trajectories.html")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Only write trajectory data as JavaScript file
+    _write_trajectory_data_js(out_rows, output_dir)
 
-    # Copy viewer files to the output directory
-    viewer_dir = output_path.parent / "viewer"
-    viewer_dir.mkdir(exist_ok=True)
-
-    # Copy CSS file
-    css_source = Path("viewer/trajectory.css")
-    css_dest = viewer_dir / "trajectory.css"
-    if css_source.exists():
-        shutil.copy2(css_source, css_dest)
-        logger.info(f"Copied CSS file to {css_dest}")
-
-    # Copy JS file
-    js_source = Path("viewer/trajectory.js")
-    js_dest = viewer_dir / "trajectory.js"
-    if js_source.exists():
-        shutil.copy2(js_source, js_dest)
-        logger.info(f"Copied JavaScript file to {js_dest}")
-
-    # Write trajectory data as separate JS file
-    _write_trajectory_data_js(out_rows, viewer_dir)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    logger.info(f"HTML trajectory visualization saved to {output_path}")
+    logger.info(f"Trajectory data converted to JavaScript in {output_dir}")
 
 
-def _write_trajectory_data_js(out_rows: list[EvalSample], viewer_dir: Path):
+def _write_trajectory_data_js(out_rows: list[EvalSample], output_dir: Path):
     """Write trajectory data as a separate JavaScript file."""
 
     # Convert trajectories to JavaScript data, properly handling numpy arrays
@@ -132,7 +108,7 @@ def _write_trajectory_data_js(out_rows: list[EvalSample], viewer_dir: Path):
     trajectories_json = json.dumps(converted_trajectories, indent=2)
 
     # Write the data as a JS file
-    js_data_path = viewer_dir / "trajectory_data.js"
+    js_data_path = output_dir / "trajectory_data.js"
     with open(js_data_path, "w", encoding="utf-8") as f:
         f.write("// Trajectory data loaded from parquet file\n")
         f.write(f"trajectoryData = {trajectories_json};\n")
@@ -142,91 +118,6 @@ def _write_trajectory_data_js(out_rows: list[EvalSample], viewer_dir: Path):
         f.write("}\n")
 
     logger.info(f"Trajectory data saved to {js_data_path}")
-
-
-def _generate_trajectory_html(out_rows: list[EvalSample]) -> str:
-    """Generate HTML content for trajectory visualization."""
-
-    # Calculate statistics
-    if not out_rows:
-        stats = {
-            "total_trajectories": 0,
-            "done_count": 0,
-            "error_count": 0,
-            "avg_steps": 0,
-        }
-        trajectories = []
-    else:
-        done_count = sum(1 for row in out_rows if row["status"] == "done")
-        error_count = sum(1 for row in out_rows if row["status"] == "error")
-        total_steps = sum(len(row["conversation"]) for row in out_rows)
-        avg_steps = total_steps / len(out_rows) if out_rows else 0
-
-        stats = {
-            "total_trajectories": len(out_rows),
-            "done_count": done_count,
-            "error_count": error_count,
-            "avg_steps": avg_steps,
-        }
-
-        # Store raw data for JavaScript rendering instead of pre-building all trajectories
-        trajectories = out_rows
-
-    return _render_html_template(stats, trajectories)
-
-
-def _render_html_template(stats: dict, _: list[EvalSample]) -> str:
-    """Render the complete HTML template."""
-
-    # Load external CSS and JS files
-    css_path = Path("viewer/trajectory.css")
-    js_path = Path("viewer/trajectory.js")
-    template_path = Path("viewer/trajectory_template.html")
-
-    if not css_path.exists():
-        logger.error(f"CSS file not found: {css_path}")
-        return "<html><body><h1>Error: CSS file not found</h1></body></html>"
-
-    if not js_path.exists():
-        logger.error(f"JavaScript file not found: {js_path}")
-        return "<html><body><h1>Error: JavaScript file not found</h1></body></html>"
-
-    if not template_path.exists():
-        logger.error(f"HTML template file not found: {template_path}")
-        return "<html><body><h1>Error: HTML template file not found</h1></body></html>"
-
-    # Read the template file
-    with open(template_path, "r", encoding="utf-8") as f:
-        html_template = f.read()
-
-    # Update stats in the template
-    html_content = html_template.replace(
-        '<strong id="total-trajectories">0</strong>',
-        f'<strong id="total-trajectories">{stats["total_trajectories"]}</strong>',
-    )
-    html_content = html_content.replace(
-        '<strong id="done-count">0</strong>',
-        f'<strong id="done-count">{stats["done_count"]}</strong>',
-    )
-    html_content = html_content.replace(
-        '<strong id="error-count">0</strong>',
-        f'<strong id="error-count">{stats["error_count"]}</strong>',
-    )
-    html_content = html_content.replace(
-        '<strong id="avg-steps">0.0</strong>',
-        f'<strong id="avg-steps">{stats["avg_steps"]:.1f}</strong>',
-    )
-
-    # Replace the inline script with a reference to the external data file
-    script_content = """
-        // Trajectory data will be loaded from trajectory_data.js
-    """
-    html_content = html_content.replace(
-        "// This script will be replaced with actual data by Python\n        // The trajectoryData will be set here",
-        script_content,
-    )
-
-    return html_content
 
 
 def main(task: TaskChoice = "connections"):
