@@ -64,7 +64,9 @@ def eval_single_step(task: TaskChoice = "connections"):
 
 def render_zork_trajectories():
     """Function to render trajectories of the zork task."""
-    eval_results_path = Path("eval_results/zork/eval_gemini_2.5_flash.parquet")
+    eval_results_path = Path(
+        "eval_results/zork/eval_gemini_2.5_flash_20250905_113525.parquet"
+    )
     if not eval_results_path.exists():
         logger.error(f"Error: {eval_results_path} folder not found")
         return

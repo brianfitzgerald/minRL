@@ -76,7 +76,7 @@ def _sanitize_conversation(conversation: Conversation) -> Conversation:
 async def main(
     task: TaskChoice = "zork",
     model_name: ModelName = "gemini_2.5_flash",
-    batch_size: int = 4,
+    batch_size: int = 8,
 ):
     dataset_cls = TASK_DATASETS[task]["dataset"]
     dataset = dataset_cls(split="eval", host="local")
@@ -225,7 +225,7 @@ async def main(
                     batch_out[i]["status"] = "done"
                     batch_out[i]["conversation"] = conversation_batch[i]
                     all_out.append(batch_out[i])
-                    _save_results(all_out, task, model_name)
+                    _save_results(batch_out, task, model_name)
 
                 conversation_batch[i].append(message)
 

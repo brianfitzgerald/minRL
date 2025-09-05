@@ -42,7 +42,8 @@ function buildTrajectoryHTML(index, row) {
             metadataHtml += `<div class="metadata-item"><strong>Moves:</strong> ${metadata.moves}</div>`;
             metadataHtml += `<div class="metadata-item"><strong>Location:</strong> ${metadata.location}</div>`;
             if (metadata.inventory && metadata.inventory.length > 0) {
-                metadataHtml += `<div class="metadata-item"><strong>Inventory:</strong> ${metadata.inventory.join(', ')}</div>`;
+                const inventoryArray = Array.isArray(metadata.inventory) ? metadata.inventory : [metadata.inventory];
+                metadataHtml += `<div class="metadata-item"><strong>Inventory:</strong> ${inventoryArray.join(', ')}</div>`;
             }
             metadataHtml += '</div>';
             stepHtml += metadataHtml;

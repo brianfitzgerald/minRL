@@ -238,7 +238,7 @@ class ZorkDataset(MinRLDataset):
             "inventory": inventory,
             "score": score,  # pyright: ignore[reportAssignmentType]
             "moves": infos["moves"],
-            "location": infos["location"],
+            "location": infos["location"].name if infos["location"] else "",
         }
 
         if not done:
