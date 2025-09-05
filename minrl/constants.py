@@ -65,6 +65,7 @@ class EvalSample(TypedDict):
     conversation: Conversation
     status: EvalSampleStatus
     game: NotRequired[str]
+    sample_run: NotRequired[int]
 
 
 class EvalModel(TypedDict):
