@@ -29,11 +29,15 @@ function buildTrajectoryHTML(index, row) {
             bgClass = 'response';
         }
 
-        let stepHtml = `<div class="${bgClass}"><strong>${role.charAt(0).toUpperCase() + role.slice(1)}:</strong><br><pre>${content}</pre></div>`;
+        let stepHTML = '';
 
+        // Display reasoning first if available (typically for assistant messages)
         if (message.reasoning) {
-            stepHtml += `<div class="observation"><strong>Reasoning:</strong><br><pre>${message.reasoning}</pre></div>`;
+            stepHTML += `<div class="observation"><strong>Reasoning:</strong><br><pre>${message.reasoning}</pre></div>`;
         }
+
+        // Then display the main message content
+        stepHTML += `<div class="${bgClass}"><strong>${role.charAt(0).toUpperCase() + role.slice(1)}:</strong><br><pre>${content}</pre></div>`;
 
         if (message.step_metadata) {
             const metadata = message.step_metadata;
@@ -46,10 +50,10 @@ function buildTrajectoryHTML(index, row) {
                 metadataHtml += `<div class="metadata-item"><strong>Inventory:</strong> ${inventoryArray.join(', ')}</div>`;
             }
             metadataHtml += '</div>';
-            stepHtml += metadataHtml;
+            stepHTML += metadataHtml;
         }
 
-        stepsHtml += `<div class="step">${stepHtml}</div>`;
+        stepsHtml += `<div class="step">${stepHTML}</div>`;
     }
 
     return `

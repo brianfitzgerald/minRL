@@ -36,7 +36,7 @@ load_dotenv(".env")
 def _save_results(out_rows: list[EvalSample], task: TaskChoice, model_name: ModelName):
     out_rows = [row for row in out_rows if row["status"] == "done"]
     df = pd.DataFrame(out_rows)
-    timestamp_short_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp_short_str = datetime.now().strftime("%m%d")
     file_path = f"eval_results/{task}/eval_{model_name}_{timestamp_short_str}.parquet"
     if not Path(file_path).parent.exists():
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)

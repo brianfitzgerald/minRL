@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="UTF-8">
     <title>Zork Trajectories</title>
@@ -7,27 +8,22 @@
     <script src="trajectory.js"></script>
     <script src="../eval_results/zork/trajectory_data.js"></script>
 </head>
+
 <body>
     <h1>Zork Trajectories</h1>
-    
-    <div class="stats">
-        <div class="stat"><strong id="total-trajectories">0</strong><br>Total</div>
-        <div class="stat"><strong id="done-count">0</strong><br>Done</div>
-        <div class="stat"><strong id="error-count">0</strong><br>Errors</div>
-        <div class="stat"><strong id="avg-steps">0.0</strong><br>Avg Steps</div>
-    </div>
-    
+
     <div class="navigation">
         <button id="prev-button" class="nav-button" onclick="previousTrajectory()">← Previous</button>
         <span id="trajectory-info" class="trajectory-info">Loading...</span>
         <button id="next-button" class="nav-button" onclick="nextTrajectory()">Next →</button>
     </div>
-    
+
     <div id="trajectory-container" class="trajectory"></div>
-    
+
     <script>
         // This script will be replaced with actual data by Python
         // The trajectoryData will be set here
     </script>
 </body>
+
 </html>
