@@ -5,7 +5,13 @@ from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, Typ
 class StepMetadata(TypedDict):
     observation: str
     inventory: list[str]
-    reward: float
+    score: NotRequired[int | None]
+    max_score: NotRequired[int | None]
+    moves: NotRequired[int | None]
+    location: NotRequired[str | None]
+    description: NotRequired[str | None]
+    entities: NotRequired[list[str] | None]
+    facts: NotRequired[list[str] | None]
 
 
 class ConversationMessage(TypedDict, total=False):

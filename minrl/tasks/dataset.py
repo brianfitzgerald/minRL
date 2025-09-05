@@ -4,7 +4,7 @@ from typing import Literal
 from torch.utils.data import Dataset
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-from minrl.constants import Conversation, HostType, Sample
+from minrl.constants import Conversation, HostType, Sample, StepMetadata
 
 
 Split = Literal["train", "test", "eval"]
@@ -39,9 +39,9 @@ class MinRLDataset(Dataset):
         raise NotImplementedError("format_initial_conversation is not implemented")
 
     @abstractmethod
-    def get_next_state(
+    def step(
         self, sample_index: int, conversation: Conversation
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, StepMetadata]:
         """
         After each turn, get the next state of the environment based on the model response.
         Returns (obs, done)

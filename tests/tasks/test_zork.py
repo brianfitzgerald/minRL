@@ -46,9 +46,15 @@ def test_zork_dataset(
     assert "Initial observation" in initial_conv[1]["content"]
 
     # Test get_next_state
-    obs, done = dataset.get_next_state(0, "<command>go east</command>")
-    assert obs == "Next observation"
+    obs, done, step_metadata = dataset.step(
+        0, [{"role": "assistant", "content": "<command>go east</command>"}]
+    )
+    assert "Next observation" in obs
+    assert "Inventory: a sword" in obs
     assert done is False
+    assert isinstance(step_metadata, dict)
+    assert "observation" in step_metadata
+    assert step_metadata["inventory"] == ["a sword"]
 
     # Test __len__
-    assert len(dataset) == 1000
+    assert len(dataset) == 43  # Number of known good games

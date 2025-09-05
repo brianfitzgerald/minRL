@@ -199,12 +199,12 @@ class ZorkDataset(MinRLDataset):
     def __len__(self) -> int:
         return len(self.env_ids) * self.samples_per_game
 
-    def get_next_state(
+    def step(
         self, sample_index: int, conversation: Conversation
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, dict]:
         """
         After rollout, update any state needed for the next rollout.
-        Returns whether the episode is done.
+        Returns whether the episode is done and step metadata.
         """
         env: TextworldGymEnv = self.envs[sample_index]
 
@@ -214,7 +214,7 @@ class ZorkDataset(MinRLDataset):
             action = parse_command(last_msg)
         except Exception as e:
             logger.error(f"Error parsing command from {last_msg}: {e}")
-            return "", True
+            return "", True, {}
 
         obs, score, done, infos = env.step(action)  # type: ignore
 
@@ -239,4 +239,4 @@ class ZorkDataset(MinRLDataset):
             del self.envs[sample_index]
             del self.sample_games[sample_index]
 
-        return user_content, done
+        return user_content, done, infos

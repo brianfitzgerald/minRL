@@ -206,7 +206,7 @@ async def main(
                     }
                 )
 
-                obs, done = dataset.get_next_state(i, conversation_batch[i])
+                obs, done, step_metadata = dataset.step(i, conversation_batch[i])
 
                 # if batch is done, save results and reset conversation
                 if done and row["status"] == "running":
@@ -219,6 +219,7 @@ async def main(
                     {
                         "role": "user",
                         "content": obs,
+                        "step_metadata": step_metadata,  # type: ignore
                     }
                 )
 
