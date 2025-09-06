@@ -121,8 +121,8 @@ class ZorkDataset(MinRLDataset):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
 
-        self.game_select_mode: GameSelectMode = "known_good_games"
-        self.samples_per_game = 1
+        self.game_select_mode: GameSelectMode = "zork_series"
+        self.samples_per_game = 4
 
         games_directory = Path(os.getenv("INFORM_GAMES_DIRECTORY", ""))
         game_files_found = os.listdir(games_directory)

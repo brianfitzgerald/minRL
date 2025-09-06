@@ -3,7 +3,7 @@ from datetime import datetime
 import random
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import aiohttp
 import fire
@@ -34,14 +34,26 @@ Evaluate against any task in the minrl.tasks module.
 load_dotenv(".env")
 
 
-def _save_results(out_rows: list[EvalSample], task: TaskChoice, model_name: str):
-    out_rows = [row for row in out_rows if row["status"] == "done"]
-    df = pd.DataFrame(out_rows)
-    timestamp_short_str = datetime.now().strftime("%m%d")
-    file_path = f"eval_results/{task}/eval_{model_name}_{timestamp_short_str}.parquet"
+def _save_all_results(all_outs: dict[ModelName, list[EvalSample]], task: TaskChoice):
+    """Save all results from all models in a single parquet file."""
+    # Collect all results from all models
+    all_rows = []
+    for _, out_rows in all_outs.items():
+        # Include both done and error samples for analysis
+        valid_rows = [row for row in out_rows if row["status"] in ["done", "error"]]
+        all_rows.extend(valid_rows)
+
+    if not all_rows:
+        logger.info("No results to save")
+        return
+
+    df = pd.DataFrame(all_rows)
+    # Use MMDDHHMM format for timestamp (month day hour minute)
+    timestamp_str = datetime.now().strftime("%m%d%H%M")
+    file_path = f"eval_results/{task}/eval_all_models_{timestamp_str}.parquet"
     if not Path(file_path).parent.exists():
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saved results to {file_path}")
+    logger.info(f"Saved all results to {file_path}")
     df.to_parquet(file_path)
 
 
@@ -77,8 +89,7 @@ def _sanitize_conversation(conversation: Conversation) -> Conversation:
 async def main(
     task: TaskChoice = "zork",
     model_names: list[ModelName] | None = None,
-    model_name: ModelName | None = None,
-    batch_size: int = 8,
+    batch_size: int = 4,
 ):
     """Run evaluation for one or more models in a single batched loop.
 
@@ -86,11 +97,7 @@ async def main(
     """
     # Resolve models list
     if model_names is None:
-        if model_name is not None:
-            model_names = [model_name]
-        else:
-            DEFAULT_MODEL: ModelName = "gemini_2.5_flash"
-            model_names = [DEFAULT_MODEL]
+        model_names = ["gemini_2.5_flash", "magistral_medium", "gpt-4.1-mini"]
 
     # Validate models
     for m in model_names:
@@ -99,14 +106,12 @@ async def main(
 
     dataset_cls = TASK_DATASETS[task]["dataset"]
 
-    model_names_str: list[str] = [str(m) for m in model_names]
-
-    datasets: dict[str, MinRLDataset] = {
-        m: dataset_cls(split="eval", host="local") for m in model_names_str
+    datasets: dict[ModelName, MinRLDataset] = {
+        m: dataset_cls(split="eval", host="local") for m in model_names
     }
 
     # Use the first dataset instance to drive batching
-    reference_dataset = datasets[model_names_str[0]]
+    reference_dataset = datasets[model_names[0]]
     loader = DataLoader(
         reference_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x
     )
@@ -114,15 +119,15 @@ async def main(
     random.seed(42)
 
     # Initialize backends per model
-    vllm_models: dict[str, LLM] = {}
-    openai_clients: dict[str, AsyncOpenAI] = {}
+    vllm_models: dict[ModelName, LLM] = {}
+    openai_clients: dict[ModelName, AsyncOpenAI] = {}
     openrouter_keys: dict[str, str] = {}
 
-    model_types: dict[str, str] = {}
-    model_cfgs = {m: INFERENCE_MODELS[cast(ModelName, m)] for m in model_names_str}
+    model_types: dict[ModelName, str] = {}
+    model_cfgs = {m: INFERENCE_MODELS[cast(ModelName, m)] for m in model_names}
 
     for m, cfg in model_cfgs.items():
-        model_types[m] = cfg["type"]
+        model_types[cast(ModelName, m)] = cfg["type"]
         if cfg["type"] in ["finetuned", "huggingface"]:
             tokenizer_model_id = cfg["model_id"]
             if cfg["type"] == "finetuned":
@@ -139,7 +144,7 @@ async def main(
                     download_checkpoint_from_modal(cfg["model_id"])
             else:
                 model_path = cfg["model_id"]
-            vllm_models[m] = LLM(
+            vllm_models[cast(ModelName, m)] = LLM(
                 model=model_path,
                 tokenizer=tokenizer_model_id,
                 device="cuda",
@@ -148,7 +153,9 @@ async def main(
                 enforce_eager=True,
             )
         elif cfg["type"] == "openai":
-            openai_clients[m] = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            openai_clients[cast(ModelName, m)] = AsyncOpenAI(
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
         elif cfg["type"] == "openrouter":
             key = os.getenv("OPENROUTER_API_KEY")
             if not key:
@@ -160,11 +167,11 @@ async def main(
     os.makedirs("eval_results", exist_ok=True)
 
     # Accumulate outputs per model
-    all_outs: dict[str, list[EvalSample]] = {m: [] for m in model_names_str}
+    all_outs: dict[ModelName, list[EvalSample]] = {m: [] for m in model_names}
 
     for batch_index, batch in enumerate(tqdm(loader)):
         # Per-model tracking structures for this batch
-        batch_outs: dict[str, list[EvalSample]] = {
+        batch_outs: dict[ModelName, list[EvalSample]] = {
             m: [
                 {
                     "model": m,
@@ -174,16 +181,16 @@ async def main(
                 }
                 for _ in batch
             ]
-            for m in model_names_str
+            for m in model_names
         }
 
-        conversation_batches: dict[str, list[Conversation]] = {
-            m: [] for m in model_names_str
+        conversation_batches: dict[ModelName, list[Conversation]] = {
+            m: [] for m in model_names
         }
 
         # Initialize conversations per model and capture game names (e.g., for zork)
         for local_idx, sample in enumerate(batch):
-            for m in model_names_str:
+            for m in model_names:
                 ds = datasets[m]
                 conv = ds.initial_conversation(sample, local_idx)
                 conversation_batches[m].append(conv)
@@ -198,15 +205,15 @@ async def main(
         while True:
             model_done_flags = {
                 m: all(row["status"] == "done" for row in batch_outs[m])
-                for m in model_names_str
+                for m in model_names
             }
             if all(model_done_flags.values()):
                 break
 
             # Build and run inference tasks for all not-done models concurrently
-            async def _infer_for_model(m: str):
+            async def _infer_for_model(m: ModelName):
                 cfg = model_cfgs[m]
-                mtype = model_types[m]
+                model_type = model_types[m]
                 ds = datasets[m]
                 # Only run for rows that are still running
                 run_indices = [
@@ -220,38 +227,48 @@ async def main(
                     _sanitize_conversation(conversation_batches[m][i])
                     for i in run_indices
                 ]
-                if mtype in ("finetuned", "huggingface"):
-                    sampling_params = SamplingParams(max_tokens=ds.max_tokens)
-                    vllm = vllm_models[m]
-                    # Run sync vLLM call in a thread to avoid blocking
-                    responses = await asyncio.to_thread(
-                        lambda: vllm.chat(convs, sampling_params=sampling_params)  # type: ignore
-                    )
-                elif mtype == "openai":
-                    client = openai_clients[m]
-                    responses = await asyncio.gather(
-                        *[
-                            client.chat.completions.create(
-                                model=cfg["model_id"],
-                                messages=conv,  # type: ignore
-                            )
-                            for conv in convs
-                        ]
-                    )
-                elif mtype == "openrouter":
-                    key = openrouter_keys[m]
-                    responses = await asyncio.gather(
-                        *[
-                            _openrouter_request(cfg["model_id"], conv, key, "medium")  # type: ignore
-                            for conv in convs
-                        ]
-                    )
-                else:
-                    raise ValueError(f"Invalid model type: {mtype}")
+                try:
+                    if model_type in ("finetuned", "huggingface"):
+                        sampling_params = SamplingParams(max_tokens=ds.max_tokens)
+                        vllm = vllm_models[m]
+                        # Run sync vLLM call in a thread to avoid blocking
+                        responses = await asyncio.to_thread(
+                            lambda: vllm.chat(convs, sampling_params=sampling_params)  # type: ignore
+                        )
+                    elif model_type == "openai":
+                        client = openai_clients[m]
+                        responses = await asyncio.gather(
+                            *[
+                                client.chat.completions.create(
+                                    model=cfg["model_id"],
+                                    messages=conv,  # type: ignore
+                                )
+                                for conv in convs
+                            ]
+                        )
+                    elif model_type == "openrouter":
+                        key = openrouter_keys[m]
+                        responses = await asyncio.gather(
+                            *[
+                                _openrouter_request(
+                                    cfg["model_id"],
+                                    conv,  # pyright: ignore[reportArgumentType]
+                                    key,
+                                    "medium",  # pyright: ignore[reportArgumentType]
+                                )  # type: ignore
+                                for conv in convs
+                            ]
+                        )
+                    else:
+                        raise ValueError(f"Invalid model type: {model_type}")
+                except Exception as e:
+                    logger.error(f"Inference failed for model {m}: {e}")
+                    # Return empty responses to mark as failed
+                    responses = []
                 return m, responses, run_indices
 
             inference_tasks = [
-                _infer_for_model(m) for m in model_names_str if not model_done_flags[m]
+                _infer_for_model(m) for m in model_names if not model_done_flags[m]
             ]
             results = await asyncio.gather(*inference_tasks)
 
@@ -267,20 +284,28 @@ async def main(
                         continue
                     reasoning_content = None
                     response_str = ""
-                    if mtype in ["finetuned", "huggingface"]:
-                        assert isinstance(resp, RequestOutput)
-                        response_str = resp.outputs[0].text
-                    elif mtype == "openai":
-                        assert isinstance(resp, ChatCompletion)
-                        response_str = resp.choices[0].message.content
-                    elif mtype == "openrouter":
-                        assert isinstance(resp, dict)
-                        response_str = resp["choices"][0]["message"]["content"]
-                        if "reasoning" in resp["choices"][0]["message"]:
-                            reasoning_content = resp["choices"][0]["message"][
-                                "reasoning"
-                            ]
-                    assert response_str is not None, "No response content"
+                    try:
+                        if mtype in ["finetuned", "huggingface"]:
+                            assert isinstance(resp, RequestOutput)
+                            response_str = resp.outputs[0].text
+                        elif mtype == "openai":
+                            assert isinstance(resp, ChatCompletion)
+                            response_str = resp.choices[0].message.content
+                        elif mtype == "openrouter":
+                            assert isinstance(resp, dict)
+                            response_str = resp["choices"][0]["message"]["content"]
+                            if "reasoning" in resp["choices"][0]["message"]:
+                                reasoning_content = resp["choices"][0]["message"][
+                                    "reasoning"
+                                ]
+                        assert response_str is not None, "No response content"
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to parse response for model {m}, sample {idx}: {e}"
+                        )
+                        # Mark this sample as failed and continue
+                        row["status"] = "error"
+                        continue
 
                     conversation_batches[m][idx].append(
                         {
@@ -290,21 +315,28 @@ async def main(
                         }
                     )
 
-                    message, done = ds.step(idx, conversation_batches[m][idx])
+                    try:
+                        message, done = ds.step(idx, conversation_batches[m][idx])
 
-                    if done and row["status"] == "running":
-                        batch_outs[m][idx]["status"] = "done"
-                        batch_outs[m][idx]["conversation"] = conversation_batches[m][
-                            idx
-                        ]
-                        all_outs[m].append(batch_outs[m][idx])
-                        _save_results(batch_outs[m], task, m)
+                        if done and row["status"] == "running":
+                            batch_outs[m][idx]["status"] = "done"
+                            batch_outs[m][idx]["conversation"] = conversation_batches[
+                                m
+                            ][idx]
+                            all_outs[m].append(batch_outs[m][idx])
+                            _save_all_results(all_outs, task)
 
-                    conversation_batches[m][idx].append(message)
+                        conversation_batches[m][idx].append(message)
+                    except Exception as e:
+                        logger.error(
+                            f"Step processing failed for model {m}, sample {idx}: {e}"
+                        )
+                        # Mark this sample as failed
+                        row["status"] = "error"
 
             # Log compact status per model
             status_str = {}
-            for m in model_names_str:
+            for m in model_names:
                 flags = [
                     "R"
                     if row["status"] == "running"
@@ -316,10 +348,10 @@ async def main(
                 status_str[m] = "".join(flags)
             logger.info(f"Step: {step}, statuses per model: {status_str}")
             step += 1
+        _save_all_results(all_outs, task)
 
-        # Save outputs at end of batch as well
-        for m in model_names_str:
-            _save_results(all_outs[m], task, m)
+    # Save all results from all models in a single file at the end
+    _save_all_results(all_outs, task)
 
 
 if __name__ == "__main__":
