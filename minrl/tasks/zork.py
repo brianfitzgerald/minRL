@@ -45,6 +45,63 @@ class ZorkSample(TypedDict):
     index: int
 
 
+class SampleRewardState:
+    """Encapsulates all reward-related state and logic for a single sample."""
+
+    def __init__(
+        self, initial_location: str, initial_inventory: str, initial_score: int
+    ):
+        # Location tracking
+        self.visited_locations: set[str] = {initial_location}
+
+        # Inventory tracking
+        self.previous_inventory: str = initial_inventory
+        self.inventory_changes: set[str] = {initial_inventory}
+
+        # Score tracking
+        self.previous_score: int = initial_score
+
+        # Turn tracking
+        self.turn_count: int = 0
+
+    def calculate_reward(
+        self, current_location: str, current_inventory: str, current_score: int
+    ) -> float:
+        """Calculate reward based on state changes according to the reward specification."""
+        reward = 0.0
+
+        # 1. Negative per turn reward (-1 point per turn)
+        reward += -1.0
+
+        # 2. New area reward (2 points for discovering new area)
+        if current_location not in self.visited_locations:
+            reward += 2.0
+            self.visited_locations.add(current_location)
+        # 3. Moving around reward (0.5 points for revisiting area)
+        else:
+            reward += 0.5
+
+        # 4. Inventory reward (3 points for new inventory change, 0.5 for repeated)
+        if current_inventory != self.previous_inventory:
+            if current_inventory not in self.inventory_changes:
+                reward += 3.0  # New inventory change
+                self.inventory_changes.add(current_inventory)
+            else:
+                reward += 0.5  # Repeated inventory change
+
+        # 5. In-game score reward (score change * 10)
+        score_change = current_score - self.previous_score
+        if score_change > 0:
+            reward += score_change * 10.0
+
+        # Update state for next step
+        self.previous_inventory = current_inventory
+        self.previous_score = current_score
+        self.turn_count += 1
+
+        return reward
+
+
 def parse_command(input_string: str) -> str:
     input_string = input_string.strip("\n").replace("COMMAND: ", "")
     command_contents = re.findall(r"<command>(.*?)</command>", input_string, re.DOTALL)
@@ -52,6 +109,16 @@ def parse_command(input_string: str) -> str:
 
 
 def zork_reward_func(conversation: Conversation, sample: dict[str, Any]) -> float:
+    """Extract reward from the last conversation message's step metadata."""
+    if not conversation:
+        return 0.0
+
+    last_message = conversation[-1]
+    if "step_metadata" in last_message and last_message["step_metadata"]:
+        metadata = last_message["step_metadata"]
+        if "reward" in metadata:
+            return metadata["reward"]
+
     return 0.0
 
 
@@ -170,6 +237,11 @@ class ZorkDataset(MinRLDataset):
         self.max_scores: dict[str, int] = {}
         self.sample_games: dict[int, str] = {}  # Track which game each sample uses
 
+        # State tracking for reward calculation per sample
+        self.sample_reward_states: dict[
+            int, SampleRewardState
+        ] = {}  # sample_index -> reward state
+
     def format_conversation(self, conversation: Conversation) -> Conversation:
         """Format conversation used for inference"""
         return conversation
@@ -190,6 +262,16 @@ class ZorkDataset(MinRLDataset):
         obs, info = env.reset()
 
         self.max_scores[selected_game] = info["max_score"]
+
+        # Initialize reward tracking state
+        current_location = info["location"].name if info["location"] else "unknown"
+        current_inventory = info["inventory"] or ""
+        current_score = info["score"]
+        self.sample_reward_states[sample_index] = SampleRewardState(
+            initial_location=current_location,
+            initial_inventory=current_inventory,
+            initial_score=current_score,
+        )
 
         # Initialize conversation with system prompt and first observation
         conversation: Conversation = [
@@ -231,14 +313,28 @@ class ZorkDataset(MinRLDataset):
 
         obs = clean_observation(obs)
 
-        inventory = infos["inventory"]
+        inventory: str = infos["inventory"]
+        current_location = infos["location"].name if infos["location"] else ""
+        # Handle score which might be a dict or int
+        if isinstance(score, dict):
+            current_score = score.get("score", 0)
+        else:
+            current_score = int(score)
+
+        # Calculate reward based on state changes
+        reward_state = self.sample_reward_states[sample_index]
+        reward = reward_state.calculate_reward(
+            current_location, inventory, current_score
+        )
+
         user_content = obs
         step_metadata: StepMetadata = {
             "observation": obs,
             "inventory": inventory,
             "score": score,  # pyright: ignore[reportAssignmentType]
             "moves": infos["moves"],
-            "location": infos["location"].name if infos["location"] else "",
+            "location": current_location,
+            "reward": reward,  # Add reward to metadata
         }
 
         if not done:
@@ -257,6 +353,10 @@ class ZorkDataset(MinRLDataset):
             del self.envs[sample_index]
             del self.sample_games[sample_index]
             del self.max_scores[game_name]
+
+            # Clean up reward tracking state
+            if sample_index in self.sample_reward_states:
+                del self.sample_reward_states[sample_index]
 
         return {
             "role": "user",

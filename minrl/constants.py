@@ -4,10 +4,11 @@ from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, Typ
 
 class StepMetadata(TypedDict):
     observation: str
-    inventory: list[str]
+    inventory: str
     score: int
     moves: int
     location: str
+    reward: float
 
 
 class ConversationMessage(TypedDict, total=False):
