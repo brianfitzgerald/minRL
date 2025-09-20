@@ -279,8 +279,6 @@ class ZorkDataset(MinRLDataset):
             {"role": "user", "content": obs},
         ]
 
-        logger.info(f"Started new trajectory {sample_index} with game: {selected_game}")
-
         return conversation
 
     def __getitem__(self, index: int) -> ZorkSample:

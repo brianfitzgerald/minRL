@@ -97,7 +97,7 @@ async def main(
     """
     # Resolve models list
     if model_names is None:
-        model_names = ["gemini_2.5_flash", "magistral_medium", "gpt-4.1-mini"]
+        model_names = [ "magistral_medium", "gpt-4.1-mini"]
 
     # Validate models
     for m in model_names:
