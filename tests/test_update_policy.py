@@ -61,7 +61,6 @@ def test_normalize_rewards_per_group(sample_episodes):
         assert orig.conversation == norm.conversation
 
 
-@pytest.mark.slow
 def test_update_policy_grpo_algorithm(
     vllm_model: LLM,
     hf_model: nn.Module,
