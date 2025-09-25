@@ -12,9 +12,11 @@ import torch.nn as nn
 def vllm_model():
     """Fixture that creates a vLLM model instance once per test session."""
     logger.info("Creating vLLM model")
+    # vLLM only supports CUDA and CPU, not MPS
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = LLM(
         model=SMOL_LM_2_135M,
-        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        device=device,
         enforce_eager=True,
         gpu_memory_utilization=0.2,
     )
@@ -26,9 +28,16 @@ def vllm_model():
 def hf_model() -> nn.Module:
     """Fixture that creates a Hugging Face model instance once per test session."""
     logger.info("Creating Hugging Face model")
+    # Determine device for HF model (can use MPS, unlike vLLM)
+    device = (
+        "cuda:0"
+        if torch.cuda.is_available()
+        else ("mps" if torch.backends.mps.is_available() else "cpu")
+    )
+
     model = AutoModelForCausalLM.from_pretrained(
         SMOL_LM_2_135M,
-        device_map="auto",
+        device_map={"": device},  # Load directly on target device
         torch_dtype=torch.bfloat16,
         attn_implementation=(
             "flash_attention_2" if torch.cuda.is_available() else "sdpa"
@@ -54,4 +63,9 @@ def config():
 @pytest.fixture
 def device():
     """Fixture that provides a device for testing."""
-    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")

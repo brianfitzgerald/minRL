@@ -313,16 +313,21 @@ def update_policy(
         logits: torch.Tensor = model(batch_token_ids_t).logits.float()
 
         # Get the cross entropy loss of the label and generated tokens
+        # Slice logits to match target tokens (exclude first position)
+        next_token_logits = logits[:, :-1]
         logprobs = -torch.nn.functional.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
+            next_token_logits.reshape(-1, next_token_logits.size(-1)),
             target_token_ids.reshape(-1),
             ignore_index=pad_token_id,
             reduction="none",
         ).reshape(batch_token_ids_t.shape[0], -1)
 
         with torch.no_grad():
-            logits = logits.reshape(-1, logits.size(-1))
-            token_entropy = compute_entropy(logits)
+            # Calculate entropy only for target positions
+            next_token_logits_flat = next_token_logits.reshape(
+                -1, next_token_logits.size(-1)
+            )
+            token_entropy = compute_entropy(next_token_logits_flat)
             # single entropy value for the sequence
             entropy = (
                 entropy
