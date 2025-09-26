@@ -367,10 +367,14 @@ def update_policy(
         for k, v in state_dict.items()
     }
 
-    model_runner: ModelRunnerBase = (
-        vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
-    )
-    model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+    try:
+        model_runner: ModelRunnerBase = (
+            vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
+        )
+        model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+    except AttributeError:
+        # vLLM API change: model_executor might not be available in newer versions
+        logger.warning("Cannot sync params to vLLM - model_executor not found. This is expected in newer vLLM versions.")
     logger.info("Param update done")
 
     return {

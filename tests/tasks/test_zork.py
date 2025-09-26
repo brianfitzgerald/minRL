@@ -28,12 +28,22 @@ def test_zork_dataset(
 
     # Mocking the environment interactions
     mock_env = MagicMock()
-    mock_env.reset.return_value = ("Initial observation", {})
+    mock_env.reset.return_value = ("Initial observation", {
+        "max_score": 100,
+        "location": MagicMock(name="Test Location"),
+        "inventory": "",
+        "score": 0
+    })
     mock_env.step.return_value = (
         "Next observation",
         1,
         False,
-        {"inventory": "a sword"},
+        {
+            "inventory": "a sword",
+            "location": MagicMock(name="Next Location"),
+            "score": 1,
+            "moves": 1
+        },
     )
     mock_make.return_value = mock_env
 
@@ -45,16 +55,16 @@ def test_zork_dataset(
     assert initial_conv[1]["role"] == "user"
     assert "Initial observation" in initial_conv[1]["content"]
 
-    # Test get_next_state
-    obs, done, step_metadata = dataset.step(
+    # Test step
+    message, done = dataset.step(
         0, [{"role": "assistant", "content": "<command>go east</command>"}]
     )
-    assert "Next observation" in obs
-    assert "Inventory: a sword" in obs
+    assert "Next observation" in message["content"]
+    assert "Inventory: a sword" in message["content"]
     assert done is False
-    assert isinstance(step_metadata, dict)
-    assert "observation" in step_metadata
-    assert step_metadata["inventory"] == ["a sword"]
+    assert isinstance(message["step_metadata"], dict)
+    assert "observation" in message["step_metadata"]
+    assert message["step_metadata"]["inventory"] == "a sword"
 
     # Test __len__
-    assert len(dataset) == 43  # Number of known good games
+    assert len(dataset) == 12  # 3 games (zork series) * 4 samples per game
