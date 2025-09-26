@@ -16,11 +16,11 @@ def clean_observation(obs: str) -> str:
     lines = obs.split("\n")
     processed_lines = []
     for line in lines:
-        # Rule 1: If a line starts with '^', discard this line and all subsequent lines
-        if line.lstrip().startswith("^") or line.lstrip().startswith(">"):
-            break
-
         lstripped_line = line.lstrip()
+
+        # Rule 1: If a line starts with '^', discard this line and all subsequent lines
+        if lstripped_line.startswith("^"):
+            break
 
         # Filter for any line starting with '>' or containing "Purpose:"
         if lstripped_line.startswith(">") or "Purpose:" in lstripped_line:
