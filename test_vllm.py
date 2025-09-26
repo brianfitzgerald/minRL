@@ -9,7 +9,6 @@ set_vllm_use_v1(True)
 
 vllm_model = LLM(
     model=QWEN_3_0_6B,
-    device="cuda:0",
     dtype="bfloat16",
     enforce_eager=True,
 )

@@ -16,7 +16,6 @@ def vllm_model():
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = LLM(
         model=SMOL_LM_2_135M,
-        device=device,
         enforce_eager=True,
         gpu_memory_utilization=0.2,
     )

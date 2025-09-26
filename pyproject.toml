@@ -29,14 +29,14 @@ dependencies = [
     "tensorboard>=2.19.0",
     "tensorboardx>=2.6.2.2",
     "tokenizers>=0.21.1",
-    "torch>=2.6.0",
-    "transformers>=4.51.3",
+    "torch>=2.8.0",
+    "transformers>=4.56.2",
     "uvicorn>=0.34.2",
     "wandb>=0.20.1",
 ]
 
 [dependency-groups]
-training = ["vllm==0.8.4", "flash-attn; sys_platform == 'linux'"]
+training = ["vllm==0.10.2", "flash-attn; sys_platform == 'linux'"]
 games = ["textworld", "pip>=25.1.1"]
 
 
@@ -44,18 +44,16 @@ games = ["textworld", "pip>=25.1.1"]
 default-groups = ["training", "games"]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
-torchvision = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
-torchaudio = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
+torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+torchvision = { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }
+torchaudio = { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }
 
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.pytest.ini_options]
 addopts = "-m 'not slow'"
-markers = [
-    "slow: marks tests as slow (deselected by default)",
-]
+markers = ["slow: marks tests as slow (deselected by default)"]

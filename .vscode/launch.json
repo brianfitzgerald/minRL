@@ -3,21 +3,21 @@
     "configurations": [
         {
             "name": "Train",
-            "type": "debugpy",
             "request": "launch",
+            "type": "python",
             "program": "train.py",
             "console": "integratedTerminal"
         },
         {
             "name": "Evaluate",
-            "type": "debugpy",
             "request": "launch",
+            "type": "python",
             "program": "evaluate.py",
             "console": "integratedTerminal"
         },
         {
             "name": "Visualize Evals",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
             "program": "visualize_evals.py",
             "console": "integratedTerminal",
@@ -27,7 +27,7 @@
         },
         {
             "name": "Test Agent",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
             "program": "test_agent.py",
             "console": "integratedTerminal"

@@ -147,7 +147,6 @@ async def main(
             vllm_models[cast(ModelName, m)] = LLM(
                 model=model_path,
                 tokenizer=tokenizer_model_id,
-                device="cuda",
                 gpu_memory_utilization=0.2,
                 max_model_len=1024,
                 enforce_eager=True,

@@ -128,7 +128,7 @@ class TrainerConfig:
     lr: float = 5e-6
     optimizer: OptimizerChoice = "adamw_8bit"
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "zork"
+    task: TaskChoice = "connections"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2

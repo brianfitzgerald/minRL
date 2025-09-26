@@ -55,23 +55,20 @@ class Trainer:
     def init_model(self):
         """Initialize the model and tokenizer."""
         vllm_device = self.device.type
-        # disable to allow updating weights
-        set_vllm_use_v1(False)
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
             vllm_device = "cpu"
         self.vllm_model = LLM(
             model=self.config.model_id,
-            device=vllm_device,
             gpu_memory_utilization=0.2,
-            max_model_len=self.config.max_new_tokens,
-            max_seq_len_to_capture=self.config.max_new_tokens,
+            max_model_len=2048,  # Increased to handle longer prompts
+            max_seq_len_to_capture=2048,
             enforce_eager=True,
             dtype="bfloat16" if not USING_MPS else "float16",
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = "flash_attention_2" if self.device.type == "cuda" else "sdpa"
-        model = AutoModelForCausalLM.from_pretrained(
+        attn_impl = "sdpa"  # Use SDPA instead of flash_attention_2 to avoid compatibility issues
+        model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
             torch_dtype=self.dtype,
@@ -79,7 +76,6 @@ class Trainer:
         )
 
         logger.info("Model loaded.")
-        model.to(self.device)
         torch.set_default_device(self.device)
         logger.info(f"Using device {self.device}, attn impl {attn_impl}")
         torch.random.manual_seed(42)
