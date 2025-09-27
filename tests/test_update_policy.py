@@ -10,7 +10,7 @@ import torch.nn as nn
 
 
 @pytest.fixture
-def sample_episodes():
+def sample_episodes() -> list[Episode]:
     """Fixture that creates sample episodes for testing."""
     conversations: list[Conversation] = [
         [
@@ -66,7 +66,7 @@ def test_update_policy_grpo_algorithm(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
     device: torch.device,
-    sample_episodes,
+    sample_episodes: list[Episode],
 ):
     """Test update_policy with GRPO algorithm."""
     config.algorithm = "grpo"
