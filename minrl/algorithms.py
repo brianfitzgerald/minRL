@@ -150,23 +150,6 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     return entropy
 
 
-def pad_sequences_to_batch(
-    batch_episode_tokens: list[int],
-    pad_value: int | bool,
-) -> list[list[int]]:
-    """
-    Pad sequences in a batch to the same length and convert to tensor.
-    """
-    batch_lengths = [len(token_ids) for _, token_ids, _ in batch_episode_tokens]
-    batch_max_length = max(batch_lengths)
-
-    batch_sequences = [
-        token_ids + [pad_value] * (batch_max_length - batch_lengths[idx])
-        for idx, (_, token_ids, _) in enumerate(batch_episode_tokens)
-    ]
-    return batch_sequences
-
-
 def get_token_ids_and_assistant_mask(
     conversation: Conversation,
     tokenizer: PreTrainedTokenizerBase,
@@ -375,21 +358,16 @@ def update_policy(
 
     # Extract token IDs from conversations and sort episodes by length
     # for more efficient batching
-    episode_tokens: list[EpisodeWithTokens] = []
+    token_ids_batch: list[list[int]] = []
+    assistant_mask_batch: list[list[bool]] = []
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer
         )
-        episode_tokens.append(
-            {
-                "episode": episode,
-                "token_ids": token_ids,
-                "assistant_mask": assistant_mask,
-            }
-        )
+        token_ids_batch.append(token_ids)
+        assistant_mask_batch.append(assistant_mask)
 
-    episodes = [e["episode"] for e in episode_tokens]
-    n_target_tokens = sum(len(token_data[1]) for token_data in episode_tokens)
+    n_target_tokens = sum(len(token_ids) for token_ids in token_ids_batch)
     total_entropy = torch.tensor(0.0, device=device)
 
     logger.info(
@@ -408,15 +386,24 @@ def update_policy(
         j = min(i + micro_batch_size, len(episodes))
 
         batch_episodes = episodes[i:j]
-        batch_episode_tokens: list[EpisodeWithTokens] = episode_tokens[i:j]
+        batch_token_ids_list = token_ids_batch[i:j]
+        batch_assistant_mask_list = assistant_mask_batch[i:j]
 
-        # Pad token IDs to the same length
-        batch_token_ids_t: list[list[int]] = pad_sequences_to_batch(
-            batch_episode_tokens, pad_token_id
+        # Pad token IDs to the same length using PyTorch's pad_sequence
+        batch_token_ids_t = torch.tensor(
+            batch_token_ids_list, dtype=torch.long, device=device
+        )
+        batch_token_ids_t = torch.nn.utils.rnn.pad_sequence(
+            batch_token_ids_t, batch_first=True, padding_value=pad_token_id
         )
 
-        # Pad assistant masks to the same length
-        batch_assistant_masks_t = pad_sequences_to_batch(batch_episode_tokens, False)
+        # Pad assistant masks to the same length using PyTorch's pad_sequence
+        batch_assistant_masks_t = torch.tensor(
+            batch_assistant_mask_list, dtype=torch.bool, device=device
+        )
+        batch_assistant_masks_t = torch.nn.utils.rnn.pad_sequence(
+            batch_assistant_masks_t, batch_first=True, padding_value=False
+        )
 
         # Shift tokens and masks for next-token prediction
         target_token_ids = batch_token_ids_t[:, 1:]

@@ -17,7 +17,7 @@ python train.py
 uv run modal run -d modal_train.py::training
 
 # Run tests
-pytest tests/
+uv run pytest tests/
 
 # Lint code
 ruff check .
@@ -68,21 +68,6 @@ python test_run.py
    - `TrainerConfig`: Main configuration with model settings, hyperparameters
    - Model definitions for various sizes (SmolLM, Qwen variants)
    - Algorithm choices: "reinforce", "grpo", "gpg"
-
-### Key Design Patterns
-
-- **Dual Model Architecture**: Uses both transformers (for training) and vLLM (for inference)
-- **Episode-based Training**: Groups responses by prompt prefix for reward normalization
-- **Modular Task System**: Easy to add new tasks by implementing reward function and dataset
-- **Flexible Deployment**: Supports both local training and Modal cloud deployment
-
-### Dependencies
-
-- **Core ML**: `torch`, `transformers`, `vllm`, `accelerate`
-- **Data**: `datasets`, `pandas`, `numpy`
-- **Logging**: `tensorboard`, `wandb`, `loguru`
-- **Testing**: `pytest`
-- **Deployment**: `modal` (for cloud training)
 
 ## Configuration
 

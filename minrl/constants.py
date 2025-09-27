@@ -50,7 +50,7 @@ SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 QWEN_TINY_TESTING = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
 
 
-OptimizerChoice = Literal["adamw", "adamw_8bit"]
+OptimizerChoice = Literal["adamw"]
 AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 LoggerChoice = Literal["tensorboard", "wandb"]
 
@@ -126,7 +126,8 @@ class TrainerConfig:
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
     lr: float = 5e-6
-    optimizer: OptimizerChoice = "adamw_8bit"
+    optimizer: OptimizerChoice = "adamw"
+    use_low_precision_optimizer_if_available: bool = False
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "connections"
     wandb_project: str = "minrl"
