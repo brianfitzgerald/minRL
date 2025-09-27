@@ -43,6 +43,7 @@ USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # type: ignore
 
+
 def get_memory_usage():
     """Get current memory usage in MB."""
     process = psutil.Process(os.getpid())
@@ -62,24 +63,22 @@ class Trainer:
 
     def init_model(self):
         """Initialize the model and tokenizer."""
-        vllm_device = self.device.type
+        torch.set_default_device(self.device)
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
-            vllm_device = "cpu"
-        
+
         # Reduce vLLM memory usage significantly
         self.vllm_model = LLM(
             model=self.config.model_id,
-            gpu_memory_utilization=0.1,  # Reduced from 0.2 to 0.1
-            max_model_len=512,  # Reduced from 1024 to 512
-            max_seq_len_to_capture=512,  # Reduced from 1024 to 512
+            gpu_memory_utilization=0.5,
+            max_model_len=2048,
+            max_seq_len_to_capture=2048,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
-            # Removed cpu_offload_gb and swap_space as they require UVA support
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "sdpa"  # Use SDPA instead of flash_attention_2 to avoid compatibility issues
-        
+
         # Use more memory-efficient model loading
         model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
@@ -91,7 +90,6 @@ class Trainer:
         )
 
         logger.info("Model loaded.")
-        torch.set_default_device(self.device)
         logger.info(f"Using device {self.device}, attn impl {attn_impl}")
         torch.random.manual_seed(42)
         self.tokenizer = tokenizer
@@ -195,11 +193,11 @@ class Trainer:
                 vllm_model=self.vllm_model,
                 algorithm=self.config.algorithm,
             )
-            
+
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
-            
+
             # Clear memory after each step
             del episodes
             gc.collect()
