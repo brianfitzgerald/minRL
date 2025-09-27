@@ -37,7 +37,7 @@ def hf_model() -> nn.Module:
     model = AutoModelForCausalLM.from_pretrained(
         SMOL_LM_2_135M,
         device_map={"": device},  # Load directly on target device
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation=(
             "flash_attention_2" if torch.cuda.is_available() else "sdpa"
         ),

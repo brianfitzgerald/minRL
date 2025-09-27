@@ -45,9 +45,34 @@ if not USING_MPS:
 
 
 def get_memory_usage():
-    """Get current memory usage in MB."""
+    """Get current memory usage in MB and percentage of total VRAM available."""
     process = psutil.Process(os.getpid())
-    return process.memory_info().rss / 1024 / 1024
+    cpu_memory_mb = process.memory_info().rss / 1024 / 1024
+
+    if torch.cuda.is_available():
+        # Get GPU memory usage
+        gpu_memory_allocated = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+        gpu_memory_reserved = torch.cuda.memory_reserved() / 1024 / 1024  # MB
+        gpu_memory_total = (
+            torch.cuda.get_device_properties(0).total_memory / 1024 / 1024
+        )  # MB
+        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
+
+        return {
+            "cpu_memory_mb": cpu_memory_mb,
+            "gpu_memory_allocated_mb": gpu_memory_allocated,
+            "gpu_memory_reserved_mb": gpu_memory_reserved,
+            "gpu_memory_total_mb": gpu_memory_total,
+            "gpu_memory_percentage": gpu_memory_percentage,
+        }
+    else:
+        return {
+            "cpu_memory_mb": cpu_memory_mb,
+            "gpu_memory_allocated_mb": 0,
+            "gpu_memory_reserved_mb": 0,
+            "gpu_memory_total_mb": 0,
+            "gpu_memory_percentage": 0,
+        }
 
 
 class Trainer:
@@ -68,9 +93,13 @@ class Trainer:
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
 
         # Reduce vLLM memory usage significantly
+        memory_info = get_memory_usage()
+        logger.info(
+            f"Memory usage - CPU: {memory_info['cpu_memory_mb']:.1f}MB, GPU: {memory_info['gpu_memory_allocated_mb']:.1f}MB ({memory_info['gpu_memory_percentage']:.1f}%)"
+        )
         self.vllm_model = LLM(
             model=self.config.model_id,
-            gpu_memory_utilization=0.5,
+            gpu_memory_utilization=0.2,
             max_model_len=2048,
             max_seq_len_to_capture=2048,
             enforce_eager=True,
@@ -83,7 +112,7 @@ class Trainer:
         model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
-            torch_dtype=self.dtype,
+            dtype=self.dtype,
             attn_implementation=attn_impl,
             low_cpu_mem_usage=True,  # Enable low memory usage
             use_cache=False,  # Disable KV cache to save memory

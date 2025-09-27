@@ -309,20 +309,19 @@ def update_policy(
         # Often OOMs here, so clear cache
         gc.collect()
         torch.cuda.empty_cache()
-        
+
         # Use gradient checkpointing to save memory
-        with torch.cuda.amp.autocast(enabled=False):  # Disable autocast for memory efficiency
-            logits: torch.Tensor = model(batch_token_ids_t).logits.float()
+        logits: torch.Tensor = model(batch_token_ids_t).logits.float()
 
         # Get the cross entropy loss of the label and generated tokens
         # Slice logits to match target tokens (exclude first position)
         next_token_logits = logits[:, :-1]
-        
+
         # Clear logits from memory immediately after use
         del logits
         gc.collect()
         torch.cuda.empty_cache()
-        
+
         logprobs = -torch.nn.functional.cross_entropy(
             next_token_logits.reshape(-1, next_token_logits.size(-1)),
             target_token_ids.reshape(-1),
@@ -357,12 +356,12 @@ def update_policy(
         if apply_loss:
             loss = -objective
             loss.backward()
-            
+
         # Clear intermediate tensors to save memory
         del batch_token_ids_t, target_token_ids, target_masks, batch_rewards_t
-        if 'logprobs' in locals():
+        if "logprobs" in locals():
             del logprobs
-        if 'next_token_logits' in locals():
+        if "next_token_logits" in locals():
             del next_token_logits
         gc.collect()
         torch.cuda.empty_cache()
@@ -391,7 +390,9 @@ def update_policy(
         model_runner.model.load_weights(model.state_dict().items())  # type: ignore
     except AttributeError:
         # vLLM API change: model_executor might not be available in newer versions
-        logger.warning("Cannot sync params to vLLM - model_executor not found. This is expected in newer vLLM versions.")
+        logger.warning(
+            "Cannot sync params to vLLM - model_executor not found. This is expected in newer vLLM versions."
+        )
     logger.info("Param update done")
 
     return {
