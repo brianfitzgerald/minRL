@@ -294,13 +294,6 @@ def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
 ) -> None:
-    """
-    Synchronize model parameters to vLLM.
-
-    Args:
-        model: The neural network model
-        vllm_model: The vLLM model instance
-    """
     logger.info("Syncing params to vLLM...")
 
     state_dict = model.state_dict()
@@ -343,7 +336,6 @@ def update_policy(
     pad_token_id: int,
     max_grad_norm: float,
     device: torch.device,
-    vllm_model: LLM,
     algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
@@ -470,8 +462,6 @@ def update_policy(
         )
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
-
-    sync_weights_to_vllm(model, vllm_model)
 
     return {
         "loss": float(loss),

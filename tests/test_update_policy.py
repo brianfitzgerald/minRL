@@ -62,7 +62,6 @@ def test_normalize_rewards_per_group(sample_episodes):
 
 
 def test_update_policy_grpo_algorithm(
-    vllm_model: LLM,
     hf_model: nn.Module,
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
@@ -78,7 +77,6 @@ def test_update_policy_grpo_algorithm(
     results = update_policy(
         model=hf_model,
         optimizer=optimizer,
-        vllm_model=vllm_model,
         episodes=sample_episodes,
         micro_batch_size=2,
         pad_token_id=pad_token_id,

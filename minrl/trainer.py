@@ -17,7 +17,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
 
-from minrl.algorithms import rollout, update_policy
+from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
@@ -222,9 +222,9 @@ class Trainer:
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
-                vllm_model=self.vllm_model,
                 algorithm=self.config.algorithm,
             )
+            sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
 
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
