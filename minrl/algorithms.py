@@ -24,9 +24,8 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.metrics import MetricsWrapper
 from minrl.constants import Episode
-from minrl.utils import NEWLINE_TOKEN_ID, find_assistant_sections
+from minrl.utils import find_assistant_sections, clear_memory
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -125,8 +124,7 @@ def rollout(
                 )
 
         # Clear CUDA cache
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_memory()
 
     episodes: List[Episode] = []
     for i, (conversation, sample) in enumerate(zip(conversations, samples)):
@@ -163,7 +161,7 @@ def get_token_ids_and_assistant_mask(
         raise ValueError("Conversation must have at least 1 message")
 
     # Apply chat template to get the full formatted conversation
-    all_token_ids = tokenizer.apply_chat_template(
+    all_token_ids: list[int] = tokenizer.apply_chat_template(
         conversation,  # type: ignore
         tokenize=True,
         enable_thinking=False,
@@ -307,10 +305,8 @@ def update_policy(
             batch_rewards, device=device, dtype=torch.float32
         )
         # Often OOMs here, so clear cache
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_memory()
 
-        # Use gradient checkpointing to save memory
         logits: torch.Tensor = model(batch_token_ids_t).logits.float()
 
         # Get the cross entropy loss of the label and generated tokens
@@ -319,8 +315,7 @@ def update_policy(
 
         # Clear logits from memory immediately after use
         del logits
-        gc.collect()
-        torch.cuda.empty_cache()
+        clear_memory()
 
         logprobs = -torch.nn.functional.cross_entropy(
             next_token_logits.reshape(-1, next_token_logits.size(-1)),
@@ -343,28 +338,26 @@ def update_policy(
 
         # multiply the log probs by the advantages
         if algorithm == "grpo":
-            objective = logprobs * batch_rewards_t[:, None]
+            advantage_t = logprobs * batch_rewards_t[:, None]
         elif algorithm == "gpg":
             # subtract baseline, which is the mean of the rewards
             advantages = batch_rewards_t - batch_rewards_t.mean()
-            objective = logprobs * advantages[:, None]
+            advantage_t = logprobs * advantages[:, None]
         elif algorithm == "reinforce":
-            objective = logprobs * batch_rewards_t[:, None]
+            advantage_t = logprobs * batch_rewards_t[:, None]
 
         # scale by the mask, and normalize by token count
-        objective = (objective * target_masks).sum() / n_target_tokens
+        # this sets the advantage to 0 for padding tokens
+        advantage_t = (advantage_t * target_masks).sum() / n_target_tokens
         if apply_loss:
-            loss = -objective
+            loss = -advantage_t
             loss.backward()
 
         # Clear intermediate tensors to save memory
         del batch_token_ids_t, target_token_ids, target_masks, batch_rewards_t
-        if "logprobs" in locals():
-            del logprobs
-        if "next_token_logits" in locals():
-            del next_token_logits
-        gc.collect()
-        torch.cuda.empty_cache()
+        del logprobs
+        del next_token_logits
+        clear_memory()
 
     if apply_loss:
         # update the policy

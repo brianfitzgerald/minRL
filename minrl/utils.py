@@ -1,3 +1,4 @@
+import gc
 import re
 from pydoc import html
 from typing import Dict, List
@@ -136,3 +137,9 @@ def find_assistant_sections(
             i += 1
 
     return sections
+
+
+def clear_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
