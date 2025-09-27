@@ -124,6 +124,21 @@ class Trainer:
         self.tokenizer = tokenizer
         self.model = model
 
+        if self.config.optimizer == "adamw":
+            if self.config.use_low_precision_optimizer_if_available:
+                self.optimizer = Adam8bit(
+                    cast(nn.Module, self.model).parameters(),
+                    lr=self.config.lr,
+                    betas=(0.9, 0.999),
+                    eps=1e-8,
+                )
+            else:
+                self.optimizer = torch.optim.AdamW(
+                    cast(nn.Module, self.model).parameters(), lr=self.config.lr
+                )
+        else:
+            raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
+
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
@@ -147,21 +162,6 @@ class Trainer:
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
         )
-
-        if self.config.optimizer == "adamw":
-            if self.config.use_low_precision_optimizer_if_available:
-                self.optimizer = Adam8bit(
-                    cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
-                    betas=(0.9, 0.999),
-                    eps=1e-8,
-                )
-            else:
-                self.optimizer = torch.optim.AdamW(
-                    cast(nn.Module, self.model).parameters(), lr=self.config.lr
-                )
-        else:
-            raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
