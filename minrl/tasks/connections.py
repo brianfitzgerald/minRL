@@ -149,7 +149,7 @@ class ConnectionsDataset(MinRLDataset):
         train_data, val_data = train_test_split(  # type: ignore
             samples_generated, test_size=0.1, random_state=42
         )
-        self.dataframe: pd.DataFrame = train_data if split == "train" else val_data
+        self.dataframe: pd.DataFrame = train_data if split == "train" else val_data  # pyright: ignore[reportAttributeAccessIssue]
 
     def __len__(self):
         return len(self.dataframe)
@@ -158,7 +158,7 @@ class ConnectionsDataset(MinRLDataset):
         item = self.dataframe.iloc[idx]
         return item  # type: ignore
 
-    def conversation(self, sample: Sample, _: int) -> Conversation:
+    def initial_conversation(self, sample: Sample, _: int) -> Conversation:
         return [
             {
                 "role": "system",

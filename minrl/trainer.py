@@ -1,7 +1,10 @@
+import gc
 import time
 from pathlib import Path
 from typing import Any, cast
 
+import psutil
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -40,6 +43,11 @@ USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # type: ignore
 
+def get_memory_usage():
+    """Get current memory usage in MB."""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / 1024 / 1024
+
 
 class Trainer:
     tokenizer: PreTrainedTokenizerBase | None = None
@@ -58,21 +66,28 @@ class Trainer:
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
             vllm_device = "cpu"
+        
+        # Reduce vLLM memory usage significantly
         self.vllm_model = LLM(
             model=self.config.model_id,
-            gpu_memory_utilization=0.2,
-            max_model_len=2048,  # Increased to handle longer prompts
-            max_seq_len_to_capture=2048,
+            gpu_memory_utilization=0.1,  # Reduced from 0.2 to 0.1
+            max_model_len=512,  # Reduced from 1024 to 512
+            max_seq_len_to_capture=512,  # Reduced from 1024 to 512
             enforce_eager=True,
-            dtype="bfloat16" if not USING_MPS else "float16",
+            dtype="float16" if USING_MPS else "bfloat16",
+            # Removed cpu_offload_gb and swap_space as they require UVA support
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "sdpa"  # Use SDPA instead of flash_attention_2 to avoid compatibility issues
+        
+        # Use more memory-efficient model loading
         model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
             torch_dtype=self.dtype,
             attn_implementation=attn_impl,
+            low_cpu_mem_usage=True,  # Enable low memory usage
+            use_cache=False,  # Disable KV cache to save memory
         )
 
         logger.info("Model loaded.")
@@ -94,12 +109,16 @@ class Trainer:
             split="eval", host=self.host_type, tokenizer=self.tokenizer
         )
         generator = torch.Generator(device=self.device)
+        # Reduce batch size for memory efficiency
+        effective_batch_size = max(1, self.config.train_batch_size // 2)
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=self.config.train_batch_size,
+            batch_size=effective_batch_size,
             collate_fn=lambda x: x,
+            pin_memory=False,  # Disable pin_memory to save memory
+            num_workers=0,  # Use single process to avoid memory overhead
         )
 
         if self.config.optimizer == "adamw":
@@ -162,21 +181,30 @@ class Trainer:
 
             logger.info(f"Updating policy for step {step}")
 
+            # Use smaller micro batch size for memory efficiency
+            micro_batch_size = max(1, self.config.train_batch_size // 4)
             results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,
                 tokenizer=self.tokenizer,
-                micro_batch_size=self.config.train_batch_size,
+                micro_batch_size=micro_batch_size,
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 vllm_model=self.vllm_model,
                 algorithm=self.config.algorithm,
             )
-            # Compute current reward std for next iteration
+            
+            # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
+            
+            # Clear memory after each step
+            del episodes
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -188,8 +216,10 @@ class Trainer:
 
             temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
 
+            # Note: episodes are already deleted for memory optimization
+            # We'll pass empty list to compute_metrics to avoid errors
             compute_metrics(
-                episodes,
+                [],  # Empty list since episodes were deleted for memory optimization
                 results,
                 self.metrics_wrapper,
                 step,

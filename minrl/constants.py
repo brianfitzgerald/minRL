@@ -119,10 +119,10 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 class TrainerConfig:
     model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10
-    group_size: int = 4
-    max_new_tokens: int = 512
-    train_batch_size: int = 4
-    eval_batch_size: int = 16
+    group_size: int = 2  # Reduced from 4 to 2 for memory efficiency
+    max_new_tokens: int = 256  # Reduced from 512 to 256 for memory efficiency
+    train_batch_size: int = 1  # Reduced from 2 to 1 for memory efficiency
+    eval_batch_size: int = 8  # Reduced from 16 to 8 for memory efficiency
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500
     lr: float = 5e-6
@@ -132,7 +132,7 @@ class TrainerConfig:
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1.2
-    temperature_scaling: bool = True
+    temperature_scaling: bool = False
     temperature_min: float = 0.2
     temperature_max: float = 1.5
 

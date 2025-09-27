@@ -3,7 +3,7 @@ name = "minrl"
 version = "0.1.0"
 description = "Minimal RL for LLM implementations"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.6.0",
     "bitsandbytes>=0.45.5; sys_platform == 'linux'",
