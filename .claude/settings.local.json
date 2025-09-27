@@ -16,7 +16,9 @@
       "Bash(uv sync:*)",
       "WebSearch",
       "Bash(uv index versions:*)",
-      "Bash(pip index versions:*)"
+      "Bash(pip index versions:*)",
+      "Bash(uv add:*)",
+      "Bash(uv pip install:*)"
     ],
     "deny": []
   }
