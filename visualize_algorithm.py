@@ -34,7 +34,7 @@ episodes = [
     ),
 ]
 
-update_policy(
+policy_results = update_policy(
     model=trainer.model,  # pyright: ignore[reportArgumentType]
     optimizer=trainer.optimizer,
     episodes=episodes,
@@ -46,3 +46,5 @@ update_policy(
     tokenizer=trainer.tokenizer,  # pyright: ignore[reportArgumentType]
     apply_loss=True,
 )
+
+print(policy_results)

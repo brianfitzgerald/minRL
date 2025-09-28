@@ -224,7 +224,6 @@ def compute_algorithm_loss(
     batch_rewards: torch.Tensor,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
-    apply_loss: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the algorithm-specific loss from pre-computed logprobs.
@@ -320,6 +319,7 @@ class UpdatePolicyResults(TypedDict):
     loss: float
     grad_norm: float
     entropy: float
+    advantages: torch.Tensor
 
 
 class EpisodeWithTokens(TypedDict):
@@ -371,6 +371,8 @@ def update_policy(
         torch.tensor(0.0, device=device),
         torch.tensor(0.0, device=device),
     )
+
+    batch_advantages: list[torch.Tensor] = []
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
@@ -441,16 +443,15 @@ def update_policy(
         total_entropy += entropy
 
         # Compute algorithm-specific loss
-        batch_loss, _ = compute_algorithm_loss(
+        batch_loss, advantage_t = compute_algorithm_loss(
             logprobs,
             target_masks,
             batch_rewards_t,
             algorithm,
             n_target_tokens,
-            apply_loss,
         )
         loss += batch_loss
-
+        batch_advantages.append(advantage_t)
         # Clear intermediate tensors to save memory
         del batch_token_ids_t, target_token_ids, target_masks, batch_rewards_t
         del logprobs
@@ -469,4 +470,5 @@ def update_policy(
         "loss": float(loss),
         "grad_norm": float(grad_norm),
         "entropy": float(entropy),
+        "advantages": batch_advantages,
     }
