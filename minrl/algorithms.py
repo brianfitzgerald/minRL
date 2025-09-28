@@ -319,7 +319,6 @@ class UpdatePolicyResults(TypedDict):
     loss: float
     grad_norm: float
     entropy: float
-    advantages: torch.Tensor
 
 
 class EpisodeWithTokens(TypedDict):
@@ -470,5 +469,4 @@ def update_policy(
         "loss": float(loss),
         "grad_norm": float(grad_norm),
         "entropy": float(entropy),
-        "advantages": batch_advantages,
     }
