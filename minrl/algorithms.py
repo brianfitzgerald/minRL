@@ -224,7 +224,21 @@ def compute_algorithm_loss(
     batch_rewards: torch.Tensor,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute the algorithm-specific loss from pre-computed logprobs.
+
+    Args:
+        logprobs: Pre-computed log probabilities of shape (batch_size, seq_len)
+        target_masks: Boolean masks for target tokens of shape (batch_size, seq_len)
+        batch_rewards: Rewards for each episode of shape (batch_size,)
+        algorithm: The algorithm to use for computing advantages
+        n_target_tokens: Total number of target tokens for normalization
+        apply_loss: Whether to apply the loss (backward pass)
+
+    Returns:
+        Tuple of (loss, advantage_tensor)
+    """
     # multiply the log probs by the advantages
     if algorithm == "grpo":
         advantage_t = logprobs * batch_rewards[:, None]
@@ -241,17 +255,19 @@ def compute_algorithm_loss(
 
     loss = -advantage_t
 
-    return loss
+    return loss, advantage_t
 
 
 @torch.no_grad()
 def compute_entropy_from_logits(
-    logits: torch.Tensor,
+    model: nn.Module,
     batch_token_ids: torch.Tensor,
     target_masks: torch.Tensor,
     n_target_tokens: int,
     device: torch.device,
 ) -> torch.Tensor:
+    logits: torch.Tensor = model(batch_token_ids).logits.float()
+
     # Get the cross entropy loss of the label and generated tokens
     # Slice logits to match target tokens (exclude first position)
     next_token_logits = logits[:, :-1]
@@ -333,23 +349,29 @@ def update_policy(
 
     # Extract token IDs from conversations and sort episodes by length
     # for more efficient batching
-    episode_tokens: list[tuple[Episode, list[int], list[bool]]] = []
+    token_ids_batch: list[list[int]] = []
+    assistant_mask_batch: list[list[bool]] = []
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer
         )
-        episode_tokens.append((episode, token_ids, assistant_mask))
+        token_ids_batch.append(token_ids)
+        assistant_mask_batch.append(assistant_mask)
 
-    episodes = [episode_data[0] for episode_data in episode_tokens]
-    n_target_tokens = sum(len(token_data[1]) for token_data in episode_tokens)
-    entropy = torch.tensor(0.0, device=device)
+    n_target_tokens = sum(len(token_ids) for token_ids in token_ids_batch)
+    total_entropy = torch.tensor(0.0, device=device)
 
     logger.info(
-        f"Updating policy with {len(episodes)} episodes, "
+        f"Computing policy update with {len(episodes)} episodes, "
         f"{n_target_tokens} target tokens"
     )
 
-    loss, grad_norm, entropy = 0, 0, 0
+    loss, grad_norm = (
+        torch.tensor(0.0, device=device),
+        torch.tensor(0.0, device=device),
+    )
+
+    batch_advantages: list[torch.Tensor] = []
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
@@ -357,27 +379,25 @@ def update_policy(
         j = min(i + micro_batch_size, len(episodes))
 
         batch_episodes = episodes[i:j]
-        batch_episode_tokens = episode_tokens[i:j]
+        batch_token_ids_list = token_ids_batch[i:j]
+        batch_assistant_mask_list = assistant_mask_batch[i:j]
 
-        batch_lengths = [len(token_ids) for _, token_ids, _ in batch_episode_tokens]
-        batch_max_length = max(batch_lengths)
-
-        # Pad all token ids to the same length
-        batch_token_ids = [
-            token_ids + [pad_token_id] * (batch_max_length - batch_lengths[idx])
-            for idx, (_, token_ids, _) in enumerate(batch_episode_tokens)
+        # Pad token IDs to the same length using PyTorch's pad_sequence
+        batch_token_ids_t = [
+            torch.tensor(token_ids, dtype=torch.long, device=device)
+            for token_ids in batch_token_ids_list
         ]
-        batch_token_ids_t = torch.tensor(
-            batch_token_ids, device=device, dtype=torch.long
+        batch_token_ids_t = torch.nn.utils.rnn.pad_sequence(
+            batch_token_ids_t, batch_first=True, padding_value=pad_token_id
         )
 
-        # Create assistant masks for each sequence in the batch
-        batch_assistant_masks = [
-            assistant_mask + [False] * (batch_max_length - batch_lengths[idx])
-            for idx, (_, _, assistant_mask) in enumerate(batch_episode_tokens)
+        # Pad assistant masks to the same length using PyTorch's pad_sequence
+        batch_assistant_masks_t = [
+            torch.tensor(assistant_mask, dtype=torch.bool, device=device)
+            for assistant_mask in batch_assistant_mask_list
         ]
-        batch_assistant_masks_t = torch.tensor(
-            batch_assistant_masks, device=device, dtype=torch.bool
+        batch_assistant_masks_t = torch.nn.utils.rnn.pad_sequence(
+            batch_assistant_masks_t, batch_first=True, padding_value=False
         )
 
         # Shift tokens and masks for next-token prediction
@@ -412,42 +432,32 @@ def update_policy(
             reduction="none",
         ).reshape(batch_token_ids_t.shape[0], -1)
 
-        with torch.no_grad():
-            # Calculate entropy only for target positions
-            next_token_logits_flat = next_token_logits.reshape(
-                -1, next_token_logits.size(-1)
-            )
-            token_entropy = compute_entropy(next_token_logits_flat)
-            # single entropy value for the sequence
-            entropy = (
-                entropy
-                + (token_entropy * target_masks.reshape(-1)).sum() / n_target_tokens
-            )
+        # Clear intermediate tensors to save memory
+        del next_token_logits
 
-        # multiply the log probs by the advantages
-        if algorithm == "grpo":
-            advantage_t = logprobs * batch_rewards_t[:, None]
-        elif algorithm == "gpg":
-            # subtract baseline, which is the mean of the rewards
-            advantages = batch_rewards_t - batch_rewards_t.mean()
-            advantage_t = logprobs * advantages[:, None]
-        elif algorithm == "reinforce":
-            advantage_t = logprobs * batch_rewards_t[:, None]
+        # Compute entropy
+        entropy = compute_entropy_from_logits(
+            model, batch_token_ids_t, target_masks, n_target_tokens, device
+        )
+        total_entropy += entropy
 
-        # scale by the mask, and normalize by token count
-        # this sets the advantage to 0 for padding tokens
-        advantage_t = (advantage_t * target_masks).sum() / n_target_tokens
-        if apply_loss:
-            loss = -advantage_t
-            loss.backward()
-
+        # Compute algorithm-specific loss
+        batch_loss, advantage_t = compute_algorithm_loss(
+            logprobs,
+            target_masks,
+            batch_rewards_t,
+            algorithm,
+            n_target_tokens,
+        )
+        loss += batch_loss
+        batch_advantages.append(advantage_t)
         # Clear intermediate tensors to save memory
         del batch_token_ids_t, target_token_ids, target_masks, batch_rewards_t
         del logprobs
-        del next_token_logits
         clear_memory()
 
     if apply_loss:
+        loss.backward()
         # update the policy
         grad_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(), max_norm=max_grad_norm
