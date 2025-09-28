@@ -250,7 +250,7 @@ class Trainer:
             # We'll pass empty list to compute_metrics to avoid errors
             compute_metrics(
                 [],  # Empty list since episodes were deleted for memory optimization
-                results,
+                results,  # pyright: ignore[reportArgumentType]
                 self.metrics_wrapper,
                 step,
                 self.optimizer,

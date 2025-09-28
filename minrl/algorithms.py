@@ -363,7 +363,7 @@ def update_policy(
     total_entropy = torch.tensor(0.0, device=device)
 
     logger.info(
-        f"Updating policy with {len(episodes)} episodes, "
+        f"Computing policy update with {len(episodes)} episodes, "
         f"{n_target_tokens} target tokens"
     )
 
@@ -382,17 +382,19 @@ def update_policy(
         batch_assistant_mask_list = assistant_mask_batch[i:j]
 
         # Pad token IDs to the same length using PyTorch's pad_sequence
-        batch_token_ids_t = torch.tensor(
-            batch_token_ids_list, dtype=torch.long, device=device
-        )
+        batch_token_ids_t = [
+            torch.tensor(token_ids, dtype=torch.long, device=device)
+            for token_ids in batch_token_ids_list
+        ]
         batch_token_ids_t = torch.nn.utils.rnn.pad_sequence(
             batch_token_ids_t, batch_first=True, padding_value=pad_token_id
         )
 
         # Pad assistant masks to the same length using PyTorch's pad_sequence
-        batch_assistant_masks_t = torch.tensor(
-            batch_assistant_mask_list, dtype=torch.bool, device=device
-        )
+        batch_assistant_masks_t = [
+            torch.tensor(assistant_mask, dtype=torch.bool, device=device)
+            for assistant_mask in batch_assistant_mask_list
+        ]
         batch_assistant_masks_t = torch.nn.utils.rnn.pad_sequence(
             batch_assistant_masks_t, batch_first=True, padding_value=False
         )

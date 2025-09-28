@@ -35,14 +35,14 @@ episodes = [
 ]
 
 update_policy(
-    model=trainer.model,
+    model=trainer.model,  # pyright: ignore[reportArgumentType]
     optimizer=trainer.optimizer,
     episodes=episodes,
     micro_batch_size=trainer.config.train_batch_size,
-    pad_token_id=int(trainer.tokenizer.pad_token_id),
+    pad_token_id=int(trainer.tokenizer.pad_token_id),  # pyright: ignore[reportArgumentType, reportOptionalMemberAccess]
     max_grad_norm=trainer.config.max_grad_norm,
     device=trainer.device,
     algorithm=trainer.config.algorithm,
-    tokenizer=trainer.tokenizer,
+    tokenizer=trainer.tokenizer,  # pyright: ignore[reportArgumentType]
     apply_loss=True,
 )

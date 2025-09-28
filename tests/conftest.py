@@ -13,7 +13,6 @@ def vllm_model():
     """Fixture that creates a vLLM model instance once per test session."""
     logger.info("Creating vLLM model")
     # vLLM only supports CUDA and CPU, not MPS
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     model = LLM(
         model=SMOL_LM_2_135M,
         enforce_eager=True,
@@ -39,7 +38,7 @@ def hf_model() -> nn.Module:
         device_map={"": device},  # Load directly on target device
         dtype=torch.bfloat16,
         attn_implementation=(
-            "flash_attention_2" if torch.cuda.is_available() else "sdpa"
+            "flash_attention_2" if torch.cuda.is_available() else "eager"
         ),
     )
 

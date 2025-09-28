@@ -26,10 +26,10 @@
             ]
         },
         {
-            "name": "Test Agent",
+            "name": "Visualize Algorithm",
             "type": "debugpy",
             "request": "launch",
-            "program": "test_agent.py",
+            "program": "visualize_algorithm.py",
             "console": "integratedTerminal"
         }
     ]
