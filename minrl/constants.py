@@ -116,6 +116,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 }
 
 
+@dataclass
 class TrainerConfig:
     model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10

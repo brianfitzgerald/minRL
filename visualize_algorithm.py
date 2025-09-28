@@ -2,7 +2,7 @@ from minrl.algorithms import update_policy
 from minrl.constants import Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
 
-config = TrainerConfig()
+config = TrainerConfig(train_batch_size=4)
 
 trainer = Trainer(host_type="local")
 trainer.init_model()
@@ -14,6 +14,14 @@ conversations: list[Conversation] = [
     [
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Hey!"},
+    ],
+    [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "What is up?"},
+    ],
+    [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "What is your name?"},
     ],
 ]
 
@@ -31,6 +39,20 @@ episodes = [
         sample={"id": 0, "prompt": "Hello"},
         reward=0.5,
         conversation=conversations[1],
+    ),
+    Episode(
+        group_index=0,
+        answer_index=2,
+        sample={"id": 0, "prompt": "Hello"},
+        reward=0.2,
+        conversation=conversations[2],
+    ),
+    Episode(
+        group_index=0,
+        answer_index=3,
+        sample={"id": 0, "prompt": "Hello"},
+        reward=0.3,
+        conversation=conversations[3],
     ),
 ]
 
