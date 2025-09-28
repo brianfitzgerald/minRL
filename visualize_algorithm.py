@@ -2,6 +2,9 @@ from minrl.algorithms import update_policy
 from minrl.constants import Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
 
+import fire
+
+
 config = TrainerConfig(train_batch_size=4)
 
 trainer = Trainer(host_type="local")
@@ -70,3 +73,11 @@ policy_results = update_policy(
 )
 
 print(policy_results)
+
+
+def main(compute_logprobs: bool = False):
+    pass
+
+
+if __name__ == "__main__":
+    fire.Fire(main)
