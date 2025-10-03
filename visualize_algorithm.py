@@ -1,4 +1,8 @@
-from minrl.algorithms import process_batch, update_policy
+from minrl.algorithms import (
+    get_token_ids_and_assistant_mask,
+    process_batch,
+    update_policy,
+)
 from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
 import torch
@@ -87,21 +91,32 @@ def compute_algorithm_loss(
     return loss, advantage_t
 
 
-# Process the batch
-logprobs, target_masks, batch_rewards_t, batch_entropy = process_batch(
-    model=trainer.model,
-    episodes=episodes,
-    tokenizer=tokenizer,
-    pad_token_id=trainer.tokenizer.pad_token_id,
-    device=trainer.device,
-    n_target_tokens=n_target_tokens_total,
-)
+def main():
+    n_target_tokens = 0
+    for episode in episodes:
+        token_ids, _ = get_token_ids_and_assistant_mask(
+            episode.conversation, trainer.tokenizer
+        )
+        n_target_tokens += len(token_ids)
 
-print(policy_results)
+    # Process the batch
+    logprobs, target_msks, batch_rewards_t, batch_entropy = process_batch(
+        model=trainer.model,
+        episodes=episodes,
+        tokenizer=trainer.tokenizer,
+        pad_token_id=int(trainer.tokenizer.pad_token_id),  # pyright: ignore[reportArgumentType]
+        device=trainer.device,
+        n_target_tokens=n_target_tokens,
+    )
+    batch_loss, advantage_t = compute_algorithm_loss(
+        logprobs,
+        target_msks,
+        batch_rewards_t,
+        algorithm="grpo",
+        n_target_tokens=n_target_tokens,
+    )
 
-
-def main(compute_logprobs: bool = False):
-    pass
+    print(batch_loss, advantage_t)
 
 
 if __name__ == "__main__":

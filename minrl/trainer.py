@@ -76,8 +76,8 @@ def get_memory_usage():
 
 
 class Trainer:
-    tokenizer: PreTrainedTokenizerBase | None = None
-    model: AutoModelForCausalLM | None = None
+    tokenizer: PreTrainedTokenizerBase
+    model: nn.Module
 
     def __init__(self, host_type: HostType) -> None:
         """Initialize the trainer with configuration."""
