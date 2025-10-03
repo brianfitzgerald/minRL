@@ -93,6 +93,7 @@ def rollout(
             for prefix in prefixes_batch  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
+        stop_token_ids = tokenizer.encode("<|im_end|>", add_special_tokens=False)
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
@@ -100,6 +101,7 @@ def rollout(
                 temperature=temperature,
                 # If past the first turn, only generate one response per conversation
                 n=group_size if step_idx == 0 else 1,
+                stop_token_ids=stop_token_ids,
             ),
         )
 
@@ -258,37 +260,6 @@ def compute_algorithm_loss(
     return loss, advantage_t
 
 
-@torch.no_grad()
-def compute_entropy_from_logits(
-    model: nn.Module,
-    batch_token_ids: torch.Tensor,
-    target_masks: torch.Tensor,
-    n_target_tokens: int,
-    device: torch.device,
-) -> torch.Tensor:
-    logits: torch.Tensor = model(batch_token_ids).logits.float()
-
-    # Get the cross entropy loss of the label and generated tokens
-    # Slice logits to match target tokens (exclude first position)
-    next_token_logits = logits[:, :-1]
-
-    # Clear logits from memory immediately after use
-    del logits
-    clear_memory()
-
-    # Calculate entropy only for target positions
-    next_token_logits_flat = next_token_logits.reshape(-1, next_token_logits.size(-1))
-    token_entropy = compute_entropy(next_token_logits_flat)
-    # single entropy value for the sequence
-    entropy = (token_entropy * target_masks.reshape(-1)).sum() / n_target_tokens
-
-    # Clear intermediate tensors to save memory
-    del next_token_logits
-    clear_memory()
-
-    return entropy
-
-
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
@@ -337,7 +308,8 @@ def process_batch(
     n_target_tokens: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy.
+    Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
+    which are all needed for computing the loss.
     """
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
@@ -377,7 +349,6 @@ def process_batch(
     # advantage is just normalized reward
     batch_rewards = [episode.reward for episode in episodes]
     batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
-    clear_memory()
 
     logits: torch.Tensor = model(batch_token_ids_t).logits.float()
 
@@ -389,23 +360,22 @@ def process_batch(
     del logits
     clear_memory()
 
+    bs = batch_token_ids_t.shape[0]
     logprobs = -torch.nn.functional.cross_entropy(
         next_token_logits.reshape(-1, next_token_logits.size(-1)),
         target_token_ids.reshape(-1),
         ignore_index=pad_token_id,
         reduction="none",
-    ).reshape(batch_token_ids_t.shape[0], -1)
+    ).reshape(bs, -1)
 
-    # Clear intermediate tensors to save memory
-    del next_token_logits
+    # Calculate entropy only for target positions
+    next_token_logits_flat = next_token_logits.reshape(-1, next_token_logits.size(-1))
+    token_entropy = compute_entropy(next_token_logits_flat)
 
-    # Compute entropy
-    entropy = compute_entropy_from_logits(
-        model, batch_token_ids_t, target_masks, n_target_tokens, device
-    )
+    # single entropy value for the sequence
+    entropy = (token_entropy * target_masks.reshape(-1)).sum() / n_target_tokens
 
-    # Clear intermediate tensors to save memory
-    del batch_token_ids_t, target_token_ids
+    del batch_token_ids_t, target_token_ids, next_token_logits_flat, next_token_logits
     clear_memory()
 
     return logprobs, target_masks, batch_rewards_t, entropy

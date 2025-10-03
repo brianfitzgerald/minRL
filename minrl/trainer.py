@@ -15,7 +15,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
-from vllm.envs import set_vllm_use_v1
+from minrl.algorithms import compute_scaled_temperature
 
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
@@ -109,7 +109,7 @@ class Trainer:
         attn_impl = "sdpa"  # Use SDPA instead of flash_attention_2 to avoid compatibility issues
 
         # Use more memory-efficient model loading
-        model: AutoModelForCausalLM = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
+        model: nn.Module = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
             dtype=self.dtype,
@@ -242,7 +242,6 @@ class Trainer:
                 self.evaluate(step)
 
             # Get temperature used for logging
-            from minrl.algorithms import compute_scaled_temperature
 
             temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
 

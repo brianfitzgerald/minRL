@@ -1,5 +1,6 @@
 from tensorboardX import SummaryWriter
 from minrl.constants import LoggerChoice, TaskChoice, TrainerConfig
+from dataclasses import asdict
 
 import wandb
 
@@ -19,7 +20,7 @@ class MetricsWrapper:
             self.wandb_run = wandb.init(
                 project="minrl",
                 name=run_name,
-                config=TrainerConfig().model_dump(),
+                config=asdict(TrainerConfig()),
                 tags=[task, model_id],
             )
         else:
