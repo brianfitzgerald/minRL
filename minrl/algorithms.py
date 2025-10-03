@@ -1,6 +1,7 @@
 import dataclasses
 from collections import defaultdict
 from typing import Dict, List, TypedDict
+import torch.nn.functional as F
 
 import torch
 import torch.nn as nn
@@ -151,8 +152,10 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     Compute entropy of logits.
     This is defined as -sum(p(x) * log(p(x))) for all x in the logits.
     """
-    probs = nn.functional.softmax(logits, dim=-1)
-    entropy = -torch.sum(probs * torch.log(probs), dim=-1)
+    # Can get underflow with softmax + log, so use log_softmax
+    logp = F.log_softmax(logits, dim=-1)
+    p = logp.exp()
+    entropy = -(p * logp).sum(dim=-1)
     return entropy
 
 
@@ -365,7 +368,7 @@ def process_batch(
     clear_memory()
 
     bs = batch_token_ids_t.shape[0]
-    logprobs = -torch.nn.functional.cross_entropy(
+    logprobs = -F.cross_entropy(
         next_token_logits.reshape(-1, next_token_logits.size(-1)),
         target_token_ids.reshape(-1),
         ignore_index=pad_token_id,
