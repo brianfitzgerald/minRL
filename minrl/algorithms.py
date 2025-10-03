@@ -83,17 +83,21 @@ def rollout(
     # For each turn, generate responses, add to conversation
     for step_idx in tqdm(range(max_steps), desc="Steps"):
         # Tokenize the conversations
-        prefixes_batch = tokenizer.apply_chat_template(
-            conversations,  # type: ignore
-            tokenize=True,
-            enable_thinking=False,  # type: ignore
+        templated_conversations = tokenizer.apply_chat_template(
+            conversations,  # pyright: ignore[reportArgumentType]
+            tokenize=False,
+            enable_thinking=False,
+            add_generation_prompt=True,
         )
+        tokenized_conversations = tokenizer(templated_conversations)["input_ids"]  # pyright: ignore[reportArgumentType]
         prefixes_prompts: list[TokensPrompt] = [
-            {"prompt_token_ids": prefix}
-            for prefix in prefixes_batch  # type: ignore
+            {
+                "prompt_token_ids": tokenized_conversation,
+            }
+            for tokenized_conversation in tokenized_conversations  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
-        stop_token_ids = tokenizer.encode("<|im_end|>", add_special_tokens=False)
+        stop_token_ids = [151645, 151643]
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(

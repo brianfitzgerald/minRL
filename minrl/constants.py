@@ -118,7 +118,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 @dataclass
 class TrainerConfig:
-    model_id: str = SMOL_LM_2_360M
+    model_id: str = QWEN_3_1_7_B
     eval_interval: int = 10
     group_size: int = 4
     max_new_tokens: int = 512
