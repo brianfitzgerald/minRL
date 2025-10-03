@@ -1,6 +1,7 @@
-from minrl.algorithms import update_policy
-from minrl.constants import Conversation, Episode, TrainerConfig
+from minrl.algorithms import process_batch, update_policy
+from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
+import torch
 
 import fire
 
@@ -59,17 +60,41 @@ episodes = [
     ),
 ]
 
-policy_results = update_policy(
-    model=trainer.model,  # pyright: ignore[reportArgumentType]
-    optimizer=trainer.optimizer,
+
+def compute_algorithm_loss(
+    logprobs: torch.Tensor,
+    target_masks: torch.Tensor,
+    batch_rewards: torch.Tensor,
+    algorithm: AlgorithmChoice,
+    n_target_tokens: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # multiply the log probs by the advantages
+    if algorithm == "grpo":
+        advantage_t = logprobs * batch_rewards[:, None]
+    elif algorithm == "gpg":
+        # subtract baseline, which is the mean of the rewards
+        advantages = batch_rewards - batch_rewards.mean()
+        advantage_t = logprobs * advantages[:, None]
+    elif algorithm == "reinforce":
+        advantage_t = logprobs * batch_rewards[:, None]
+
+    # scale by the mask, and normalize by token count
+    # this sets the advantage to 0 for padding tokens
+    advantage_t = (advantage_t * target_masks).sum() / n_target_tokens
+
+    loss = -advantage_t
+
+    return loss, advantage_t
+
+
+# Process the batch
+logprobs, target_masks, batch_rewards_t, batch_entropy = process_batch(
+    model=trainer.model,
     episodes=episodes,
-    micro_batch_size=trainer.config.train_batch_size,
-    pad_token_id=int(trainer.tokenizer.pad_token_id),  # pyright: ignore[reportArgumentType, reportOptionalMemberAccess]
-    max_grad_norm=trainer.config.max_grad_norm,
+    tokenizer=tokenizer,
+    pad_token_id=trainer.tokenizer.pad_token_id,
     device=trainer.device,
-    algorithm=trainer.config.algorithm,
-    tokenizer=trainer.tokenizer,  # pyright: ignore[reportArgumentType]
-    apply_loss=True,
+    n_target_tokens=n_target_tokens_total,
 )
 
 print(policy_results)
