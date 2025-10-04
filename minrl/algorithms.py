@@ -69,8 +69,8 @@ def rollout(
 ) -> List[Episode]:
     """
     Generate completions for each turn in a batch of conversations.
-    Runs for max_turns turns, and generates num_answers_per_question completions
-    for each turn.
+    Runs for max_steps turns, and generates group_size completions
+    for the first turn, then 1 completion per turn for subsequent turns.
     """
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
@@ -80,6 +80,9 @@ def rollout(
         f"max_tokens={config.max_new_tokens}, n={config.group_size}, "
         f"temp={temperature:.3f}"
     )
+
+    # Store all generated responses for episode creation
+    all_responses: list[list[list[str]]] = [[] for _ in range(len(conversations))]
 
     # For each turn, generate responses, add to conversation
     for step_idx in tqdm(range(max_steps), desc="Steps"):
@@ -113,36 +116,70 @@ def rollout(
         # Parse out the responses, and add to conversation
         for i in range(len(outputs)):
             if step_idx == 0:
-                # If first turn, add all responses to conversation
+                # If first turn, store all responses for episode creation
+                step_responses = []
                 for j in range(group_size):
                     generated_text = outputs[i].outputs[j].text
                     logger.info(f"\nText for response {i}.{j}: {generated_text}")
-                    conversations[i].append(
-                        {"role": "assistant", "content": generated_text}
-                    )
+                    step_responses.append(generated_text)
+                all_responses[i].append(step_responses)
+                # Add the first response to the conversation for next step
+                conversations[i].append(
+                    {"role": "assistant", "content": step_responses[0]}
+                )
             else:
                 # Otherwise, add the first response to the conversation
                 generated_text = outputs[i].outputs[0].text
                 conversations[i].append(
                     {"role": "assistant", "content": generated_text}
                 )
+                # Store single response for this step
+                all_responses[i].append([generated_text])
 
         # Clear CUDA cache
         clear_memory()
 
+    # Create episodes from all generated responses
     episodes: List[Episode] = []
     for i, (conversation, sample) in enumerate(zip(conversations, samples)):
-        # Calculate rewards
-        reward = reward_function(conversation, sample)
-        # Create episode
-        episode = Episode(
-            group_index=i,
-            answer_index=0,
-            sample=sample,
-            reward=reward,
-            conversation=conversation,
-        )
-        episodes.append(episode)
+        # For the first step, create multiple episodes (one per response in group)
+        if all_responses[i] and len(all_responses[i][0]) > 1:
+            for answer_idx in range(len(all_responses[i][0])):
+                # Create a conversation with this specific response
+                episode_conversation = conversation.copy()
+                # Replace the first assistant response with the specific one
+                if (
+                    len(episode_conversation) > 0
+                    and episode_conversation[-1]["role"] == "assistant"
+                ):
+                    episode_conversation[-1] = {
+                        "role": "assistant",
+                        "content": all_responses[i][0][answer_idx],
+                    }
+
+                # Calculate rewards for this specific response
+                reward = reward_function(episode_conversation, sample)
+
+                # Create episode
+                episode = Episode(
+                    group_index=i,
+                    answer_index=answer_idx,
+                    sample=sample,
+                    reward=reward,
+                    conversation=episode_conversation,
+                )
+                episodes.append(episode)
+        else:
+            # Fallback: create single episode if no group responses
+            reward = reward_function(conversation, sample)
+            episode = Episode(
+                group_index=i,
+                answer_index=0,
+                sample=sample,
+                reward=reward,
+                conversation=conversation,
+            )
+            episodes.append(episode)
 
     return episodes
 
@@ -233,28 +270,13 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
 def compute_algorithm_loss(
     logprobs: torch.Tensor,
     target_masks: torch.Tensor,
-    batch_rewards: torch.Tensor,
+    batch_advantages: torch.Tensor,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
     entropy: torch.Tensor | None = None,
     entropy_coef: float = 0.0,
 ) -> torch.Tensor:
     """
-    Compute the algorithm-specific loss from pre-computed logprobs.
-
-    Args:
-        logprobs: Pre-computed log probabilities of shape (batch_size, seq_len)
-                 These are NEGATIVE values from cross_entropy
-        target_masks: Boolean masks for target tokens of shape (batch_size, seq_len)
-        batch_rewards: Rewards for each episode of shape (batch_size,)
-        algorithm: The algorithm to use for computing advantages
-        n_target_tokens: Total number of target tokens for normalization
-        entropy: Optional entropy value for regularization
-        entropy_coef: Coefficient for entropy regularization
-
-    Returns:
-        loss value (to be minimized via gradient descent)
-
     Math: Policy gradient theorem says gradient should be: grad = E[grad log π(a|s) * A]
     where A is advantage/reward. Since we minimize loss, we set:
     loss = -log π(a|s) * A
@@ -268,26 +290,25 @@ def compute_algorithm_loss(
     """
     # multiply the log probs by the advantages
     if algorithm == "grpo":
-        advantage_t = logprobs * batch_rewards[:, None]
+        obj = logprobs * batch_advantages[:, None]
     elif algorithm == "gpg":
         # subtract baseline, which is the mean of the rewards
-        advantages = batch_rewards - batch_rewards.mean()
-        advantage_t = logprobs * advantages[:, None]
+        advantages = batch_advantages - batch_advantages.mean()
+        obj = logprobs * advantages[:, None]
     elif algorithm == "reinforce":
-        advantage_t = logprobs * batch_rewards[:, None]
+        obj = logprobs * batch_advantages[:, None]
 
     # scale by the mask, and normalize by token count
     # this sets the advantage to 0 for padding tokens
-    masked_advantage = advantage_t * target_masks
     # Sum over all tokens and divide by count for mean loss per token
-    policy_loss = -masked_advantage.sum() / n_target_tokens
+    loss = (obj * target_masks).sum() / n_target_tokens
 
     # Add entropy regularization (negative because we want to maximize entropy)
     if entropy is not None and entropy_coef > 0:
         entropy_loss = -entropy_coef * entropy
-        loss = policy_loss + entropy_loss
-    else:
-        loss = policy_loss
+        loss += entropy_loss
+
+    loss = -loss
 
     return loss
 
