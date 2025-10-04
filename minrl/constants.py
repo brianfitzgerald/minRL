@@ -124,9 +124,9 @@ class TrainerConfig:
     max_new_tokens: int = 512
     micro_batch_size: int = 4
     eval_batch_size: int = 8
-    max_grad_norm: float = 0.1
+    max_grad_norm: float = 1.0  # Increased from 0.1 - was too aggressive
     ckpt_save_interval: int = 500
-    lr: float = 5e-6
+    lr: float = 1e-5  # Increased from 5e-6 for faster learning
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = False
     algorithm: AlgorithmChoice = "grpo"
@@ -137,6 +137,7 @@ class TrainerConfig:
     temperature_scaling: bool = False
     temperature_min: float = 0.2
     temperature_max: float = 1.5
+    entropy_coef: float = 0.01  # Entropy regularization coefficient
 
     @property
     def model_display_name(self) -> str:

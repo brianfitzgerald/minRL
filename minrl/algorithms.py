@@ -209,15 +209,16 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
     for group in groups.values():
         rewards = torch.tensor([e.reward for e in group])
         mean = rewards.mean()
-        std = rewards.std()
-        if torch.isnan(std):
-            std = 0
+        std = rewards.std(unbiased=False)  # Use biased std for small groups
 
-        # Handle case where std is 0 to avoid division by zero
-        if std == 0:
-            normalized_rewards = rewards - mean
+        # Handle edge cases
+        if torch.isnan(std) or std == 0:
+            # If all rewards are identical, keep them as-is (will be zero after mean subtraction)
+            # This happens when all responses get same reward
+            # Small epsilon prevents completely killing gradient signal
+            normalized_rewards = torch.zeros_like(rewards)
         else:
-            normalized_rewards = (rewards - mean) / std
+            normalized_rewards = (rewards - mean) / (std + 1e-8)  # Add epsilon for numerical stability
 
         for episode, norm_reward in zip(group, normalized_rewards):
             normalized_episodes.append(
@@ -233,6 +234,8 @@ def compute_algorithm_loss(
     batch_rewards: torch.Tensor,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
+    entropy: torch.Tensor | None = None,
+    entropy_coef: float = 0.0,
 ) -> torch.Tensor:
     """
     Compute the algorithm-specific loss from pre-computed logprobs.
@@ -244,32 +247,45 @@ def compute_algorithm_loss(
         batch_rewards: Rewards for each episode of shape (batch_size,)
         algorithm: The algorithm to use for computing advantages
         n_target_tokens: Total number of target tokens for normalization
+        entropy: Optional entropy value for regularization
+        entropy_coef: Coefficient for entropy regularization
 
     Returns:
         loss value (to be minimized via gradient descent)
 
-    Note: logprobs from cross_entropy are negative. To maximize reward:
-    - We want to increase log P(a) when reward is high (positive)
-    - We want to decrease log P(a) when reward is low (negative)
-    - Since logprobs are negative, multiplying by reward gives the right gradient direction
+    Math: Policy gradient theorem says gradient should be: grad = E[grad log π(a|s) * A]
+    where A is advantage/reward. Since we minimize loss, we set:
+    loss = -log π(a|s) * A
+
+    Here logprobs = -cross_entropy = log π(a|s) (negative values)
+    So: advantage_t = logprobs * reward = (negative) * (pos/neg)
+        loss = -advantage_t.sum()
+    This gives correct gradients via SGD.
+
+    Entropy regularization encourages exploration by penalizing low entropy (peaked distributions).
     """
     # multiply the log probs by the advantages
     if algorithm == "grpo":
-        # logprobs are negative, rewards can be positive/negative after normalization
-        # We negate to get proper gradient: maximize logprob for high reward
-        advantage_t = -logprobs * batch_rewards[:, None]
+        advantage_t = logprobs * batch_rewards[:, None]
     elif algorithm == "gpg":
         # subtract baseline, which is the mean of the rewards
         advantages = batch_rewards - batch_rewards.mean()
-        advantage_t = -logprobs * advantages[:, None]
+        advantage_t = logprobs * advantages[:, None]
     elif algorithm == "reinforce":
-        advantage_t = -logprobs * batch_rewards[:, None]
+        advantage_t = logprobs * batch_rewards[:, None]
 
     # scale by the mask, and normalize by token count
     # this sets the advantage to 0 for padding tokens
     masked_advantage = advantage_t * target_masks
     # Sum over all tokens and divide by count for mean loss per token
-    loss = -masked_advantage.sum() / n_target_tokens
+    policy_loss = -masked_advantage.sum() / n_target_tokens
+
+    # Add entropy regularization (negative because we want to maximize entropy)
+    if entropy is not None and entropy_coef > 0:
+        entropy_loss = -entropy_coef * entropy
+        loss = policy_loss + entropy_loss
+    else:
+        loss = policy_loss
 
     return loss
 
@@ -456,6 +472,8 @@ def update_policy(
             batch_rewards_t,
             algorithm,
             batch_n_target_tokens,
+            entropy=batch_entropy,
+            entropy_coef=0.0,  # Will be set from config later
         )
 
         loss += batch_loss
