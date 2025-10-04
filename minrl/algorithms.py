@@ -239,28 +239,36 @@ def compute_algorithm_loss(
 
     Args:
         logprobs: Pre-computed log probabilities of shape (batch_size, seq_len)
+                 These are NEGATIVE values from cross_entropy
         target_masks: Boolean masks for target tokens of shape (batch_size, seq_len)
         batch_rewards: Rewards for each episode of shape (batch_size,)
         algorithm: The algorithm to use for computing advantages
         n_target_tokens: Total number of target tokens for normalization
-        apply_loss: Whether to apply the loss (backward pass)
 
     Returns:
-        Tuple of (loss, advantage_tensor)
+        loss value (to be minimized via gradient descent)
+
+    Note: logprobs from cross_entropy are negative. To maximize reward:
+    - We want to increase log P(a) when reward is high (positive)
+    - We want to decrease log P(a) when reward is low (negative)
+    - Since logprobs are negative, multiplying by reward gives the right gradient direction
     """
     # multiply the log probs by the advantages
     if algorithm == "grpo":
-        advantage_t = logprobs * batch_rewards[:, None]
+        # logprobs are negative, rewards can be positive/negative after normalization
+        # We negate to get proper gradient: maximize logprob for high reward
+        advantage_t = -logprobs * batch_rewards[:, None]
     elif algorithm == "gpg":
         # subtract baseline, which is the mean of the rewards
         advantages = batch_rewards - batch_rewards.mean()
-        advantage_t = logprobs * advantages[:, None]
+        advantage_t = -logprobs * advantages[:, None]
     elif algorithm == "reinforce":
-        advantage_t = logprobs * batch_rewards[:, None]
+        advantage_t = -logprobs * batch_rewards[:, None]
 
     # scale by the mask, and normalize by token count
     # this sets the advantage to 0 for padding tokens
     masked_advantage = advantage_t * target_masks
+    # Sum over all tokens and divide by count for mean loss per token
     loss = -masked_advantage.sum() / n_target_tokens
 
     return loss

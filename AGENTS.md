@@ -1,12 +1,8 @@
-# CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-MinRL is a minimal reimplementation of GRPO (Group Relative Policy Optimization) and other reinforcement learning algorithms for LLM training. The project uses PyTorch and vLLM for model training and inference, with support for various tasks like Connections and Hanoi Tower puzzles.
 
 ## Development Commands
+
+Always activate the virtualenv first with `source .venv/bin/activate`.
 
 ### Training
 ```bash
@@ -23,23 +19,9 @@ uv run pytest tests/
 ruff check .
 ```
 
-### Monitoring
-```bash
-# View TensorBoard logs
-tensorboard --logdir runs
-
-# Evaluation visualization
-python visualize_evals.py
-```
-
 ### Testing
 ```bash
-# Run specific test files
-pytest tests/test_connections_reward.py
-pytest tests/test_hanoi.py
-
-# Run a quick test
-python test_run.py
+python tests/
 ```
 
 ## Architecture
@@ -60,36 +42,9 @@ python test_run.py
 
 3. **Tasks** (`minrl/tasks/`): Task definitions and datasets
    - Each task has a reward function and dataset class
-   - `ConnectionsDataset`: NYT Connections puzzle task
-   - `HanoiDataset`: Tower of Hanoi puzzle task
    - Tasks are registered in `TASK_DEFINITIONS` dictionary
 
 4. **Configuration** (`minrl/constants.py`): Centralized configuration
    - `TrainerConfig`: Main configuration with model settings, hyperparameters
    - Model definitions for various sizes (SmolLM, Qwen variants)
    - Algorithm choices: "reinforce", "grpo", "gpg"
-
-## Configuration
-
-The main configuration is in `TrainerConfig` class in `constants.py`:
-- `model_id`: HuggingFace model identifier
-- `algorithm`: RL algorithm choice ("grpo", "reinforce", "gpg")
-- `task`: Task to train on ("connections", "hanoi")
-- `train_batch_size`: Training batch size
-- `max_new_tokens`: Maximum tokens to generate
-- `temperature`: Sampling temperature (supports adaptive scaling)
-
-## File Structure
-
-- `minrl/`: Main package
-  - `trainer.py`: Training orchestration
-  - `algorithms.py`: RL algorithms
-  - `constants.py`: Configuration classes
-  - `metrics.py`: Metrics logging wrapper
-  - `tasks/`: Task implementations
-- `train.py`: Local training entry point
-- `modal_train.py`: Modal deployment script
-- `evaluate.py`: Evaluation utilities
-- `tests/`: Test suite
-- `runs/`: TensorBoard logs
-- `checkpoints/`: Model checkpoints

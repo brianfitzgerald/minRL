@@ -99,9 +99,9 @@ class Trainer:
         )
         self.vllm_model = LLM(
             model=self.config.model_id,
-            gpu_memory_utilization=0.2,
-            max_model_len=2048,
-            max_seq_len_to_capture=2048,
+            gpu_memory_utilization=0.5,
+            max_model_len=1024,
+            max_seq_len_to_capture=1024,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
         )

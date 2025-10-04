@@ -19,7 +19,8 @@
       "Bash(pip index versions:*)",
       "Bash(uv add:*)",
       "Bash(uv pip install:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(nvidia-smi:*)"
     ],
     "deny": []
   }
