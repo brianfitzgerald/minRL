@@ -173,9 +173,10 @@ class Trainer:
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        logger_choice: LoggerChoice = (
-            "wandb" if self.host_type == "modal" else "tensorboard"
-        )
+        # logger_choice: LoggerChoice = (
+        #     "wandb" if self.host_type == "modal" else "tensorboard"
+        # )
+        logger_choice: LoggerChoice = "wandb"
         logger.info(f"Logging to: {logger_choice}")
         self.metrics_wrapper = MetricsWrapper(
             logger_choice, self.config.task, self.config.model_id, self.run_name
