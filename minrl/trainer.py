@@ -152,12 +152,11 @@ class Trainer:
         )
         generator = torch.Generator(device=self.device)
         # Reduce batch size for memory efficiency
-        effective_batch_size = max(1, self.config.train_batch_size // 2)
         self.train_dataloader = DataLoader(
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=effective_batch_size,
+            batch_size=self.config.micro_batch_size,
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
@@ -212,13 +211,12 @@ class Trainer:
             logger.info(f"Updating policy for step {step}")
 
             # Use smaller micro batch size for memory efficiency
-            micro_batch_size = max(1, self.config.train_batch_size // 4)
             results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,
                 tokenizer=self.tokenizer,
-                micro_batch_size=micro_batch_size,
+                micro_batch_size=self.config.micro_batch_size,
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
@@ -230,6 +228,18 @@ class Trainer:
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
 
+            # Get temperature used for logging
+            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
+
+            compute_metrics(
+                episodes,
+                results,  # pyright: ignore[reportArgumentType]
+                self.metrics_wrapper,
+                step,
+                self.optimizer,
+                temperature_used,
+            )
+
             # Clear memory after each step
             del episodes
             gc.collect()
@@ -240,21 +250,6 @@ class Trainer:
                 torch.cuda.synchronize()
             if step % self.config.eval_interval == 0:
                 self.evaluate(step)
-
-            # Get temperature used for logging
-
-            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
-
-            # Note: episodes are already deleted for memory optimization
-            # We'll pass empty list to compute_metrics to avoid errors
-            compute_metrics(
-                [],  # Empty list since episodes were deleted for memory optimization
-                results,  # pyright: ignore[reportArgumentType]
-                self.metrics_wrapper,
-                step,
-                self.optimizer,
-                temperature_used,
-            )
 
             # Update prev_reward_std for next iteration
             prev_reward_std = current_reward_std

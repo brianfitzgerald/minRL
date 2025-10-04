@@ -18,7 +18,8 @@
       "Bash(uv index versions:*)",
       "Bash(pip index versions:*)",
       "Bash(uv add:*)",
-      "Bash(uv pip install:*)"
+      "Bash(uv pip install:*)",
+      "Bash(source:*)"
     ],
     "deny": []
   }

@@ -122,7 +122,7 @@ class TrainerConfig:
     eval_interval: int = 10
     group_size: int = 4
     max_new_tokens: int = 512
-    train_batch_size: int = 2
+    micro_batch_size: int = 4
     eval_batch_size: int = 8
     max_grad_norm: float = 0.1
     ckpt_save_interval: int = 500

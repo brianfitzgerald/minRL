@@ -233,7 +233,7 @@ def compute_algorithm_loss(
     batch_rewards: torch.Tensor,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Compute the algorithm-specific loss from pre-computed logprobs.
 
@@ -260,11 +260,10 @@ def compute_algorithm_loss(
 
     # scale by the mask, and normalize by token count
     # this sets the advantage to 0 for padding tokens
-    advantage_t = (advantage_t * target_masks).sum() / n_target_tokens
+    masked_advantage = advantage_t * target_masks
+    loss = -masked_advantage.sum() / n_target_tokens
 
-    loss = -advantage_t
-
-    return loss, advantage_t
+    return loss
 
 
 def sync_weights_to_vllm(
@@ -415,19 +414,22 @@ def update_policy(
         n_target_tokens += len(token_ids)
     total_entropy = torch.tensor(0.0, device=device)
 
-    loss, grad_norm = (
-        torch.tensor(0.0, device=device),
-        torch.tensor(0.0, device=device),
-    )
-
-    batch_advantages: list[torch.Tensor] = []
+    loss = torch.tensor(0.0, device=device)
+    grad_norm = 0.0
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
-        # get a micro-batch of episodes
         j = min(i + micro_batch_size, len(episodes))
 
         batch_episodes = episodes[i:j]
+
+        # Calculate target tokens for this batch only
+        batch_n_target_tokens = 0
+        for episode in batch_episodes:
+            token_ids, _ = get_token_ids_and_assistant_mask(
+                episode.conversation, tokenizer
+            )
+            batch_n_target_tokens += len(token_ids)
 
         # Process the batch
         logprobs, target_masks, batch_rewards_t, batch_entropy = process_batch(
@@ -436,21 +438,20 @@ def update_policy(
             tokenizer=tokenizer,
             pad_token_id=pad_token_id,
             device=device,
-            n_target_tokens=n_target_tokens,
+            n_target_tokens=batch_n_target_tokens,
         )
 
         # Compute algorithm-specific loss
-        batch_loss, advantage_t = compute_algorithm_loss(
+        batch_loss = compute_algorithm_loss(
             logprobs,
             target_masks,
             batch_rewards_t,
             algorithm,
-            n_target_tokens,
+            batch_n_target_tokens,
         )
 
         loss += batch_loss
         total_entropy += batch_entropy
-        batch_advantages.append(advantage_t)
 
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t
