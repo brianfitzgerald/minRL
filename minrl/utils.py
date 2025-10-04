@@ -140,6 +140,14 @@ def find_assistant_sections(
 
 
 def clear_memory():
+    """Clear memory more aggressively to prevent lockups during training."""
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        # Force garbage collection of CUDA tensors
+        torch.cuda.synchronize()
+
+        # Reset peak memory stats to get accurate measurements
+        torch.cuda.reset_peak_memory_stats()
+        # Force garbage collection again after CUDA operations
+        gc.collect()

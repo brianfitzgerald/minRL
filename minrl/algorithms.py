@@ -218,7 +218,9 @@ def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
             # Small epsilon prevents completely killing gradient signal
             normalized_rewards = torch.zeros_like(rewards)
         else:
-            normalized_rewards = (rewards - mean) / (std + 1e-8)  # Add epsilon for numerical stability
+            normalized_rewards = (rewards - mean) / (
+                std + 1e-8
+            )  # Add epsilon for numerical stability
 
         for episode, norm_reward in zip(group, normalized_rewards):
             normalized_episodes.append(
@@ -312,9 +314,8 @@ def sync_weights_to_vllm(
     except AttributeError:
         # vLLM API change: model_executor might not be available in newer versions
         logger.warning(
-            "Cannot sync params to vLLM - model_executor not found. This is expected in newer vLLM versions."
+            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
         )
-    logger.info("Param update done")
 
 
 class UpdatePolicyResults(TypedDict):
@@ -422,11 +423,12 @@ def update_policy(
     algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
+    gradient_accumulation_steps: int = 1,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
     by computing the loss from the reward and generated logits.
-    This implements a number of different algorithms.
+    This implements a number of different algorithms with gradient accumulation.
     """
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
@@ -438,13 +440,13 @@ def update_policy(
         n_target_tokens += len(token_ids)
     total_entropy = torch.tensor(0.0, device=device)
 
-    loss = torch.tensor(0.0, device=device)
+    accumulated_loss = torch.tensor(0.0, device=device)
     grad_norm = 0.0
+    accumulation_step = 0
 
-    # Iterate over micro-batches
+    # Iterate over micro-batches with gradient accumulation
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
-
         batch_episodes = episodes[i:j]
 
         # Calculate target tokens for this batch only
@@ -476,24 +478,42 @@ def update_policy(
             entropy_coef=0.0,  # Will be set from config later
         )
 
-        loss += batch_loss
+        # Scale loss by accumulation steps to maintain correct gradient magnitude
+        scaled_batch_loss = batch_loss / gradient_accumulation_steps
+        accumulated_loss += scaled_batch_loss
         total_entropy += batch_entropy
 
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t
         clear_memory()
 
-    if apply_loss:
-        loss.backward()
-        # update the policy
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=max_grad_norm
-        )
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+        accumulation_step += 1
+
+        # Perform backward pass and optimizer step when accumulation is complete
+        if apply_loss and (
+            accumulation_step % gradient_accumulation_steps == 0
+            or i + micro_batch_size >= len(episodes)
+        ):
+            accumulated_loss.backward()
+
+            # Clip gradients to prevent exploding gradients
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=max_grad_norm
+            )
+
+            # Update parameters
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            # Reset accumulated loss for next accumulation cycle
+            accumulated_loss = torch.tensor(0.0, device=device)
+            accumulation_step = 0
+
+            # Clear memory after optimizer step more aggressively
+            clear_memory()
 
     return {
-        "loss": float(loss),
+        "loss": float(accumulated_loss),
         "grad_norm": float(grad_norm),
         "entropy": float(total_entropy),
     }

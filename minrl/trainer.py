@@ -1,4 +1,3 @@
-import gc
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +14,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
+from vllm.envs import set_vllm_use_v1
 from minrl.algorithms import compute_scaled_temperature
 
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
@@ -22,7 +22,7 @@ from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
-from minrl.utils import compute_metrics
+from minrl.utils import clear_memory, compute_metrics
 
 
 def get_available_device() -> str:
@@ -91,6 +91,7 @@ class Trainer:
         torch.set_default_device(self.device)
         if self.device.type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
+        set_vllm_use_v1(False)
 
         # Reduce vLLM memory usage significantly
         memory_info = get_memory_usage()
@@ -117,6 +118,14 @@ class Trainer:
             low_cpu_mem_usage=True,  # Enable low memory usage
             use_cache=False,  # Disable KV cache to save memory
         )
+
+        # Enable gradient checkpointing to save memory during backward pass
+        if self.config.use_gradient_checkpointing:
+            if hasattr(model, "gradient_checkpointing_enable"):
+                model.gradient_checkpointing_enable()
+                logger.info("Gradient checkpointing enabled")
+            else:
+                logger.warning("Gradient checkpointing not available for this model")
 
         logger.info("Model loaded.")
         logger.info(f"Using device {self.device}, attn impl {attn_impl}")
@@ -156,7 +165,7 @@ class Trainer:
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=self.config.micro_batch_size,
+            batch_size=self.config.groups_per_batch,
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
@@ -210,7 +219,6 @@ class Trainer:
 
             logger.info(f"Updating policy for step {step}")
 
-            # Use smaller micro batch size for memory efficiency
             results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
@@ -221,6 +229,7 @@ class Trainer:
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 algorithm=self.config.algorithm,
+                gradient_accumulation_steps=self.config.gradient_accumulation_steps,
             )
             sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
 
@@ -240,14 +249,16 @@ class Trainer:
                 temperature_used,
             )
 
-            # Clear memory after each step
+            # Clear memory after each step more aggressively
             del episodes
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            clear_memory()
 
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
+            # Log memory usage after clearing
+            memory_info = get_memory_usage()
+            logger.info(
+                f"Memory after step {step} - CPU: {memory_info['cpu_memory_mb']:.1f}MB, "
+                f"GPU: {memory_info['gpu_memory_allocated_mb']:.1f}MB ({memory_info['gpu_memory_percentage']:.1f}%)"
+            )
             if step % self.config.eval_interval == 0:
                 self.evaluate(step)
 

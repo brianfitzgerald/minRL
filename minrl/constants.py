@@ -118,17 +118,18 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 @dataclass
 class TrainerConfig:
-    model_id: str = QWEN_3_1_7_B
+    model_id: str = QWEN_3_0_6B
     eval_interval: int = 10
+    # Total batch size is groups_per_batch * group_size
+    groups_per_batch: int = 2
     group_size: int = 4
     max_new_tokens: int = 512
-    micro_batch_size: int = 4
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0  # Increased from 0.1 - was too aggressive
     ckpt_save_interval: int = 500
     lr: float = 1e-5  # Increased from 5e-6 for faster learning
     optimizer: OptimizerChoice = "adamw"
-    use_low_precision_optimizer_if_available: bool = False
+    use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "connections"
     wandb_project: str = "minrl"
@@ -138,6 +139,15 @@ class TrainerConfig:
     temperature_min: float = 0.2
     temperature_max: float = 1.5
     entropy_coef: float = 0.01  # Entropy regularization coefficient
+
+    # Memory optimization settings
+    gradient_accumulation_steps: int = (
+        2  # Number of micro-batches to accumulate before optimizer step
+    )
+    use_gradient_checkpointing: bool = (
+        True  # Enable gradient checkpointing to save memory
+    )
+    micro_batch_size: int = 1  # Size of micro-batches for gradient accumulation
 
     @property
     def model_display_name(self) -> str:

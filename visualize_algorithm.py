@@ -10,7 +10,7 @@ import torch
 import fire
 
 
-config = TrainerConfig(micro_batch_size=4)
+config = TrainerConfig(groups_per_batch=4)
 
 trainer = Trainer(host_type="local")
 trainer.init_model()
