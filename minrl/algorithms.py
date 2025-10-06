@@ -101,8 +101,12 @@ def rollout(
             for tokenized_conversation in tokenized_conversations  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
-        stop_token_ids = tokenizer.encode("<|endoftext|>", add_special_tokens=False)
-        logger.info(f"Stop token IDs: {stop_token_ids}")
+        stop_token_ids = tokenizer.eos_token_id
+        logger.info(
+            f"Stop token IDs: {stop_token_ids} deocded: {tokenizer.decode(stop_token_ids)}"
+        )
+        if isinstance(stop_token_ids, int):
+            stop_token_ids = [stop_token_ids]
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
