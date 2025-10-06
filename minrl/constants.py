@@ -118,7 +118,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 @dataclass
 class TrainerConfig:
-    model_id: str = QWEN_3_0_6B
+    model_id: str = SMOL_LM_2_360M
     eval_interval: int = 10
     # Total batch size is groups_per_batch * group_size
     groups_per_batch: int = 2
