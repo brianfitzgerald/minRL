@@ -1,4 +1,5 @@
 import dataclasses
+from contextlib import nullcontext
 from collections import defaultdict
 from typing import Dict, List, TypedDict
 import torch.nn.functional as F
@@ -101,12 +102,14 @@ def rollout(
             for tokenized_conversation in tokenized_conversations  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
-        stop_token_ids = tokenizer.eos_token_id
+        eos_token_id = tokenizer.eos_token_id
         logger.info(
-            f"Stop token IDs: {stop_token_ids} deocded: {tokenizer.decode(stop_token_ids)}"
+            f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
         )
-        if isinstance(stop_token_ids, int):
-            stop_token_ids = [stop_token_ids]
+        # Convert to proper type for SamplingParams
+        stop_token_ids: list[int] | None = None
+        if isinstance(eos_token_id, int):
+            stop_token_ids = [eos_token_id]
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
@@ -190,14 +193,10 @@ def rollout(
 
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
-    """
-    Compute entropy of logits.
-    This is defined as -sum(p(x) * log(p(x))) for all x in the logits.
-    """
-    # Can get underflow with softmax + log, so use log_softmax
+    # Use log_softmax to avoid numerical instability
     logp = F.log_softmax(logits, dim=-1)
-    p = logp.exp()
-    entropy = -(p * logp).sum(dim=-1)
+    # Compute entropy: -sum(p * log(p)) = -sum(exp(logp) * logp)
+    entropy = -(logp.exp() * logp).sum(dim=-1)
     return entropy
 
 
@@ -407,11 +406,19 @@ def process_batch(
     batch_rewards = [episode.reward for episode in episodes]
     batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
 
-    logits: torch.Tensor = model(batch_token_ids_t).logits.float()
+    # Use mixed precision for forward pass to reduce memory usage
+    # Use autocast even without scaler for BFloat16 models to save memory
+    fwd_ctx = (
+        torch.autocast(device_type="cuda", enabled=True)
+        if device.type == "cuda"
+        else nullcontext()
+    )
+    with fwd_ctx:
+        logits: torch.Tensor = model(batch_token_ids_t).logits
 
     # Get the cross entropy loss of the label and generated tokens
     # Slice logits to match target tokens (exclude first position)
-    next_token_logits = logits[:, :-1]
+    next_token_logits = logits[:, :-1].float()
 
     # Clear logits from memory immediately after use
     del logits
@@ -425,14 +432,27 @@ def process_batch(
         reduction="none",
     ).reshape(bs, -1)
 
-    # Calculate entropy only for target positions
-    next_token_logits_flat = next_token_logits.reshape(-1, next_token_logits.size(-1))
-    token_entropy = compute_entropy(next_token_logits_flat)
+    # Calculate entropy only for target positions - memory efficient version
+    # Compute entropy in chunks to avoid creating large intermediate tensors
+    bs, seq_len, vocab_size = next_token_logits.shape
+    target_masks_flat = target_masks.reshape(-1)
 
-    # single entropy value for the sequence
-    entropy = (token_entropy * target_masks.reshape(-1)).sum() / n_target_tokens
+    # Only compute entropy for positions that are actually targets
+    target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
+    if len(target_positions) > 0:
+        next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
+        target_logits = next_token_logits_flat[target_positions]
 
-    del batch_token_ids_t, target_token_ids, next_token_logits_flat, next_token_logits
+        # Use mixed precision for entropy computation
+        with fwd_ctx:
+            token_entropy = compute_entropy(target_logits)
+
+        # single entropy value for the sequence
+        entropy = token_entropy.sum() / n_target_tokens
+    else:
+        entropy = torch.tensor(0.0, device=device)
+
+    del batch_token_ids_t, target_token_ids, next_token_logits
     clear_memory()
 
     return logprobs, target_masks, batch_rewards_t, entropy

@@ -83,6 +83,9 @@ class Trainer:
         """Initialize the trainer with configuration."""
         self.config = TrainerConfig()
         self.device = torch.device(get_available_device())
+        if self.device.type == "cuda" and host_type == "local":
+            # set to 0.9 to avoid total locks during development
+            torch.cuda.memory.set_per_process_memory_fraction(0.9, device=0)
         self.host_type: HostType = host_type
         self.dtype = torch.bfloat16
 
