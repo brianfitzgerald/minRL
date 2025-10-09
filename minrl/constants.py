@@ -141,9 +141,9 @@ class TrainerConfig:
     entropy_coef: float = 0.01  # Entropy regularization coefficient
 
     # Memory optimization settings
-    gradient_accumulation_steps: int = 2
+    gradient_accumulation_steps: int = 4
     use_gradient_checkpointing: bool = True
-    micro_batch_size: int = 4  # Size of micro-batches for gradient accumulation
+    micro_batch_size: int = 2  # Size of micro-batches for gradient accumulation
 
     @property
     def model_display_name(self) -> str:

@@ -110,7 +110,7 @@ class Trainer:
             dtype="float16" if USING_MPS else "bfloat16",
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = "sdpa"  # Use SDPA instead of flash_attention_2 to avoid compatibility issues
+        attn_impl = "sdpa" if self.device.type == "mps" else "flash_attention_2"
 
         # Use more memory-efficient model loading
         model: nn.Module = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
@@ -118,8 +118,7 @@ class Trainer:
             device_map="auto",
             dtype=self.dtype,
             attn_implementation=attn_impl,
-            low_cpu_mem_usage=True,  # Enable low memory usage
-            use_cache=False,  # Disable KV cache to save memory
+            low_cpu_mem_usage=True,
         )
 
         # Enable gradient checkpointing to save memory during backward pass
