@@ -20,7 +20,9 @@
       "Bash(uv add:*)",
       "Bash(uv pip install:*)",
       "Bash(source:*)",
-      "Bash(nvidia-smi:*)"
+      "Bash(nvidia-smi:*)",
+      "Bash(timeout:*)",
+      "Bash(pkill:*)"
     ],
     "deny": []
   }

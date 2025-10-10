@@ -140,9 +140,7 @@ class Trainer:
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        logger_choice: LoggerChoice = (
-            "wandb" if self.host_type == "modal" else "tensorboard"
-        )
+        logger_choice: LoggerChoice = "wandb"
         logger.info(f"Logging to: {logger_choice}")
         self.metrics_wrapper = MetricsWrapper(
             logger_choice, self.config.task, self.config.model_id, self.run_name
@@ -221,11 +219,7 @@ class Trainer:
             clear_memory()
 
             # Log memory usage after clearing
-            memory_info = get_memory_usage()
-            logger.info(
-                f"Memory after step {step} - CPU: {memory_info['cpu_memory_mb']:.1f}MB, "
-                f"GPU: {memory_info['gpu_memory_allocated_mb']:.1f}MB ({memory_info['gpu_memory_percentage']:.1f}%)"
-            )
+            get_memory_usage()
             if step % self.config.eval_interval == 0:
                 self.evaluate(step)
 

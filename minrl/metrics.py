@@ -35,6 +35,7 @@ class MetricsWrapper:
             self.writer.add_scalar(tag, value, step)
 
     def add_text(self, tag: str, text: str, step: int) -> None:
+        return  # TODO: fix this
         if self.logger_choice == "wandb":
             assert self.wandb_run is not None
             self.wandb_run.log({tag: wandb.Html(text)}, step=step)

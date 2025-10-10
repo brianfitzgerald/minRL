@@ -125,9 +125,6 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 class TrainerConfig:
     model_id: str = GEMMA_3_270M
     eval_interval: int = 10
-    # Total batch size is groups_per_batch * group_size
-    groups_per_batch: int = 4
-    group_size: int = 4
     max_new_tokens: int = 512
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
@@ -145,9 +142,13 @@ class TrainerConfig:
     temperature_max: float = 1.5
     entropy_coef: float = 0.01  # Entropy regularization coefficient
 
-    # Memory optimization settings
     use_gradient_checkpointing: bool = True
-    micro_batch_size: int = 2  # Size of micro-batches
+
+    # Size of micro-batches for backward pass
+    micro_batch_size: int = 4
+    groups_per_batch: int = 4
+    group_size: int = 4
+    # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
     @property
     def model_display_name(self) -> str:

@@ -515,11 +515,18 @@ def update_policy(
     grad_norm = 0.0
     num_micro_batches = 0
 
+    # Compute number of micro-batches up-front for correct gradient accumulation scaling
+    # This makes the accumulated gradient equivalent to averaging over the full batch
+    total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
+
+    logger.info(
+        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}"
+    )
+
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
-        logger.info(f"Processing batch {i} of {len(episodes)}")
 
         # Process the batch
         logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
@@ -543,14 +550,17 @@ def update_policy(
             entropy_coef=entropy_coef,
         )
 
-        # Track total loss for logging
+        # Track total loss for logging (unscaled). We scale only for backward
         total_loss += batch_loss
         total_entropy += batch_entropy
         num_micro_batches += 1
 
         # Backward pass - gradients accumulate naturally
         if apply_loss:
-            batch_loss.backward()
+            # Scale per micro-batch loss by number of accumulation steps so that
+            # the accumulated gradient matches the average gradient over the full batch
+            scaled_loss = batch_loss / max(total_micro_batches, 1)
+            scaled_loss.backward()
 
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t, batch_loss
