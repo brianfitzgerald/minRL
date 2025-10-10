@@ -16,7 +16,7 @@ from vllm.envs import set_vllm_use_v1
 from minrl.algorithms import compute_scaled_temperature
 
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
-from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
+from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
@@ -26,9 +26,9 @@ if not USING_MPS:
     from bitsandbytes.optim import Adam8bit
 
 
-def get_available_device() -> str:
+def get_available_device() -> DeviceType:
     return (
-        "cuda:0"
+        "cuda"
         if torch.cuda.is_available()
         else "mps"
         if torch.mps.is_available()
@@ -47,17 +47,16 @@ class Trainer:
     def __init__(self, host_type: HostType) -> None:
         """Initialize the trainer with configuration."""
         self.config = TrainerConfig()
-        self.device = torch.device(get_available_device())
-        if self.device.type == "cuda" and host_type == "local":
-            # set to 0.9 to avoid total locks during development
-            torch.cuda.memory.set_per_process_memory_fraction(0.9, device=0)
+        device_type = get_available_device()
+        self.device_type: DeviceType = device_type
+        self.device = torch.device(device_type)
         self.host_type: HostType = host_type
         self.dtype = torch.bfloat16
 
     def init_model(self):
         """Initialize the model and tokenizer."""
         torch.set_default_device(self.device)
-        if self.device.type == "mps":
+        if self.device_type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
         set_vllm_use_v1(False)
 
@@ -74,7 +73,7 @@ class Trainer:
         )
         get_memory_usage()
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = "sdpa" if self.device.type == "mps" else "flash_attention_2"
+        attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
 
         # Use more memory-efficient model loading
         logger.info("Initializing HF model")
@@ -141,10 +140,9 @@ class Trainer:
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        # logger_choice: LoggerChoice = (
-        #     "wandb" if self.host_type == "modal" else "tensorboard"
-        # )
-        logger_choice: LoggerChoice = "wandb"
+        logger_choice: LoggerChoice = (
+            "wandb" if self.host_type == "modal" else "tensorboard"
+        )
         logger.info(f"Logging to: {logger_choice}")
         self.metrics_wrapper = MetricsWrapper(
             logger_choice, self.config.task, self.config.model_id, self.run_name

@@ -56,6 +56,7 @@ AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
+DeviceType = Literal["cuda", "mps", "cpu"]
 TaskChoice = Literal["connections", "hanoi", "zork"]
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 
@@ -122,13 +123,13 @@ class TrainerConfig:
     model_id: str = GEMMA_3_270M
     eval_interval: int = 10
     # Total batch size is groups_per_batch * group_size
-    groups_per_batch: int = 2
+    groups_per_batch: int = 4
     group_size: int = 4
     max_new_tokens: int = 512
     eval_batch_size: int = 8
-    max_grad_norm: float = 1.0  # Increased from 0.1 - was too aggressive
+    max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    lr: float = 1e-5  # Increased from 5e-6 for faster learning
+    lr: float = 5e-6
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
