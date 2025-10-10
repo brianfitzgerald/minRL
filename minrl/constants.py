@@ -47,7 +47,8 @@ QWEN_25_05B = "Qwen/Qwen2.5-0.5B-Instruct"
 TINY_LLAMA_V0 = "Maykeye/TinyLLama-v0"
 SMOL_LM_2_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
 SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
-QWEN_TINY_TESTING = "trl-internal-testing/tiny-Qwen2ForCausalLM-2.5"
+GEMMA_3_270M = "google/gemma-3-270m-it"
+GEMMA_TINY_TESTING = "trl-internal-testing/tiny-GemmaForCausalLM"
 
 
 OptimizerChoice = Literal["adamw"]
@@ -118,7 +119,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 @dataclass
 class TrainerConfig:
-    model_id: str = SMOL_LM_2_360M
+    model_id: str = GEMMA_3_270M
     eval_interval: int = 10
     # Total batch size is groups_per_batch * group_size
     groups_per_batch: int = 2

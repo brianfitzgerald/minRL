@@ -2,8 +2,6 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-import psutil
-import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -22,7 +20,10 @@ from minrl.constants import Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
-from minrl.utils import clear_memory, compute_metrics
+from minrl.utils import clear_memory, compute_metrics, USING_MPS, get_memory_usage
+
+if not USING_MPS:
+    from bitsandbytes.optim import Adam8bit
 
 
 def get_available_device() -> str:
@@ -37,42 +38,6 @@ def get_available_device() -> str:
 
 def simple_timestamp() -> str:
     return time.strftime("%m%d_%H%M%S")
-
-
-USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
-if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit  # type: ignore
-
-
-def get_memory_usage():
-    """Get current memory usage in MB and percentage of total VRAM available."""
-    process = psutil.Process(os.getpid())
-    cpu_memory_mb = process.memory_info().rss / 1024 / 1024
-
-    if torch.cuda.is_available():
-        # Get GPU memory usage
-        gpu_memory_allocated = torch.cuda.memory_allocated() / 1024 / 1024  # MB
-        gpu_memory_reserved = torch.cuda.memory_reserved() / 1024 / 1024  # MB
-        gpu_memory_total = (
-            torch.cuda.get_device_properties(0).total_memory / 1024 / 1024
-        )  # MB
-        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
-
-        return {
-            "cpu_memory_mb": cpu_memory_mb,
-            "gpu_memory_allocated_mb": gpu_memory_allocated,
-            "gpu_memory_reserved_mb": gpu_memory_reserved,
-            "gpu_memory_total_mb": gpu_memory_total,
-            "gpu_memory_percentage": gpu_memory_percentage,
-        }
-    else:
-        return {
-            "cpu_memory_mb": cpu_memory_mb,
-            "gpu_memory_allocated_mb": 0,
-            "gpu_memory_reserved_mb": 0,
-            "gpu_memory_total_mb": 0,
-            "gpu_memory_percentage": 0,
-        }
 
 
 class Trainer:
@@ -97,10 +62,8 @@ class Trainer:
         set_vllm_use_v1(False)
 
         # Reduce vLLM memory usage significantly
-        memory_info = get_memory_usage()
-        logger.info(
-            f"Memory usage - CPU: {memory_info['cpu_memory_mb']:.1f}MB, GPU: {memory_info['gpu_memory_allocated_mb']:.1f}MB ({memory_info['gpu_memory_percentage']:.1f}%)"
-        )
+        get_memory_usage()
+        logger.info("Initializing vLLM model")
         self.vllm_model = LLM(
             model=self.config.model_id,
             gpu_memory_utilization=0.5,
@@ -109,10 +72,12 @@ class Trainer:
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
         )
+        get_memory_usage()
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         attn_impl = "sdpa" if self.device.type == "mps" else "flash_attention_2"
 
         # Use more memory-efficient model loading
+        logger.info("Initializing HF model")
         model: nn.Module = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
@@ -120,6 +85,7 @@ class Trainer:
             attn_implementation=attn_impl,
             low_cpu_mem_usage=True,
         )
+        get_memory_usage()
 
         # Enable gradient checkpointing to save memory during backward pass
         if self.config.use_gradient_checkpointing:
@@ -233,6 +199,7 @@ class Trainer:
                 device=self.device,
                 algorithm=self.config.algorithm,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+                entropy_coef=self.config.entropy_coef,
             )
             sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
 

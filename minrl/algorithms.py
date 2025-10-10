@@ -155,15 +155,21 @@ def rollout(
             for answer_idx in range(len(all_responses[i][0])):
                 # Create a conversation with this specific response
                 episode_conversation = conversation.copy()
-                # Replace the first assistant response with the specific one
-                if (
-                    len(episode_conversation) > 0
-                    and episode_conversation[-1]["role"] == "assistant"
-                ):
-                    episode_conversation[-1] = {
-                        "role": "assistant",
-                        "content": all_responses[i][0][answer_idx],
-                    }
+
+                # Find and replace the first assistant response (from step 0)
+                # We need to find the first assistant message that was added during rollout
+                assistant_count = 0
+                for msg_idx, msg in enumerate(episode_conversation):
+                    if msg["role"] == "assistant":
+                        if (
+                            assistant_count == 0
+                        ):  # This is the first assistant message (from step 0)
+                            episode_conversation[msg_idx] = {
+                                "role": "assistant",
+                                "content": all_responses[i][0][answer_idx],
+                            }
+                            break
+                        assistant_count += 1
 
                 # Calculate rewards for this specific response
                 reward = reward_function(episode_conversation, sample)
@@ -361,8 +367,7 @@ def process_batch(
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
     device: torch.device,
-    n_target_tokens: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
     which are all needed for computing the loss.
@@ -370,12 +375,14 @@ def process_batch(
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
     assistant_mask_list: list[list[bool]] = []
+    n_target_tokens = 0
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
+        n_target_tokens += len(token_ids)
     # Pad token IDs to the same length using PyTorch's pad_sequence
     batch_token_ids_t = [
         torch.tensor(token_ids, dtype=torch.long, device=device)
@@ -455,7 +462,7 @@ def process_batch(
     del batch_token_ids_t, target_token_ids, next_token_logits
     clear_memory()
 
-    return logprobs, target_masks, batch_rewards_t, entropy
+    return logprobs, target_masks, batch_rewards_t, entropy, n_target_tokens
 
 
 def update_policy(
@@ -470,6 +477,7 @@ def update_policy(
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
     gradient_accumulation_steps: int = 1,
+    entropy_coef: float = 0.0,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
@@ -479,38 +487,28 @@ def update_policy(
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
-    # Calculate total target tokens for logging
-    n_target_tokens = 0
-    for episode in episodes:
-        token_ids, _ = get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
-        n_target_tokens += len(token_ids)
     total_entropy = torch.tensor(0.0, device=device)
-
+    total_loss = torch.tensor(0.0, device=device)
     accumulated_loss = torch.tensor(0.0, device=device)
     grad_norm = 0.0
     accumulation_step = 0
+    num_micro_batches = 0
 
     # Iterate over micro-batches with gradient accumulation
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
+        logger.info(f"Processing batch {i} of {len(episodes)}")
 
-        # Calculate target tokens for this batch only
-        batch_n_target_tokens = 0
-        for episode in batch_episodes:
-            token_ids, _ = get_token_ids_and_assistant_mask(
-                episode.conversation, tokenizer
+        # Preprocess batch
+        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
+            process_batch(
+                model=model,
+                episodes=batch_episodes,
+                tokenizer=tokenizer,
+                pad_token_id=pad_token_id,
+                device=device,
             )
-            batch_n_target_tokens += len(token_ids)
-
-        # Process the batch
-        logprobs, target_masks, batch_rewards_t, batch_entropy = process_batch(
-            model=model,
-            episodes=batch_episodes,
-            tokenizer=tokenizer,
-            pad_token_id=pad_token_id,
-            device=device,
-            n_target_tokens=batch_n_target_tokens,
         )
 
         # Compute algorithm-specific loss
@@ -519,15 +517,19 @@ def update_policy(
             target_masks,
             batch_rewards_t,
             algorithm,
-            batch_n_target_tokens,
+            n_target_tokens,
             entropy=batch_entropy,
-            entropy_coef=0.0,  # Will be set from config later
+            entropy_coef=entropy_coef,
         )
+
+        # Track total loss for logging (before scaling)
+        total_loss += batch_loss
+        total_entropy += batch_entropy
+        num_micro_batches += 1
 
         # Scale loss by accumulation steps to maintain correct gradient magnitude
         scaled_batch_loss = batch_loss / gradient_accumulation_steps
         accumulated_loss += scaled_batch_loss
-        total_entropy += batch_entropy
 
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t
@@ -535,14 +537,16 @@ def update_policy(
 
         accumulation_step += 1
 
-        # Perform backward pass and optimizer step when accumulation is complete
-        if apply_loss and (
-            accumulation_step % gradient_accumulation_steps == 0
-            or i + micro_batch_size >= len(episodes)
-        ):
+        # Perform backward pass and optimizer step either on the last batch,
+        # or every N accumulation steps
+        is_last_batch = j >= len(episodes)
+        should_step = (
+            accumulation_step % gradient_accumulation_steps == 0 or is_last_batch
+        )
+
+        if apply_loss and should_step:
             accumulated_loss.backward()
 
-            # Clip gradients to prevent exploding gradients
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=max_grad_norm
             )
@@ -551,15 +555,16 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
-            # Reset accumulated loss for next accumulation cycle
             accumulated_loss = torch.tensor(0.0, device=device)
             accumulation_step = 0
-
-            # Clear memory after optimizer step more aggressively
             clear_memory()
 
+    # Return average loss and entropy across all micro-batches
+    avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+
     return {
-        "loss": float(accumulated_loss),
+        "loss": float(avg_loss),
         "grad_norm": float(grad_norm),
-        "entropy": float(total_entropy),
+        "entropy": float(avg_entropy),
     }

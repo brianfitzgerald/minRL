@@ -1,14 +1,20 @@
 import gc
+import os
 import re
 from pydoc import html
 from typing import Dict, List
 
 import numpy as np
+import psutil
 import torch
 from loguru import logger
 
 from minrl.constants import Episode
 from minrl.metrics import MetricsWrapper
+
+USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
+if not USING_MPS:
+    from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo
 
 
 def clean_observation(obs: str) -> str:
@@ -151,3 +157,43 @@ def clear_memory():
         torch.cuda.reset_peak_memory_stats()
         # Force garbage collection again after CUDA operations
         gc.collect()
+
+
+def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
+    """Get current memory usage in MB and percentage of total VRAM available."""
+    process = psutil.Process(os.getpid())
+    cpu_memory_mb = process.memory_info().rss / 1024 / 1024
+    gpu_memory_allocated, gpu_memory_percentage = 0, 0
+
+    if torch.cuda.is_available():
+        # Get GPU memory usage
+        try:
+            handle = nvmlDeviceGetHandleByIndex(0)
+            info = nvmlDeviceGetMemoryInfo(handle)
+            gpu_memory_allocated = info.used
+            gpu_memory_reserved = info.reserved
+            gpu_memory_total = info.total
+        except Exception as e:
+            logger.warning(f"Error getting GPU memory usage: {e}")
+            gpu_memory_allocated = torch.cuda.memory_allocated()
+            gpu_memory_reserved = torch.cuda.memory_reserved()
+            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+
+        # Convert to MB
+        gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+        gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+        gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
+
+    if print_usage:
+        logger.info(
+            f"Memory usage - CPU: {cpu_memory_mb:.1f}MB, GPU: {gpu_memory_allocated:.1f}MB ({gpu_memory_percentage:.1f}%)"
+        )
+
+    return {
+        "cpu_memory_mb": cpu_memory_mb,
+        "gpu_memory_allocated": gpu_memory_allocated,
+        "gpu_memory_reserved": gpu_memory_reserved,
+        "gpu_memory_total": gpu_memory_total,
+        "gpu_memory_percentage": gpu_memory_percentage,
+    }
