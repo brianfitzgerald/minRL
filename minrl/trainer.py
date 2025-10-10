@@ -196,7 +196,6 @@ class Trainer:
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
                 algorithm=self.config.algorithm,
-                gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 entropy_coef=self.config.entropy_coef,
             )
             sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)

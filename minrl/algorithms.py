@@ -476,25 +476,22 @@ def update_policy(
     algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
-    gradient_accumulation_steps: int = 1,
     entropy_coef: float = 0.0,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
     by computing the loss from the reward and generated logits.
-    This implements a number of different algorithms with gradient accumulation.
+    This implements a number of different algorithms.
     """
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
     total_entropy = torch.tensor(0.0, device=device)
     total_loss = torch.tensor(0.0, device=device)
-    accumulated_loss = torch.tensor(0.0, device=device)
     grad_norm = 0.0
-    accumulation_step = 0
     num_micro_batches = 0
 
-    # Iterate over micro-batches with gradient accumulation
+    # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
@@ -522,30 +519,13 @@ def update_policy(
             entropy_coef=entropy_coef,
         )
 
-        # Track total loss for logging (before scaling)
+        # Track total loss for logging
         total_loss += batch_loss
         total_entropy += batch_entropy
         num_micro_batches += 1
 
-        # Scale loss by accumulation steps to maintain correct gradient magnitude
-        scaled_batch_loss = batch_loss / gradient_accumulation_steps
-        accumulated_loss += scaled_batch_loss
-
-        # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t
-        clear_memory()
-
-        accumulation_step += 1
-
-        # Perform backward pass and optimizer step either on the last batch,
-        # or every N accumulation steps
-        is_last_batch = j >= len(episodes)
-        should_step = (
-            accumulation_step % gradient_accumulation_steps == 0 or is_last_batch
-        )
-
-        if apply_loss and should_step:
-            accumulated_loss.backward()
+        if apply_loss:
+            batch_loss.backward()
 
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=max_grad_norm
@@ -554,10 +534,11 @@ def update_policy(
             # Update parameters
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-
-            accumulated_loss = torch.tensor(0.0, device=device)
-            accumulation_step = 0
             clear_memory()
+
+        # Clear intermediate tensors to save memory
+        del logprobs, target_masks, batch_rewards_t
+        clear_memory()
 
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
