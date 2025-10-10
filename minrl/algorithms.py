@@ -209,7 +209,17 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
 def get_token_ids_and_assistant_mask(
     conversation: Conversation,
     tokenizer: PreTrainedTokenizerBase,
+    episode: Episode | None = None,
 ) -> tuple[list[int], list[bool]]:
+    """Get token IDs and assistant mask, using cache if available."""
+    # Check cache first
+    if (
+        episode is not None
+        and episode._token_ids is not None
+        and episode._assistant_mask is not None
+    ):
+        return episode._token_ids, episode._assistant_mask
+
     if len(conversation) < 1:
         raise ValueError("Conversation must have at least 1 message")
 
@@ -236,6 +246,11 @@ def get_token_ids_and_assistant_mask(
     for start, end in assistant_sections:
         for j in range(start, end):
             assistant_mask[j] = True
+
+    # Cache results if episode provided
+    if episode is not None:
+        episode._token_ids = all_token_ids
+        episode._assistant_mask = assistant_mask
 
     return all_token_ids, assistant_mask
 
@@ -378,7 +393,7 @@ def process_batch(
     n_target_tokens = 0
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
-            episode.conversation, tokenizer
+            episode.conversation, tokenizer, episode
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
@@ -486,6 +501,15 @@ def update_policy(
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
+    # Pre-tokenize all episodes once and cache results
+    for episode in episodes:
+        get_token_ids_and_assistant_mask(episode.conversation, tokenizer, episode)
+
+    # Sort episodes by length for more efficient batching (reduces padding)
+    episodes.sort(
+        key=lambda ep: len(ep._token_ids) if ep._token_ids else 0, reverse=True
+    )
+
     total_entropy = torch.tensor(0.0, device=device)
     total_loss = torch.tensor(0.0, device=device)
     grad_norm = 0.0
@@ -497,7 +521,7 @@ def update_policy(
         batch_episodes = episodes[i:j]
         logger.info(f"Processing batch {i} of {len(episodes)}")
 
-        # Preprocess batch
+        # Process the batch
         logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
             process_batch(
                 model=model,
@@ -524,20 +548,21 @@ def update_policy(
         total_entropy += batch_entropy
         num_micro_batches += 1
 
+        # Backward pass - gradients accumulate naturally
         if apply_loss:
             batch_loss.backward()
 
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=max_grad_norm
-            )
-
-            # Update parameters
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-            clear_memory()
-
         # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t
+        del logprobs, target_masks, batch_rewards_t, batch_loss
+        clear_memory()
+
+    # Update parameters once after all gradients accumulated
+    if apply_loss:
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=max_grad_norm
+        )
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
         clear_memory()
 
     # Return average loss and entropy across all micro-batches

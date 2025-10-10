@@ -39,6 +39,9 @@ class Episode:
     reward: float
     conversation: Conversation
     sample: Sample
+    # Cache tokenization results to avoid re-tokenizing
+    _token_ids: list[int] | None = None
+    _assistant_mask: list[bool] | None = None
 
 
 QWEN_3_0_6B = "Qwen/Qwen3-0.6B"
