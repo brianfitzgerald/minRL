@@ -71,6 +71,7 @@ class Trainer:
             max_seq_len_to_capture=1024,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
+            enable_prefix_caching=True,
         )
         get_memory_usage()
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)

@@ -81,4 +81,17 @@ def test_rollout_with_multiple_turns(
     assert len(episode.conversation) >= 2  # user message + assistant response
     assistant_message = episode.conversation[1]
     assert assistant_message["role"] == "assistant"
-    assert assistant_message["content"] == MOCK_VLLM_RESPONSE
+    assert assistant_message["content"] == f"{MOCK_VLLM_RESPONSE} batch_idx=0"
+
+    # Test that each episode uses the correct response index
+    for i, episode in enumerate(episodes):
+        assert episode.group_index == 0
+        assert episode.answer_index == i
+        assert len(episode.conversation) == 4
+        for j in range(1, 4):
+            assert episode.conversation[j]["role"] == "assistant"
+        # The first assistant message should have the correct response index
+        first_assistant_message = episode.conversation[1]
+        assert (
+            first_assistant_message["content"] == f"{MOCK_VLLM_RESPONSE} batch_idx={i}"
+        )

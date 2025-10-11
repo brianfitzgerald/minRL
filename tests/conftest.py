@@ -83,7 +83,7 @@ class MockVLLMRequestOutput:
         self.outputs = outputs
 
 
-MOCK_VLLM_RESPONSE = "I am fine, how are you?"
+MOCK_VLLM_RESPONSE = "Mock response"
 
 
 class MockVLLMModel:
@@ -98,7 +98,15 @@ class MockVLLMModel:
         mock_outputs = []
         for _ in prompts:
             # Create n outputs per prompt (for group_size > 1)
-            outputs = [MockVLLMOutput(MOCK_VLLM_RESPONSE) for _ in range(n)]
+            if n == 1:
+                # For single response, don't append number
+                outputs = [MockVLLMOutput(MOCK_VLLM_RESPONSE)]
+            else:
+                # For multiple responses, append numbers to distinguish them
+                outputs = [
+                    MockVLLMOutput(f"{MOCK_VLLM_RESPONSE} batch_idx={j}")
+                    for j in range(n)
+                ]
             mock_outputs.append(MockVLLMRequestOutput(outputs))
 
         return mock_outputs

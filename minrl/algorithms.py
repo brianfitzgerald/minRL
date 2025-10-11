@@ -73,46 +73,70 @@ def rollout(
     Runs for max_steps turns, and generates group_size completions
     for the first turn, then 1 completion per turn for subsequent turns.
     """
+
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
 
-    logger.info(
-        f"Generating responses for {len(conversations)} prompts, "
-        f"max_tokens={config.max_new_tokens}, n={config.group_size}, "
-        f"temp={temperature:.3f}"
-    )
-
-    # Store all generated responses for episode creation
-    all_responses: list[list[list[str]]] = [[] for _ in range(len(conversations))]
+    # Get stop token IDs to stop generation on
     stop_token_ids: list[int] | None = None
     eos_token_id = tokenizer.eos_token_id
     if isinstance(eos_token_id, int):
         stop_token_ids = [eos_token_id]
+    if eos_token_id is not None:
+        logger.info(
+            f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
+        )
+    else:
+        logger.info("No EOS token ID found")
+
     logger.info(
-        f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
+        f"Generating responses for {len(conversations)} prompts, "
+        f"max_tokens={config.max_new_tokens}, n={group_size}, "
+        f"temp={temperature:.3f}"
     )
+
+    # Store all generated responses for all steps
+    # size is len(conversations) * group_size
+    # indexing is [prompt_idx][group_idx]
+    conversations_out: list[list[Conversation]] = [
+        [list(c) for _ in range(group_size)] for c in conversations
+    ]
 
     # For turn 1, generate group_size responses, and add them to separate conversations.
     # For subsequent turns, generate 1 response per conversation so the group size is maintained.
     for step_idx in tqdm(range(max_steps), desc="Steps"):
-        # Tokenize the conversations
+        # Tokenize the conversations and convert to input for vLLM
+        if step_idx == 0:
+            # First step: use the first conversation from each group for tokenization
+            current_conversations = [
+                conversations_out[i][0] for i in range(len(conversations_out))
+            ]
+        else:
+            # Subsequent steps: generate a new completion for each conversation in each group
+            # Flatten the conversations in the order expected by vLLM: [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
+            current_conversations = [
+                conversations_out[i][j]
+                for i in range(len(conversations_out))
+                for j in range(group_size)
+            ]
         templated_conversations = tokenizer.apply_chat_template(
-            conversations,  # pyright: ignore[reportArgumentType]
+            current_conversations,  # pyright: ignore[reportArgumentType]
             tokenize=False,
             enable_thinking=False,
             add_generation_prompt=True,
         )
         tokenized_conversations = tokenizer(templated_conversations)["input_ids"]  # pyright: ignore[reportArgumentType]
-        prefixes_prompts: list[TokensPrompt] = [
+        vllm_input: list[TokensPrompt] = [
             {
                 "prompt_token_ids": tokenized_conversation,
             }
             for tokenized_conversation in tokenized_conversations  # type: ignore
         ]
+
         # Generate list of n_conversations * group_size responses
         # Convert to proper type for SamplingParams
-        outputs = vllm_model.generate(
-            prefixes_prompts,
+        outputs_for_step = vllm_model.generate(
+            vllm_input,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
                 temperature=temperature,
@@ -123,62 +147,47 @@ def rollout(
         )
 
         # Parse out the responses, and add to conversation
-        # If this is the first turn, store all responses for episode creation.
-        # Otherwise,
-        for i in range(len(outputs)):
-            if step_idx == 0:
-                step_responses = []
-                for j in range(group_size):
-                    generated_text = outputs[i].outputs[j].text
+        if step_idx == 0:
+            # First step: add each response to its corresponding conversation in the group
+            for i in range(len(outputs_for_step)):
+                for j in range(len(outputs_for_step[i].outputs)):
+                    generated_text = outputs_for_step[i].outputs[j].text
                     logger.info(f"\nText for response {i}.{j}: {generated_text}")
-                    step_responses.append(generated_text)
-                all_responses[i].append(step_responses)
-                # Add the first response to the conversation for next step
-                conversations[i].append(
-                    {"role": "assistant", "content": step_responses[0]}
-                )
-            else:
-                # Otherwise, add the first response to the conversation
-                generated_text = outputs[i].outputs[0].text
-                conversations[i].append(
-                    {"role": "assistant", "content": generated_text}
-                )
-                # Store single response for this step
-                all_responses[i].append([generated_text])
+                    # Only add this response to the corresponding conversation
+                    conversations_out[i][j].append(
+                        {"role": "assistant", "content": generated_text}
+                    )
+        else:
+            # Subsequent steps: add each response to its corresponding conversation
+            # The flattened order is [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
+            flattened_idx = 0
+            for i in range(len(outputs_for_step)):
+                for j in range(len(outputs_for_step[i].outputs)):
+                    generated_text = outputs_for_step[i].outputs[j].text
+                    logger.info(f"\nText for response {i}.{j}: {generated_text}")
+                    # Calculate the group and conversation indices from the flattened index
+                    group_idx = flattened_idx // group_size
+                    conv_idx = flattened_idx % group_size
+                    conversations_out[group_idx][conv_idx].append(
+                        {"role": "assistant", "content": generated_text}
+                    )
+                    flattened_idx += 1
 
         # Clear CUDA cache
         clear_memory()
 
     # Create episodes from all generated responses
     episodes: List[Episode] = []
-    for i, (conversation, sample) in enumerate(zip(conversations, samples)):
-        # For the first step, create multiple episodes (one per response in group)
-        if all_responses[i] and len(all_responses[i][0]) > 1:
-            for answer_idx in range(len(all_responses[i][0])):
-                # Create a conversation with this specific response
-                episode_conversation = conversation.copy()
-
-                # Calculate rewards for this specific response
-                reward = reward_function(episode_conversation, sample)
-
-                # Create episode
-                episode = Episode(
-                    group_index=i,
-                    answer_index=answer_idx,
-                    sample=sample,
-                    reward=reward,
-                    conversation=episode_conversation,
-                )
-                episodes.append(episode)
-        else:
-            # Fallback: create single episode if no group responses
-            reward = reward_function(conversation, sample)
+    for i, (conversations, sample) in enumerate(zip(conversations_out, samples)):
+        for j in range(group_size):
+            # For the first step, create multiple episodes (one per response in group)
+            reward = reward_function(conversations[j], sample)
             episode = Episode(
                 group_index=i,
-                answer_index=0,
+                answer_index=j,
                 sample=sample,
                 reward=reward,
-                conversation=conversation,
+                conversation=conversations[j],
             )
             episodes.append(episode)
 
