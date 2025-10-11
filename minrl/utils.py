@@ -9,7 +9,7 @@ import psutil
 import torch
 from loguru import logger
 
-from minrl.constants import Episode
+from minrl.constants import Episode, Conversation
 from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
@@ -197,3 +197,46 @@ def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
         "gpu_memory_total": gpu_memory_total,
         "gpu_memory_percentage": gpu_memory_percentage,
     }
+
+
+def log_conversation(conversation: Conversation) -> None:
+    """
+    Log a Conversation to the console using loguru with colored output based on roles.
+
+    Args:
+        conversation: The conversation to log
+    """
+    # Color mapping for different roles using ANSI color codes
+    role_colors = {
+        "system": "\033[36m",  # Cyan
+        "user": "\033[32m",  # Green
+        "assistant": "\033[34m",  # Blue
+        "function": "\033[33m",  # Yellow
+        "tool": "\033[35m",  # Magenta
+        "unknown": "\033[31m",  # Red
+    }
+    reset_color = "\033[0m"
+
+    # Build the complete log message
+    log_lines = []
+
+    for i, message in enumerate(conversation, 1):
+        role = message.get("role", "unknown")
+        content = message.get("content", "")
+
+        if isinstance(content, str):
+            content_str = content
+        elif content is None:
+            content_str = ""
+        else:
+            content_str = str(content)
+
+        # Get color for role, default to red for unknown roles
+        color = role_colors.get(role, role_colors["unknown"])
+
+        # Add the message with color and clear separation
+        log_lines.append(f"\n{color}[{i}] {role.upper()}{reset_color}\n")
+        log_lines.append(f"{color}{content_str}{reset_color}\n")
+
+    logger.info("".join(log_lines))
+    print("".join(log_lines))

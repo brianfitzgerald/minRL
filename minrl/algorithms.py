@@ -1,4 +1,5 @@
 import dataclasses
+import numpy as np
 from contextlib import nullcontext
 from collections import defaultdict
 from typing import Dict, List, TypedDict
@@ -24,7 +25,7 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections
+from minrl.utils import clear_memory, find_assistant_sections, log_conversation
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -122,7 +123,6 @@ def rollout(
         templated_conversations = tokenizer.apply_chat_template(
             current_conversations,  # pyright: ignore[reportArgumentType]
             tokenize=False,
-            enable_thinking=False,
             add_generation_prompt=True,
         )
         tokenized_conversations = tokenizer(templated_conversations)["input_ids"]  # pyright: ignore[reportArgumentType]
@@ -152,7 +152,6 @@ def rollout(
             for i in range(len(outputs_for_step)):
                 for j in range(len(outputs_for_step[i].outputs)):
                     generated_text = outputs_for_step[i].outputs[j].text
-                    logger.info(f"\nText for response {i}.{j}: {generated_text}")
                     # Only add this response to the corresponding conversation
                     conversations_out[i][j].append(
                         {"role": "assistant", "content": generated_text}
@@ -164,7 +163,6 @@ def rollout(
             for i in range(len(outputs_for_step)):
                 for j in range(len(outputs_for_step[i].outputs)):
                     generated_text = outputs_for_step[i].outputs[j].text
-                    logger.info(f"\nText for response {i}.{j}: {generated_text}")
                     # Calculate the group and conversation indices from the flattened index
                     group_idx = flattened_idx // group_size
                     conv_idx = flattened_idx % group_size
@@ -182,6 +180,9 @@ def rollout(
         for j in range(group_size):
             # For the first step, create multiple episodes (one per response in group)
             reward = reward_function(conversations[j], sample)
+            logger.info(f"Episode {j}: reward: {reward}")
+            conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
+            log_conversation(conv_to_log)
             episode = Episode(
                 group_index=i,
                 answer_index=j,
@@ -534,6 +535,14 @@ def update_policy(
                 device=device,
             )
         )
+
+        reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
+        logger.info(
+            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
+        )
+        if reward_std == 0:
+            logger.warning("Reward std is 0, skipping micro-batch")
+            continue
 
         # Compute algorithm-specific loss
         batch_loss = compute_algorithm_loss(

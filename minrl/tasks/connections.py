@@ -21,8 +21,7 @@ CONNECTION_GROUP_SIZE = 4
 
 
 CONNECTIONS_PROMPT = """
-You are an expert puzzle solving model.
-Find groups of words that are related to each other. Each group is four words long. There are exactly four groups in total.
+Find four groups of four words that are related to each other.
 You may only use each word in one group.
 Respond in the following format:
 <answer>
@@ -33,6 +32,7 @@ Respond in the following format:
 ...
 </group>
 </answer>
+
 # Example
 
 User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
@@ -164,7 +164,7 @@ class ConnectionsDataset(MinRLDataset):
                 "role": "system",
                 "content": CONNECTIONS_PROMPT,
             },
-            {"role": "user", "content": sample["prompt"]},
+            {"role": "user", "content": f"User: {sample['prompt']}"},
         ]
 
 
