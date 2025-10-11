@@ -139,7 +139,7 @@ def rollout(
             vllm_input,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
-                temperature=temperature,
+                # temperature=temperature,
                 # If past the first turn, only generate one response per conversation
                 n=group_size if step_idx == 0 else 1,
                 stop_token_ids=stop_token_ids,
