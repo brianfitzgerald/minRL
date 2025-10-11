@@ -84,8 +84,16 @@ def rollout(
 
     # Store all generated responses for episode creation
     all_responses: list[list[list[str]]] = [[] for _ in range(len(conversations))]
+    stop_token_ids: list[int] | None = None
+    eos_token_id = tokenizer.eos_token_id
+    if isinstance(eos_token_id, int):
+        stop_token_ids = [eos_token_id]
+    logger.info(
+        f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
+    )
 
-    # For each turn, generate responses, add to conversation
+    # For turn 1, generate group_size responses, and add them to separate conversations.
+    # For subsequent turns, generate 1 response per conversation so the group size is maintained.
     for step_idx in tqdm(range(max_steps), desc="Steps"):
         # Tokenize the conversations
         templated_conversations = tokenizer.apply_chat_template(
@@ -102,14 +110,7 @@ def rollout(
             for tokenized_conversation in tokenized_conversations  # type: ignore
         ]
         # Generate list of n_conversations * group_size responses
-        eos_token_id = tokenizer.eos_token_id
-        logger.info(
-            f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
-        )
         # Convert to proper type for SamplingParams
-        stop_token_ids: list[int] | None = None
-        if isinstance(eos_token_id, int):
-            stop_token_ids = [eos_token_id]
         outputs = vllm_model.generate(
             prefixes_prompts,
             sampling_params=SamplingParams(
@@ -122,9 +123,10 @@ def rollout(
         )
 
         # Parse out the responses, and add to conversation
+        # If this is the first turn, store all responses for episode creation.
+        # Otherwise,
         for i in range(len(outputs)):
             if step_idx == 0:
-                # If first turn, store all responses for episode creation
                 step_responses = []
                 for j in range(group_size):
                     generated_text = outputs[i].outputs[j].text
@@ -155,21 +157,6 @@ def rollout(
             for answer_idx in range(len(all_responses[i][0])):
                 # Create a conversation with this specific response
                 episode_conversation = conversation.copy()
-
-                # Find and replace the first assistant response (from step 0)
-                # We need to find the first assistant message that was added during rollout
-                assistant_count = 0
-                for msg_idx, msg in enumerate(episode_conversation):
-                    if msg["role"] == "assistant":
-                        if (
-                            assistant_count == 0
-                        ):  # This is the first assistant message (from step 0)
-                            episode_conversation[msg_idx] = {
-                                "role": "assistant",
-                                "content": all_responses[i][0][answer_idx],
-                            }
-                            break
-                        assistant_count += 1
 
                 # Calculate rewards for this specific response
                 reward = reward_function(episode_conversation, sample)

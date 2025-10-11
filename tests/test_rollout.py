@@ -1,18 +1,17 @@
-import pytest
 from minrl.algorithms import rollout
 from minrl.constants import Conversation
-from vllm import LLM
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from minrl.constants import TrainerConfig
+from tests.conftest import MOCK_VLLM_RESPONSE, MockVLLMModel
 
 
-@pytest.mark.slow
 def test_rollout_with_sample_batch(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
-    vllm_model: LLM,
+    mock_vllm_model: MockVLLMModel,
 ):
     """Test rollout with a sample batch containing conversations."""
+
     conversations: list[Conversation] = [
         [
             {"role": "user", "content": "Hello, how are you?"},
@@ -27,7 +26,7 @@ def test_rollout_with_sample_batch(
         conversations=conversations,
         samples=samples,
         reward_function=lambda x, y: 0.5,
-        vllm_model=vllm_model,
+        vllm_model=mock_vllm_model,  # type: ignore
     )
 
     assert isinstance(episodes, list)
@@ -37,14 +36,22 @@ def test_rollout_with_sample_batch(
     episode = episodes[0]
     assert episode.reward == 0.5
 
+    # Verify that the mock model returned the expected text
+    # The conversation should have the assistant's response
+    assert len(episode.conversation) >= 2  # user message + assistant response
+    assistant_message = episode.conversation[1]
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["content"] == MOCK_VLLM_RESPONSE
 
-@pytest.mark.slow
+
 def test_rollout_with_multiple_turns(
     config: TrainerConfig,
     tokenizer: PreTrainedTokenizerBase,
-    vllm_model: LLM,
+    mock_vllm_model: MockVLLMModel,
 ):
     """Test rollout with a sample batch containing conversations."""
+
+    group_size = 4
     conversations: list[Conversation] = [
         [
             {"role": "user", "content": "Hello, how are you?"},
@@ -54,17 +61,24 @@ def test_rollout_with_multiple_turns(
     episodes = rollout(
         config=config,
         tokenizer=tokenizer,
-        group_size=4,
+        group_size=group_size,
         max_steps=3,
         conversations=conversations,
         samples=samples,
         reward_function=lambda x, y: 0.5,
-        vllm_model=vllm_model,
+        vllm_model=mock_vllm_model,  # type: ignore
     )
 
     assert isinstance(episodes, list)
-    assert len(episodes) > 0
+    assert len(episodes) == len(conversations) * group_size
 
     # Check episode structure
     episode = episodes[0]
     assert episode.reward == 0.5
+
+    # Verify that the mock model returned the expected text
+    # The conversation should have the assistant's response
+    assert len(episode.conversation) >= 2  # user message + assistant response
+    assistant_message = episode.conversation[1]
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["content"] == MOCK_VLLM_RESPONSE

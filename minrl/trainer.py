@@ -59,6 +59,7 @@ class Trainer:
         if self.device_type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
         set_vllm_use_v1(False)
+        torch.random.manual_seed(42)
 
         # Reduce vLLM memory usage significantly
         get_memory_usage()
@@ -96,7 +97,6 @@ class Trainer:
 
         logger.info("Model loaded.")
         logger.info(f"Using device {self.device}, attn impl {attn_impl}")
-        torch.random.manual_seed(42)
         self.tokenizer = tokenizer
         self.model = model
 
@@ -115,7 +115,7 @@ class Trainer:
         else:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
 
-    def init_training(self) -> None:
+    def init_training(self, logger_choice: LoggerChoice) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
         dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
@@ -140,7 +140,6 @@ class Trainer:
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        logger_choice: LoggerChoice = "wandb"
         logger.info(f"Logging to: {logger_choice}")
         self.metrics_wrapper = MetricsWrapper(
             logger_choice, self.config.task, self.config.model_id, self.run_name

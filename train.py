@@ -2,10 +2,10 @@ import fire
 from minrl.trainer import Trainer
 
 
-def main() -> None:
+def main(wandb: bool = False) -> None:
     trainer = Trainer("local")
     trainer.init_model()
-    trainer.init_training()
+    trainer.init_training(logger_choice="wandb" if wandb else "tensorboard")
     trainer.train()
 
 

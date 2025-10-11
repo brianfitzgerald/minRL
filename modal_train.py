@@ -1,6 +1,5 @@
 from modal import Image, App
 import modal
-import os
 from minrl.trainer import Trainer
 from minrl.modal_utils import (
     MODELS_VOLUME_PATH,
@@ -63,9 +62,7 @@ def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     timeout=format_timeout(hours=6),
 )
 def training():
-    data_files = os.listdir("/data")
-    print(f"Found {len(data_files)} data files in data directory: {data_files}")
     trainer = Trainer("modal")
     trainer.init_model()
-    trainer.init_training()
+    trainer.init_training("wandb")
     trainer.train()
