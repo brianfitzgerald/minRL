@@ -23,7 +23,9 @@ from minrl.tasks.dataset import MinRLDataset
 from minrl.utils import clear_memory, compute_metrics, USING_MPS, get_memory_usage
 
 if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit
+    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports]
+else:
+    Adam8bit = torch.optim.AdamW
 
 
 def get_available_device() -> DeviceType:
@@ -75,7 +77,8 @@ class Trainer:
         )
         get_memory_usage()
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
-        attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
+        # fallback to eager for mps
+        attn_impl = "eager" if self.device_type == "mps" else "flash_attention_2"
 
         # Use more memory-efficient model loading
         logger.info("Initializing HF model")
@@ -102,7 +105,10 @@ class Trainer:
         self.model = model
 
         if self.config.optimizer == "adamw":
-            if self.config.use_low_precision_optimizer_if_available:
+            if (
+                self.config.use_low_precision_optimizer_if_available
+                and self.device_type == "cuda"
+            ):
                 self.optimizer = Adam8bit(
                     cast(nn.Module, self.model).parameters(),
                     lr=self.config.lr,

@@ -66,7 +66,7 @@ def test_parse_groups_whitespace():
     assert parse_groups(input_str) == expected
 
 
-def test_parseG_groups_empty_string():
+def test_parse_groups_empty_string():
     input_str = ""
     expected = []
     assert parse_groups(input_str) == expected

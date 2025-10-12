@@ -1,5 +1,4 @@
 import dataclasses
-import numpy as np
 from contextlib import nullcontext
 from collections import defaultdict
 from typing import Dict, List, TypedDict

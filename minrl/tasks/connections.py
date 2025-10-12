@@ -19,10 +19,10 @@ RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
 N_CONNECTION_GROUPS = 4
 CONNECTION_GROUP_SIZE = 4
 
-
 CONNECTIONS_PROMPT = """
 Find four groups of four words that are related to each other.
 You may only use each word in one group.
+Always return four groups of four words.
 Respond in the following format:
 <answer>
 <group>
@@ -33,16 +33,17 @@ Respond in the following format:
 </group>
 </answer>
 
-# Example
+"""
 
-User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
+MOCK_PROMPT = """candle, crayon, honeycomb, seal, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk, defense, excuse, out, reason"""
+
+MOCK_ANSWER = """
 <answer>
-<group> candle, crayon, honeycomb, seal</group>
-<group> kettles, mittens, raindrops, whiskers</group>
-<group> canine, fang, molar, tusk</group>
-<group> defense, excuse, out, reason</group>
+<group>candle, crayon, honeycomb, seal</group>
+<group>kettles, mittens, raindrops, whiskers</group>
+<group>canine, fang, molar, tusk</group>
+<group>defense, excuse, out, reason</group>
 </answer>
-
 """
 
 
@@ -164,7 +165,9 @@ class ConnectionsDataset(MinRLDataset):
                 "role": "system",
                 "content": CONNECTIONS_PROMPT,
             },
-            {"role": "user", "content": f"User: {sample['prompt']}"},
+            {"role": "user", "content": MOCK_PROMPT},
+            {"role": "assistant", "content": MOCK_ANSWER},
+            {"role": "user", "content": f"{sample['prompt']}"},
         ]
 
 

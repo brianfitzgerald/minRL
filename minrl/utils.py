@@ -14,7 +14,7 @@ from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
-    from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo
+    from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo  # pyright: ignore[reportMissingImports]
 
 
 def clean_observation(obs: str) -> str:
@@ -163,7 +163,12 @@ def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
     """Get current memory usage in MB and percentage of total VRAM available."""
     process = psutil.Process(os.getpid())
     cpu_memory_mb = process.memory_info().rss / 1024 / 1024
-    gpu_memory_allocated, gpu_memory_percentage = 0, 0
+    (
+        gpu_memory_allocated,
+        gpu_memory_percentage,
+        gpu_memory_reserved,
+        gpu_memory_total,
+    ) = 0, 0, 0, 0
 
     if torch.cuda.is_available():
         # Get GPU memory usage

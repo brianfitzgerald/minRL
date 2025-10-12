@@ -51,6 +51,7 @@ TINY_LLAMA_V0 = "Maykeye/TinyLLama-v0"
 SMOL_LM_2_360M = "HuggingFaceTB/SmolLM2-360M-Instruct"
 SMOL_LM_2_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 GEMMA_3_270M = "google/gemma-3-270m-it"
+GEMMA_3_1B = "google/gemma-3-1b-it"
 GEMMA_TINY_TESTING = "trl-internal-testing/tiny-GemmaForCausalLM"
 
 
@@ -123,7 +124,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 @dataclass
 class TrainerConfig:
-    model_id: str = GEMMA_3_270M
+    model_id: str = GEMMA_3_1B
     eval_interval: int = 10
     max_new_tokens: int = 512
     eval_batch_size: int = 8
