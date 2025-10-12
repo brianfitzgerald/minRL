@@ -98,10 +98,15 @@ def find_assistant_sections(
     im_start_token: list[int],
     assistant_role_tokens: list[int],
     im_end_token: list[int],
+    newline_token_id: int | None = None,
 ) -> list[tuple[int, int]]:
     """Find all assistant sections in tokenized conversation."""
     sections = []
     i = 0
+
+    # Use provided newline token ID or fall back to default (Qwen/GPT-style)
+    if newline_token_id is None:
+        newline_token_id = NEWLINE_TOKEN_ID
 
     while i < len(all_token_ids):
         # Look for <|im_start|>assistant pattern
@@ -128,7 +133,7 @@ def find_assistant_sections(
                         is_last_token = end_pos == len(all_token_ids) - 1
                         is_newline = (
                             end_pos < len(all_token_ids)
-                            and all_token_ids[end_pos] == NEWLINE_TOKEN_ID
+                            and all_token_ids[end_pos] == newline_token_id
                         )
                         if is_last_token and is_newline:
                             end_pos += 1

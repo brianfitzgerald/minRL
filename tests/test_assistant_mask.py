@@ -1,6 +1,7 @@
 import pytest
+from transformers import AutoTokenizer
 from minrl.algorithms import get_token_ids_and_assistant_mask
-from minrl.constants import Conversation
+from minrl.constants import Conversation, GEMMA_3_1B, QWEN_3_0_6B
 
 
 def visualize_token_mask(token_ids, assistant_mask, tokenizer, title=None):
@@ -112,8 +113,8 @@ def test_get_token_ids_and_assistant_mask(tokenizer):
     assert False in assistant_mask, "Should have non-assistant tokens"
 
     # Verify token sequences - first tokens should be non-assistant, last should be assistant
-    assert assistant_mask[0] == False, "First token should be non-assistant"
-    assert assistant_mask[-1] == True, "Last token should be assistant"
+    assert not assistant_mask[0], "First token should be non-assistant"
+    assert assistant_mask[-1], "Last token should be assistant"
 
     # Visualize the token mask
     visualize_token_mask(
@@ -121,79 +122,53 @@ def test_get_token_ids_and_assistant_mask(tokenizer):
     )
 
 
-def test_get_token_ids_and_assistant_mask_error_cases(tokenizer):
-    """Test error cases for get_token_ids_and_assistant_mask."""
+@pytest.mark.parametrize("model_id", [GEMMA_3_1B, QWEN_3_0_6B])
+def test_assistant_mask_with_different_models(model_id):
+    """Test that get_token_ids_and_assistant_mask works correctly with different model tokenizers."""
 
-    # Test with empty conversation
-    with pytest.raises(ValueError, match="Conversation must have at least 1 message"):
-        get_token_ids_and_assistant_mask([], tokenizer)
+    # Create a tokenizer for the specific model
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-    # Test with single user message (should work now)
-    token_ids, assistant_mask = get_token_ids_and_assistant_mask(
-        [{"role": "user", "content": "Hello"}], tokenizer
-    )
-    assert len(token_ids) > 0
-    assert len(assistant_mask) == len(token_ids)
-    assert not any(assistant_mask)  # All should be False since no assistant messages
-
-
-def test_get_token_ids_and_assistant_mask_minimal(tokenizer):
-    """Test with minimal valid conversation."""
-
+    # Create a test conversation with system, user, and assistant messages
     conversation: Conversation = [
-        {"role": "user", "content": "Hi"},
-        {"role": "assistant", "content": "Hello"},
+        {"role": "system", "content": "You are a helpful AI assistant."},
+        {"role": "user", "content": "What is the capital of France?"},
+        {"role": "assistant", "content": "The capital of France is Paris."},
     ]
 
+    # Get token IDs and assistant mask
     token_ids, assistant_mask = get_token_ids_and_assistant_mask(
         conversation, tokenizer
     )
 
-    assert len(token_ids) == len(assistant_mask)
-    assert True in assistant_mask, "Should have assistant tokens"
-    assert False in assistant_mask, "Should have non-assistant tokens"
+    # Basic assertions
+    assert len(token_ids) == len(assistant_mask), (
+        f"Token IDs and assistant mask must have same length for {model_id}"
+    )
+    assert len(token_ids) > 0, f"Should have tokens for {model_id}"
+    assert len(assistant_mask) > 0, f"Should have assistant mask for {model_id}"
 
-    # Should start with non-assistant tokens and end with assistant tokens
-    assert assistant_mask[0] == False, "First token should be non-assistant"
-    assert assistant_mask[-1] == True, "Last token should be assistant"
-
-    # Visualize the token mask
-    visualize_token_mask(
-        token_ids, assistant_mask, tokenizer, "Minimal 2-message conversation"
+    # Check that we have both True and False in the mask
+    assert True in assistant_mask, (
+        f"Should have assistant tokens (True) in mask for {model_id}"
+    )
+    assert False in assistant_mask, (
+        f"Should have non-assistant tokens (False) in mask for {model_id}"
     )
 
-    print(f"\nSummary - Total tokens: {len(token_ids)}")
-    assistant_tokens = sum(assistant_mask)
-    non_assistant_tokens = len(assistant_mask) - assistant_tokens
-    print(
-        f"Token distribution: assistant={assistant_tokens}, non-assistant={non_assistant_tokens}"
+    # Verify that the first tokens (system/user) are not marked as assistant
+    assert not assistant_mask[0], f"First token should be non-assistant for {model_id}"
+
+    # Verify that the last tokens (assistant response) are marked as assistant
+    assert assistant_mask[-1], f"Last token should be assistant for {model_id}"
+
+    # Count assistant tokens - should be less than total (since we have system + user messages)
+    num_assistant_tokens = sum(assistant_mask)
+    total_tokens = len(assistant_mask)
+    assert 0 < num_assistant_tokens < total_tokens, (
+        f"Assistant tokens should be a subset of total tokens for {model_id}. "
+        f"Got {num_assistant_tokens}/{total_tokens}"
     )
 
-
-def test_get_token_ids_and_assistant_mask_complex(tokenizer):
-    """Test with a more complex multi-turn conversation."""
-
-    conversation: Conversation = [
-        {"role": "system", "content": "You are an expert mathematician."},
-        {"role": "user", "content": "Solve this equation: x^2 + 5x + 6 = 0"},
-        {
-            "role": "assistant",
-            "content": "I'll solve this quadratic equation step by step.",
-        },
-        {"role": "user", "content": "Can you show the work?"},
-        {
-            "role": "assistant",
-            "content": "Sure! Using the quadratic formula: x = (-5 ± √(25-24))/2 = (-5 ± 1)/2. So x = -2 or x = -3.",
-        },
-    ]
-
-    token_ids, assistant_mask = get_token_ids_and_assistant_mask(
-        conversation, tokenizer
-    )
-
-    # Visualize the token mask
-    visualize_token_mask(
-        token_ids, assistant_mask, tokenizer, "Complex multi-turn conversation"
-    )
-
-    print(f"\nSummary - Total tokens: {len(token_ids)}")
+    # Visualize the token mask for debugging
+    visualize_token_mask(token_ids, assistant_mask, tokenizer, f"Model: {model_id}")

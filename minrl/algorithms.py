@@ -223,14 +223,39 @@ def get_token_ids_and_assistant_mask(
     # Create assistant mask - initially all False
     assistant_mask = [False] * len(all_token_ids)
 
+    # Get newline token ID for this tokenizer
+    newline_token_ids = tokenizer.encode("\n", add_special_tokens=False)
+    newline_token_id = newline_token_ids[0] if newline_token_ids else None
+
+    # Try ChatML format first (Qwen, SmolLM, etc.)
     assistant_role_tokens = tokenizer.encode("assistant", add_special_tokens=False)
     im_start_token = tokenizer.encode("<|im_start|>", add_special_tokens=False)
     im_end_token = tokenizer.encode("<|im_end|>", add_special_tokens=False)
 
     # Find all assistant sections and mark them
     assistant_sections = find_assistant_sections(
-        all_token_ids, im_start_token, assistant_role_tokens, im_end_token
+        all_token_ids,
+        im_start_token,
+        assistant_role_tokens,
+        im_end_token,
+        newline_token_id,
     )
+
+    # If no sections found, try Gemma format
+    if not assistant_sections:
+        model_role_tokens = tokenizer.encode("model", add_special_tokens=False)
+        start_of_turn_token = tokenizer.encode(
+            "<start_of_turn>", add_special_tokens=False
+        )
+        end_of_turn_token = tokenizer.encode("<end_of_turn>", add_special_tokens=False)
+
+        assistant_sections = find_assistant_sections(
+            all_token_ids,
+            start_of_turn_token,
+            model_role_tokens,
+            end_of_turn_token,
+            newline_token_id,
+        )
 
     for start, end in assistant_sections:
         for j in range(start, end):

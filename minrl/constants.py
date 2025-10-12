@@ -134,7 +134,7 @@ class TrainerConfig:
     task: TaskChoice = "connections"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
-    temperature: float = 1.2
+    temperature: float = 1
     temperature_scaling: bool = False
     temperature_min: float = 0.2
     temperature_max: float = 1.5
@@ -143,7 +143,7 @@ class TrainerConfig:
     use_gradient_checkpointing: bool = True
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 4
+    micro_batch_size: int = 2
     groups_per_batch: int = 4
     group_size: int = 4
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
