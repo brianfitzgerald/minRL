@@ -87,3 +87,6 @@ def test_update_policy_grpo_algorithm(
     )
 
     assert results is not None
+    assert "duration" in results
+    assert isinstance(results["duration"], float)
+    assert results["duration"] >= 0

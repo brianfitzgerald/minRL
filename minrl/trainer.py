@@ -179,7 +179,7 @@ class Trainer:
                 for i, sample in enumerate(batch)
             ]
 
-            episodes = rollout(
+            episodes, rollout_duration = rollout(
                 self.config,
                 self.tokenizer,
                 self.config.group_size,
@@ -189,6 +189,9 @@ class Trainer:
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
                 prev_reward_std=prev_reward_std,
+            )
+            self.metrics_wrapper.add_scalar(
+                "timing/train_rollout_duration_sec", rollout_duration, step
             )
 
             logger.info(f"Updating policy for step {step}")
@@ -204,6 +207,9 @@ class Trainer:
                 device=self.device,
                 algorithm=self.config.algorithm,
                 entropy_coef=self.config.entropy_coef,
+            )
+            self.metrics_wrapper.add_scalar(
+                "timing/update_policy_duration_sec", results["duration"], step
             )
             sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
 
@@ -265,7 +271,7 @@ class Trainer:
                 self.eval_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
             ]
-            batch_episodes = rollout(
+            batch_episodes, rollout_duration = rollout(
                 self.config,
                 self.tokenizer,
                 1,
@@ -274,6 +280,10 @@ class Trainer:
                 samples=batch,
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
+            )
+
+            self.metrics_wrapper.add_scalar(
+                "timing/eval_rollout_duration_sec", rollout_duration, step
             )
 
             episodes.extend(batch_episodes)

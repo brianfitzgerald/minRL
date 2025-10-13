@@ -1,4 +1,5 @@
 import dataclasses
+import time
 from contextlib import nullcontext
 from collections import defaultdict
 from typing import Dict, List, TypedDict
@@ -67,12 +68,13 @@ def rollout(
     reward_function: RewardFunction,
     vllm_model: LLM,
     prev_reward_std: float | None = None,
-) -> List[Episode]:
+) -> tuple[List[Episode], float]:
     """
     Generate completions for each turn in a batch of conversations.
     Runs for max_steps turns, and generates group_size completions
     for the first turn, then 1 completion per turn for subsequent turns.
     """
+    rollout_start_time = time.perf_counter()
 
     # Compute scaled temperature based on previous reward std
     temperature = compute_scaled_temperature(config, prev_reward_std)
@@ -188,10 +190,9 @@ def rollout(
         )
         episodes.append(episode)
 
-    all_rewards = [round(episode.reward, 2) for episode in episodes]
-    logger.info(f"Rewards for rollout: {all_rewards}")
+    rollout_duration = time.perf_counter() - rollout_start_time
 
-    return episodes
+    return episodes, rollout_duration
 
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
@@ -379,6 +380,7 @@ class UpdatePolicyResults(TypedDict):
     loss: float
     grad_norm: float
     entropy: float
+    duration: float
 
 
 class EpisodeWithTokens(TypedDict):
@@ -528,6 +530,8 @@ def update_policy(
     by computing the loss from the reward and generated logits.
     This implements a number of different algorithms.
     """
+    update_start_time = time.perf_counter()
+
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
@@ -613,8 +617,12 @@ def update_policy(
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
     avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
 
+    update_duration = time.perf_counter() - update_start_time
+    logger.info(f"Policy update completed in {update_duration:.2f}s")
+
     return {
         "loss": float(avg_loss),
         "grad_norm": float(grad_norm),
         "entropy": float(avg_entropy),
+        "duration": update_duration,
     }
