@@ -11,6 +11,7 @@ dependencies = [
     "fire>=0.7.0",
     "huggingface-hub[hf-transfer]>=0.32.3",
     "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
     "jinja2>=3.1.6",
     "loguru>=0.7.3",
     "matplotlib>=3.10.3",

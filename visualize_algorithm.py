@@ -1,7 +1,6 @@
 from minrl.algorithms import (
     get_token_ids_and_assistant_mask,
     process_batch,
-    update_policy,
 )
 from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
@@ -100,13 +99,14 @@ def main():
         n_target_tokens += len(token_ids)
 
     # Process the batch
-    logprobs, target_msks, batch_rewards_t, batch_entropy = process_batch(
-        model=trainer.model,
-        episodes=episodes,
-        tokenizer=trainer.tokenizer,
-        pad_token_id=int(trainer.tokenizer.pad_token_id),  # pyright: ignore[reportArgumentType]
-        device=trainer.device,
-        n_target_tokens=n_target_tokens,
+    logprobs, target_msks, batch_rewards_t, batch_entropy, n_target_tokens = (
+        process_batch(
+            model=trainer.model,
+            episodes=episodes,
+            tokenizer=trainer.tokenizer,
+            pad_token_id=int(trainer.tokenizer.pad_token_id),  # pyright: ignore[reportArgumentType]
+            device=trainer.device,
+        )
     )
     batch_loss, advantage_t = compute_algorithm_loss(
         logprobs,
