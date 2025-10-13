@@ -54,10 +54,10 @@ class Trainer:
         self.device = torch.device(device_type)
         self.host_type: HostType = host_type
         self.dtype = torch.bfloat16
+        torch.set_default_device(self.device)
 
     def init_model(self):
         """Initialize the model and tokenizer."""
-        torch.set_default_device(self.device)
         if self.device_type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
         set_vllm_use_v1(False)
@@ -171,21 +171,23 @@ class Trainer:
             assert self.model is not None
             assert self.tokenizer is not None
 
+            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
+
             conversations = [
                 self.train_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
             ]
 
             episodes = rollout(
-                self.config,
+                temperature_used,
+                self.config.max_new_tokens,
                 self.tokenizer,
                 self.config.group_size,
                 self.train_dataset.max_steps,
                 conversations,
-                samples=batch,
+                batch,
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
-                prev_reward_std=prev_reward_std,
             )
 
             logger.info(f"Updating policy for step {step}")
@@ -207,9 +209,6 @@ class Trainer:
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
-
-            # Get temperature used for logging
-            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
 
             compute_metrics(
                 episodes,
@@ -263,12 +262,13 @@ class Trainer:
                 for i, sample in enumerate(batch)
             ]
             episodes = rollout(
-                self.config,
+                self.config.temperature,
+                self.config.max_new_tokens,
                 self.tokenizer,
                 1,
                 self.eval_dataset.max_steps,
                 conversations,
-                samples=batch,
+                batch,
                 reward_function=self.reward_function,
                 vllm_model=self.vllm_model,
             )

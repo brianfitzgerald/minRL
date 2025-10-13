@@ -58,7 +58,8 @@ def compute_scaled_temperature(
 
 @torch.no_grad()
 def rollout(
-    config: TrainerConfig,
+    temperature: float,
+    max_new_tokens: int,
     tokenizer: PreTrainedTokenizerBase,
     group_size: int,
     max_steps: int,
@@ -66,16 +67,12 @@ def rollout(
     samples: list[Sample],
     reward_function: RewardFunction,
     vllm_model: LLM,
-    prev_reward_std: float | None = None,
 ) -> List[Episode]:
     """
     Generate completions for each turn in a batch of conversations.
     Runs for max_steps turns, and generates group_size completions
     for the first turn, then 1 completion per turn for subsequent turns.
     """
-
-    # Compute scaled temperature based on previous reward std
-    temperature = compute_scaled_temperature(config, prev_reward_std)
 
     # Get stop token IDs to stop generation on
     stop_token_ids: list[int] | None = None
@@ -91,7 +88,7 @@ def rollout(
 
     logger.info(
         f"Generating responses for {len(conversations)} prompts, "
-        f"max_tokens={config.max_new_tokens}, n={group_size}, "
+        f"max_tokens={max_new_tokens}, n={group_size}, "
         f"temp={temperature:.3f}"
     )
 
@@ -137,9 +134,7 @@ def rollout(
         outputs_for_step = vllm_model.generate(
             vllm_input,
             sampling_params=SamplingParams(
-                max_tokens=config.max_new_tokens,
-                # temperature=temperature,
-                # If past the first turn, only generate one response per conversation
+                max_tokens=max_new_tokens,
                 n=group_size if step_idx == 0 else 1,
                 stop_token_ids=stop_token_ids,
             ),
