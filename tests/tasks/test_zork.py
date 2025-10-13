@@ -28,12 +28,15 @@ def test_zork_dataset(
 
     # Mocking the environment interactions
     mock_env = MagicMock()
-    mock_env.reset.return_value = ("Initial observation", {
-        "max_score": 100,
-        "location": MagicMock(name="Test Location"),
-        "inventory": "",
-        "score": 0
-    })
+    mock_env.reset.return_value = (
+        "Initial observation",
+        {
+            "max_score": 100,
+            "location": MagicMock(name="Test Location"),
+            "inventory": "",
+            "score": 0,
+        },
+    )
     mock_env.step.return_value = (
         "Next observation",
         1,
@@ -42,7 +45,7 @@ def test_zork_dataset(
             "inventory": "a sword",
             "location": MagicMock(name="Next Location"),
             "score": 1,
-            "moves": 1
+            "moves": 1,
         },
     )
     mock_make.return_value = mock_env

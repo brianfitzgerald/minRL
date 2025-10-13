@@ -138,7 +138,8 @@ class TrainerConfig:
     temperature_scaling: bool = False
     temperature_min: float = 0.2
     temperature_max: float = 1.5
-    entropy_coef: float = 0.01  # Entropy regularization coefficient
+    # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
+    entropy_coef: float = 0.00  # Entropy regularization coefficient
 
     use_gradient_checkpointing: bool = True
 

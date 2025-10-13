@@ -24,7 +24,7 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections, log_conversation
+from minrl.utils import clear_memory, find_assistant_sections
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -171,7 +171,12 @@ def rollout(
                     flattened_idx += 1
 
         # Free memory from vllm outputs and tokenization
-        del outputs_for_step, vllm_input, tokenized_conversations, templated_conversations
+        del (
+            outputs_for_step,
+            vllm_input,
+            tokenized_conversations,
+            templated_conversations,
+        )
         clear_memory()
 
     # Create episodes from all generated responses
@@ -180,7 +185,7 @@ def rollout(
         for j in range(group_size):
             # For the first step, create multiple episodes (one per response in group)
             reward = reward_function(conversations[j], sample)
-            logger.info(f"Episode {j}: reward: {reward}")
+            logger.info(f"Prompt {i} group {j}: reward: {reward}")
             # conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
             # log_conversation(conv_to_log)
             episode = Episode(
@@ -491,7 +496,13 @@ def process_batch(
             entropy = token_entropy.sum() / n_target_tokens
 
             # Explicitly delete intermediate tensors to free memory
-            del target_positions, next_token_logits_flat, target_logits, target_masks_flat, token_entropy
+            del (
+                target_positions,
+                next_token_logits_flat,
+                target_logits,
+                target_masks_flat,
+                token_entropy,
+            )
         else:
             entropy = torch.tensor(0.0, device=device)
             del target_masks_flat, target_positions
