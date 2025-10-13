@@ -140,11 +140,12 @@ class TrainerConfig:
     temperature_max: float = 1.5
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
     entropy_coef: float = 0.00  # Entropy regularization coefficient
+    max_num_seqs: int = 8
 
     use_gradient_checkpointing: bool = True
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 4
+    micro_batch_size: int = 8
     groups_per_batch: int = 4
     group_size: int = 4
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size

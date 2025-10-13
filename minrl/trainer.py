@@ -68,6 +68,7 @@ class Trainer:
         logger.info("Initializing vLLM model")
 
         self.vllm_model = LLM(
+            max_num_seqs=self.config.max_num_seqs,
             model=self.config.model_id,
             gpu_memory_utilization=0.5,
             enforce_eager=True,

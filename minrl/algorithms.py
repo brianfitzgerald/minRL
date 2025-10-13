@@ -89,113 +89,107 @@ def rollout(
     else:
         logger.info("No EOS token ID found")
 
+    num_prompts = len(conversations)
+    total_conversations = num_prompts * group_size
+
     logger.info(
-        f"Generating responses for {len(conversations)} prompts, "
-        f"max_tokens={config.max_new_tokens}, n={group_size}, "
-        f"temp={temperature:.3f}"
+        f"Generating responses for {num_prompts} prompts × {group_size} group_size = {total_conversations} total conversations, "
+        f"max_tokens={config.max_new_tokens}, temp={temperature:.3f}"
     )
 
-    # Store all generated responses for all steps
-    # size is len(conversations) * group_size
-    # indexing is [prompt_idx][group_idx]
-    conversations_out: list[list[Conversation]] = [
-        [list(c) for _ in range(group_size)] for c in conversations
-    ]
+    # Flatten structure: instead of nested lists, maintain flat list of all conversations
+    # Index: [group0_resp0, group0_resp1, ..., group0_respN, group1_resp0, ...]
+    # This makes batching simpler and more efficient
+    flat_conversations: list[Conversation] = []
+    group_indices: list[
+        int
+    ] = []  # Track which original prompt each conversation belongs to
 
-    # For turn 1, generate group_size responses, and add them to separate conversations.
-    # For subsequent turns, generate 1 response per conversation so the group size is maintained.
+    # Initialize: create group_size copies of each initial conversation
+    for i, conv in enumerate(conversations):
+        for j in range(group_size):
+            flat_conversations.append(list(conv))
+            group_indices.append(i)
+
+    # Generate responses for all conversations across all steps
     for step_idx in tqdm(range(max_steps), desc="Steps"):
-        # Tokenize the conversations and convert to input for vLLM
+        # Prepare batch: use all flat_conversations for step 0, or vLLM's n parameter
         if step_idx == 0:
-            # First step: use the first conversation from each group for tokenization
-            current_conversations = [
-                conversations_out[i][0] for i in range(len(conversations_out))
-            ]
+            # First step optimization: batch initial prompts and use vLLM's n parameter
+            batch_conversations = [conversations[i] for i in range(num_prompts)]
+            n_responses = group_size
         else:
-            # Subsequent steps: generate a new completion for each conversation in each group
-            # Flatten the conversations in the order expected by vLLM: [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
-            current_conversations = [
-                conversations_out[i][j]
-                for i in range(len(conversations_out))
-                for j in range(group_size)
-            ]
+            # Subsequent steps: batch all existing conversations
+            batch_conversations = flat_conversations
+            n_responses = 1
+
+        # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(
-            current_conversations,  # pyright: ignore[reportArgumentType]
+            batch_conversations,  # pyright: ignore[reportArgumentType]
             tokenize=False,
             add_generation_prompt=True,
         )
         tokenized_conversations = tokenizer(templated_conversations)["input_ids"]  # pyright: ignore[reportArgumentType]
+
+        # Prepare vLLM input as a single batch
         vllm_input: list[TokensPrompt] = [
-            {
-                "prompt_token_ids": tokenized_conversation,
-            }
-            for tokenized_conversation in tokenized_conversations  # type: ignore
+            {"prompt_token_ids": token_ids}
+            for token_ids in tokenized_conversations  # type: ignore
         ]
 
-        # Generate list of n_conversations * group_size responses
-        # Convert to proper type for SamplingParams
-        outputs_for_step = vllm_model.generate(
+        # Single batched generation call
+        outputs = vllm_model.generate(
             vllm_input,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
-                # temperature=temperature,
-                # If past the first turn, only generate one response per conversation
-                n=group_size if step_idx == 0 else 1,
+                temperature=temperature,
+                n=n_responses,
                 stop_token_ids=stop_token_ids,
             ),
         )
 
-        # Parse out the responses, and add to conversation
+        # Parse and append responses
         if step_idx == 0:
-            # First step: add each response to its corresponding conversation in the group
-            for i in range(len(outputs_for_step)):
-                for j in range(len(outputs_for_step[i].outputs)):
-                    generated_text = outputs_for_step[i].outputs[j].text
-                    # Only add this response to the corresponding conversation
-                    conversations_out[i][j].append(
-                        {"role": "assistant", "content": generated_text}
+            # First step: vLLM returned group_size responses per prompt
+            # Update our flat_conversations structure
+            for prompt_idx, output in enumerate(outputs):
+                for resp_idx, completion in enumerate(output.outputs):
+                    flat_idx = prompt_idx * group_size + resp_idx
+                    flat_conversations[flat_idx].append(
+                        {"role": "assistant", "content": completion.text}
                     )
         else:
-            # Subsequent steps: add each response to its corresponding conversation
-            # The flattened order is [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
-            flattened_idx = 0
-            for i in range(len(outputs_for_step)):
-                for j in range(len(outputs_for_step[i].outputs)):
-                    generated_text = outputs_for_step[i].outputs[j].text
-                    # Calculate the group and conversation indices from the flattened index
-                    group_idx = flattened_idx // group_size
-                    conv_idx = flattened_idx % group_size
-                    conversations_out[group_idx][conv_idx].append(
-                        {"role": "assistant", "content": generated_text}
-                    )
-                    flattened_idx += 1
+            # Subsequent steps: vLLM returned 1 response per conversation
+            for conv_idx, output in enumerate(outputs):
+                generated_text = output.outputs[0].text
+                flat_conversations[conv_idx].append(
+                    {"role": "assistant", "content": generated_text}
+                )
 
-        # Free memory from vllm outputs and tokenization
-        del (
-            outputs_for_step,
-            vllm_input,
-            tokenized_conversations,
-            templated_conversations,
-        )
+        # Free memory
+        del outputs, vllm_input, tokenized_conversations, templated_conversations
         clear_memory()
 
-    # Create episodes from all generated responses
+    # Create episodes from all generated conversations
     episodes: List[Episode] = []
-    for i, (conversations, sample) in enumerate(zip(conversations_out, samples)):
-        for j in range(group_size):
-            # For the first step, create multiple episodes (one per response in group)
-            reward = reward_function(conversations[j], sample)
-            logger.info(f"Prompt {i} group {j}: reward: {reward}")
-            # conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
-            # log_conversation(conv_to_log)
-            episode = Episode(
-                group_index=i,
-                answer_index=j,
-                sample=sample,
-                reward=reward,
-                conversation=conversations[j],
-            )
-            episodes.append(episode)
+    for flat_idx, (conversation, group_idx) in enumerate(
+        zip(flat_conversations, group_indices)
+    ):
+        answer_idx = flat_idx % group_size
+        sample = samples[group_idx]
+        reward = reward_function(conversation, sample)
+
+        episode = Episode(
+            group_index=group_idx,
+            answer_index=answer_idx,
+            sample=sample,
+            reward=reward,
+            conversation=conversation,
+        )
+        episodes.append(episode)
+
+    all_rewards = [round(episode.reward, 2) for episode in episodes]
+    logger.info(f"Rewards for rollout: {all_rewards}")
 
     return episodes
 
