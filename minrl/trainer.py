@@ -66,24 +66,22 @@ class Trainer:
         # Reduce vLLM memory usage significantly
         get_memory_usage()
         logger.info("Initializing vLLM model")
-        # Note: max_seq_len_to_capture controls vLLM's KV cache allocation.
-        # If your sequences are shorter, reduce this value (e.g., 1024 or 1536)
-        # to save significant memory. Analyze your actual sequence lengths first.
+
         self.vllm_model = LLM(
             model=self.config.model_id,
             gpu_memory_utilization=0.5,
-            max_seq_len_to_capture=2048,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
-            enable_prefix_caching=True,
+            # Prefix caching requires CUDA for some model families (Gemma)
+            enable_prefix_caching=self.device_type == "cuda",
         )
         get_memory_usage()
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         # fallback to eager for mps
-        attn_impl = "eager" if self.device_type == "mps" else "flash_attention_2"
+        attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
 
         # Use more memory-efficient model loading
-        logger.info("Initializing HF model")
+        logger.info(f"Initializing HF model, attn impl: {attn_impl}")
         model: nn.Module = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
             device_map="auto",
