@@ -143,7 +143,7 @@ class TrainerConfig:
     use_gradient_checkpointing: bool = True
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 2
+    micro_batch_size: int = 4
     groups_per_batch: int = 4
     group_size: int = 4
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size

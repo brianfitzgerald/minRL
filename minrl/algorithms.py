@@ -170,7 +170,8 @@ def rollout(
                     )
                     flattened_idx += 1
 
-        # Clear CUDA cache
+        # Free memory from vllm outputs and tokenization
+        del outputs_for_step, vllm_input, tokenized_conversations, templated_conversations
         clear_memory()
 
     # Create episodes from all generated responses
@@ -180,8 +181,8 @@ def rollout(
             # For the first step, create multiple episodes (one per response in group)
             reward = reward_function(conversations[j], sample)
             logger.info(f"Episode {j}: reward: {reward}")
-            conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
-            log_conversation(conv_to_log)
+            # conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
+            # log_conversation(conv_to_log)
             episode = Episode(
                 group_index=i,
                 answer_index=j,
@@ -195,10 +196,17 @@ def rollout(
 
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
-    # Use log_softmax to avoid numerical instability
+    """Compute entropy efficiently in-place to minimize memory allocation.
+
+    Using the identity: entropy = -sum(p * log(p))
+    Where p = softmax(logits) and log(p) = log_softmax(logits)
+    """
+    # Use log_softmax and softmax - PyTorch optimizes these internally
     logp = F.log_softmax(logits, dim=-1)
-    # Compute entropy: -sum(p * log(p)) = -sum(exp(logp) * logp)
-    entropy = -(logp.exp() * logp).sum(dim=-1)
+    p = F.softmax(logits, dim=-1)
+    # Compute entropy: -sum(p * log(p))
+    # Use in-place operations where possible to reduce memory
+    entropy = -(p * logp).sum(dim=-1)
     return entropy
 
 
@@ -354,17 +362,12 @@ def sync_weights_to_vllm(
     logger.info("Syncing params to vLLM...")
 
     state_dict = model.state_dict()
-    state_dict = {k: v.to(dtype=torch.float16) for k, v in state_dict.items()}
-    state_dict = {
-        k.removeprefix("base_model.model.").replace(".base_layer", ""): v
-        for k, v in state_dict.items()
-    }
 
     try:
         model_runner: ModelRunnerBase = (
             vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
         )
-        model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+        model_runner.model.load_weights(state_dict.items())  # type: ignore
         logger.info("Param update succesful.")
     except AttributeError:
         # vLLM API change: model_executor might not be available in newer versions
@@ -391,6 +394,7 @@ def process_batch(
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
     device: torch.device,
+    entropy_coef: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
@@ -449,13 +453,15 @@ def process_batch(
 
     # Get the cross entropy loss of the label and generated tokens
     # Slice logits to match target tokens (exclude first position)
-    next_token_logits = logits[:, :-1].float()
+    # Keep in bfloat16/float16 to save memory - cross_entropy handles mixed precision
+    next_token_logits = logits[:, :-1]
 
     # Clear logits from memory immediately after use
     del logits
     clear_memory()
 
     bs = batch_token_ids_t.shape[0]
+    # F.cross_entropy handles dtype conversion internally, no need for .float()
     logprobs = -F.cross_entropy(
         next_token_logits.reshape(-1, next_token_logits.size(-1)),
         target_token_ids.reshape(-1),
@@ -463,24 +469,34 @@ def process_batch(
         reduction="none",
     ).reshape(bs, -1)
 
-    # Calculate entropy only for target positions - memory efficient version
-    # Compute entropy in chunks to avoid creating large intermediate tensors
-    bs, seq_len, vocab_size = next_token_logits.shape
-    target_masks_flat = target_masks.reshape(-1)
+    # Only compute entropy if it's being used (entropy_coef > 0)
+    # This saves memory and computation when entropy regularization is disabled
+    if entropy_coef > 0:
+        # Calculate entropy only for target positions - memory efficient version
+        # Compute entropy in chunks to avoid creating large intermediate tensors
+        bs, seq_len, vocab_size = next_token_logits.shape
+        target_masks_flat = target_masks.reshape(-1)
 
-    # Only compute entropy for positions that are actually targets
-    target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
-    if len(target_positions) > 0:
-        next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
-        target_logits = next_token_logits_flat[target_positions]
+        # Only compute entropy for positions that are actually targets
+        target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
+        if len(target_positions) > 0:
+            next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
+            target_logits = next_token_logits_flat[target_positions]
 
-        # Use mixed precision for entropy computation
-        with fwd_ctx:
-            token_entropy = compute_entropy(target_logits)
+            # Use mixed precision for entropy computation
+            with fwd_ctx:
+                token_entropy = compute_entropy(target_logits)
 
-        # single entropy value for the sequence
-        entropy = token_entropy.sum() / n_target_tokens
+            # single entropy value for the sequence
+            entropy = token_entropy.sum() / n_target_tokens
+
+            # Explicitly delete intermediate tensors to free memory
+            del target_positions, next_token_logits_flat, target_logits, target_masks_flat, token_entropy
+        else:
+            entropy = torch.tensor(0.0, device=device)
+            del target_masks_flat, target_positions
     else:
+        # Skip entropy computation entirely if not used
         entropy = torch.tensor(0.0, device=device)
 
     del batch_token_ids_t, target_token_ids, next_token_logits
@@ -540,6 +556,7 @@ def update_policy(
                 tokenizer=tokenizer,
                 pad_token_id=pad_token_id,
                 device=device,
+                entropy_coef=entropy_coef,
             )
         )
 

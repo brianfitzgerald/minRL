@@ -66,11 +66,13 @@ class Trainer:
         # Reduce vLLM memory usage significantly
         get_memory_usage()
         logger.info("Initializing vLLM model")
+        # Note: max_seq_len_to_capture controls vLLM's KV cache allocation.
+        # If your sequences are shorter, reduce this value (e.g., 1024 or 1536)
+        # to save significant memory. Analyze your actual sequence lengths first.
         self.vllm_model = LLM(
             model=self.config.model_id,
             gpu_memory_utilization=0.5,
-            max_model_len=1024,
-            max_seq_len_to_capture=1024,
+            max_seq_len_to_capture=2048,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
             enable_prefix_caching=True,
@@ -121,6 +123,8 @@ class Trainer:
                 )
         else:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
+
+        logger.info(f"Using optimizer: {self.optimizer}")
 
     def init_training(self, logger_choice: LoggerChoice) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
@@ -262,7 +266,7 @@ class Trainer:
                 self.eval_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
             ]
-            episodes = rollout(
+            batch_episodes = rollout(
                 self.config,
                 self.tokenizer,
                 1,
@@ -273,7 +277,7 @@ class Trainer:
                 vllm_model=self.vllm_model,
             )
 
-            episodes.extend(episodes)
+            episodes.extend(batch_episodes)
 
         reward = [episode.reward for episode in episodes]
         mean_reward = sum(reward) / len(reward)

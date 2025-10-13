@@ -249,4 +249,3 @@ def log_conversation(conversation: Conversation) -> None:
         log_lines.append(f"{color}{content_str}{reset_color}\n")
 
     logger.info("".join(log_lines))
-    print("".join(log_lines))
