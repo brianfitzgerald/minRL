@@ -20,7 +20,12 @@ from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, Trainer
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
-from minrl.utils import clear_memory, compute_metrics, USING_MPS, get_memory_usage
+from minrl.utils import (
+    clear_memory,
+    compute_metrics,
+    USING_MPS,
+    get_memory_usage,
+)
 
 if not USING_MPS:
     from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports]
@@ -46,7 +51,7 @@ class Trainer:
     tokenizer: PreTrainedTokenizerBase
     model: nn.Module
 
-    def __init__(self, host_type: HostType) -> None:
+    def __init__(self, host_type: HostType, logger_choice: LoggerChoice) -> None:
         """Initialize the trainer with configuration."""
         self.config = TrainerConfig()
         device_type = get_available_device()
@@ -54,6 +59,11 @@ class Trainer:
         self.device = torch.device(device_type)
         self.host_type: HostType = host_type
         self.dtype = torch.bfloat16
+        self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
+        self.metrics_wrapper = MetricsWrapper(
+            logger_choice, self.config.task, self.config.model_id, self.run_name
+        )
+        logger.info(f"Logging to: {logger_choice}")
 
     def init_model(self):
         """Initialize the model and tokenizer."""
@@ -64,7 +74,7 @@ class Trainer:
         torch.random.manual_seed(42)
 
         # Reduce vLLM memory usage significantly
-        get_memory_usage()
+        get_memory_usage("pre_init_model", metrics_wrapper=self.metrics_wrapper, step=0)
         logger.info("Initializing vLLM model")
 
         self.vllm_model = LLM(
@@ -76,7 +86,9 @@ class Trainer:
             # Prefix caching requires CUDA for some model families (Gemma)
             enable_prefix_caching=self.device_type == "cuda",
         )
-        get_memory_usage()
+        get_memory_usage(
+            "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
+        )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         # fallback to eager for mps
         attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
@@ -90,7 +102,7 @@ class Trainer:
             attn_implementation=attn_impl,
             low_cpu_mem_usage=True,
         )
-        get_memory_usage()
+        get_memory_usage("init_model", metrics_wrapper=self.metrics_wrapper, step=0)
 
         # Enable gradient checkpointing to save memory during backward pass
         if self.config.use_gradient_checkpointing:
@@ -125,7 +137,7 @@ class Trainer:
 
         logger.info(f"Using optimizer: {self.optimizer}")
 
-    def init_training(self, logger_choice: LoggerChoice) -> None:
+    def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
         dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
@@ -149,11 +161,6 @@ class Trainer:
         )
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
-        logger.info(f"Logging to: {logger_choice}")
-        self.metrics_wrapper = MetricsWrapper(
-            logger_choice, self.config.task, self.config.model_id, self.run_name
-        )
 
     def train(self) -> None:
         """Run the main training loop.
@@ -169,6 +176,7 @@ class Trainer:
         prev_reward_std: float | None = None
 
         for step, batch in enumerate(self.train_dataloader, start=1):
+            step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
 
             assert self.model is not None
@@ -194,6 +202,9 @@ class Trainer:
                 "timing/train_rollout_duration_sec", rollout_duration, step
             )
 
+            # Log GPU utilization after rollout
+            get_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
+
             logger.info(f"Updating policy for step {step}")
 
             results = update_policy(
@@ -207,10 +218,18 @@ class Trainer:
                 device=self.device,
                 algorithm=self.config.algorithm,
                 entropy_coef=self.config.entropy_coef,
+                metrics_wrapper=self.metrics_wrapper,
+                step=step,
             )
             self.metrics_wrapper.add_scalar(
                 "timing/update_policy_duration_sec", results["duration"], step
             )
+
+            # Log GPU utilization after update_policy
+            get_memory_usage(
+                "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
+            )
+
             sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
 
             # Compute current reward std for next iteration before clearing memory
@@ -234,7 +253,9 @@ class Trainer:
             clear_memory()
 
             # Log memory usage after clearing
-            get_memory_usage()
+            get_memory_usage(
+                "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
+            )
             if step % self.config.eval_interval == 0:
                 self.evaluate(step)
 
@@ -246,6 +267,13 @@ class Trainer:
                 output_file = self.checkpoint_dir / f"{self.run_name}_step_{step:06d}"
                 self.model.save_pretrained(output_file)  # type: ignore
                 logger.info(f"Saved checkpoint to {output_file}")
+
+            # Log total step duration
+            total_step_duration = time.time() - step_start_time
+            self.metrics_wrapper.add_scalar(
+                "timing/total_step_duration_sec", total_step_duration, step
+            )
+            logger.info(f"Step {step} completed in {total_step_duration:.2f}s")
 
         self.metrics_wrapper.close()
 

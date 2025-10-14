@@ -25,7 +25,8 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections
+from minrl.utils import clear_memory, find_assistant_sections, get_memory_usage
+from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -524,6 +525,8 @@ def update_policy(
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
     entropy_coef: float = 0.0,
+    metrics_wrapper: MetricsWrapper | None = None,
+    step: int | None = None,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
@@ -603,6 +606,9 @@ def update_policy(
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t, batch_loss
         clear_memory()
+
+    # Log GPU utilization after compute_loss
+    get_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
 
     # Update parameters once after all gradients accumulated
     if apply_loss:
