@@ -25,7 +25,7 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections, get_memory_usage
+from minrl.utils import clear_memory, find_assistant_sections, log_memory_usage
 from minrl.metrics import MetricsWrapper
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
@@ -608,7 +608,7 @@ def update_policy(
         clear_memory()
 
     # Log GPU utilization after compute_loss
-    get_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
+    log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
 
     # Update parameters once after all gradients accumulated
     if apply_loss:

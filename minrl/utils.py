@@ -178,7 +178,7 @@ class GPUStats(TypedDict):
     gpu_utilization: float
 
 
-def get_memory_usage(
+def log_memory_usage(
     label: str = "Memory usage",
     metrics_wrapper: MetricsWrapper | None = None,
     step: int | None = None,

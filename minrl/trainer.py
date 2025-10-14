@@ -24,7 +24,7 @@ from minrl.utils import (
     clear_memory,
     compute_metrics,
     USING_MPS,
-    get_memory_usage,
+    log_memory_usage,
 )
 
 if not USING_MPS:
@@ -74,19 +74,19 @@ class Trainer:
         torch.random.manual_seed(42)
 
         # Reduce vLLM memory usage significantly
-        get_memory_usage("pre_init_model", metrics_wrapper=self.metrics_wrapper, step=0)
+        log_memory_usage("pre_init_model", metrics_wrapper=self.metrics_wrapper, step=0)
         logger.info("Initializing vLLM model")
 
         self.vllm_model = LLM(
             max_num_seqs=self.config.max_num_seqs,
             model=self.config.model_id,
-            gpu_memory_utilization=0.5,
+            gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
             # Prefix caching requires CUDA for some model families (Gemma)
             enable_prefix_caching=self.device_type == "cuda",
         )
-        get_memory_usage(
+        log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
         )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
@@ -102,7 +102,7 @@ class Trainer:
             attn_implementation=attn_impl,
             low_cpu_mem_usage=True,
         )
-        get_memory_usage("init_model", metrics_wrapper=self.metrics_wrapper, step=0)
+        log_memory_usage("init_model", metrics_wrapper=self.metrics_wrapper, step=0)
 
         # Enable gradient checkpointing to save memory during backward pass
         if self.config.use_gradient_checkpointing:
@@ -203,7 +203,7 @@ class Trainer:
             )
 
             # Log GPU utilization after rollout
-            get_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
+            log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
 
             logger.info(f"Updating policy for step {step}")
 
@@ -226,7 +226,7 @@ class Trainer:
             )
 
             # Log GPU utilization after update_policy
-            get_memory_usage(
+            log_memory_usage(
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
 
@@ -253,7 +253,7 @@ class Trainer:
             clear_memory()
 
             # Log memory usage after clearing
-            get_memory_usage(
+            log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
             )
             if step % self.config.eval_interval == 0:
