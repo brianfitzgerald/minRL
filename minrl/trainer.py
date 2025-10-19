@@ -75,20 +75,6 @@ class Trainer:
 
         # Reduce vLLM memory usage significantly
         log_memory_usage("pre_init_model", metrics_wrapper=self.metrics_wrapper, step=0)
-        logger.info("Initializing vLLM model")
-
-        self.vllm_model = LLM(
-            max_num_seqs=self.config.max_num_seqs,
-            model=self.config.model_id,
-            gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
-            enforce_eager=True,
-            dtype="float16" if USING_MPS else "bfloat16",
-            # Prefix caching requires CUDA for some model families (Gemma)
-            enable_prefix_caching=self.device_type == "cuda",
-        )
-        log_memory_usage(
-            "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
-        )
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         # fallback to eager for mps
         attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
@@ -141,6 +127,21 @@ class Trainer:
             logger.info("Applying LoRA to model")
             apply_lora_to_model(self.model, self.config.lora_config)
             logger.info("LoRA applied to model")
+
+        logger.info("Initializing vLLM model")
+
+        self.vllm_model = LLM(
+            max_num_seqs=self.config.max_num_seqs,
+            model=self.config.model_id,
+            gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
+            enforce_eager=True,
+            dtype="float16" if USING_MPS else "bfloat16",
+            # Prefix caching requires CUDA for some model families (Gemma)
+            enable_prefix_caching=self.device_type == "cuda",
+        )
+        log_memory_usage(
+            "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
+        )
 
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""

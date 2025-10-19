@@ -141,11 +141,12 @@ class TrainerConfig(BaseModel):
     temperature_min: float = 0.2
     temperature_max: float = 1.5
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
+    # TODO implement vocab wise entropy calculation
     entropy_coef: float = 0.00  # Entropy regularization coefficient
     max_num_seqs: int = 8
 
     use_gradient_checkpointing: bool = True
-    vllm_gpu_memory_utilization: float = 0.35
+    vllm_gpu_memory_utilization: float = 0.25
 
     lora_config: LoRAConfig | None = LoRAConfig()
 
