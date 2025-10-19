@@ -1,5 +1,8 @@
-from dataclasses import dataclass
+from pydantic import BaseModel
 from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, TypedDict
+
+from minrl.lora import LoRAConfig
+from dataclasses import dataclass
 
 
 class StepMetadata(TypedDict):
@@ -119,8 +122,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 }
 
 
-@dataclass
-class TrainerConfig:
+class TrainerConfig(BaseModel):
     model_id: str = GEMMA_3_1B
     eval_interval: int = 10
     max_new_tokens: int = 512
@@ -144,6 +146,8 @@ class TrainerConfig:
 
     use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.35
+
+    lora_config: LoRAConfig | None = LoRAConfig()
 
     # Size of micro-batches for backward pass
     micro_batch_size: int = 4

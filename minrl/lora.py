@@ -1,8 +1,7 @@
 import math
 import re
 from typing import List
-from pydantic import BaseModel, Field
-from typing import Annotated
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
@@ -13,41 +12,9 @@ Based on src/prime_rl/trainer/lora.py
 from prime_rl
 """
 
-
-class LoRAConfig(BaseModel):
-    """Configuration for LoRA (Low-Rank Adaptation)."""
-
-    rank: Annotated[
-        int,
-        Field(
-            ge=1,
-            description="Rank of the low-rank decomposition matrices.",
-        ),
-    ] = 16
-
-    alpha: Annotated[
-        float,
-        Field(
-            ge=0,
-            description="LoRA scaling parameter.",
-        ),
-    ] = 16.0
-
-    dropout: Annotated[
-        float,
-        Field(
-            ge=0,
-            le=1,
-            description="LoRA dropout rate.",
-        ),
-    ] = 0.0
-
-    target_modules: Annotated[
-        list[str],
-        Field(
-            description="Regex patterns for modules to apply LoRA to.",
-        ),
-    ] = [
+TARGET_PRESETS = {
+    "linear": [".*"],
+    "attention": [
         r".*\.q_proj$",
         r".*\.k_proj$",
         r".*\.v_proj$",
@@ -55,8 +22,22 @@ class LoRAConfig(BaseModel):
         r".*\.gate_proj$",
         r".*\.up_proj$",
         r".*\.down_proj$",
-    ]
+    ],
+}
 
+
+class LoRAConfig(BaseModel):
+    """Configuration for LoRA (Low-Rank Adaptation)."""
+
+    rank: int = 16
+    alpha: float = 16.0
+
+    dropout: float = 0.0
+
+    # Regex patterns for modules to apply LoRA to
+    target_modules: list[str] = TARGET_PRESETS["linear"]
+
+    # Regex patterns for modules to keep trainable
     modules_to_save: list[str] = [
         r".*embed_tokens$",
         r".*norm$",

@@ -14,7 +14,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
 from minrl.algorithms import compute_scaled_temperature
-
+from minrl.lora import apply_lora_to_model
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
 from minrl.metrics import MetricsWrapper
@@ -136,6 +136,11 @@ class Trainer:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
 
         logger.info(f"Using optimizer: {self.optimizer}")
+
+        if self.config.lora_config is not None:
+            logger.info("Applying LoRA to model")
+            apply_lora_to_model(self.model, self.config.lora_config)
+            logger.info("LoRA applied to model")
 
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
