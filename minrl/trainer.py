@@ -61,7 +61,7 @@ class Trainer:
         self.dtype = torch.bfloat16
         self.run_name = f"{self.config.model_display_name}-{self.config.algorithm}-{self.config.task}-{simple_timestamp()}"
         self.metrics_wrapper = MetricsWrapper(
-            logger_choice, self.config.task, self.config.model_id, self.run_name
+            logger_choice, self.config.task, self.config, self.run_name
         )
         logger.info(f"Logging to: {logger_choice}")
 
