@@ -190,6 +190,33 @@ def _find_target_modules(model: nn.Module, target_patterns: List[str]) -> List[s
     return target_modules
 
 
+def merge_lora_weights_inplace(model: nn.Module) -> dict[str, dict[str, torch.Tensor]]:
+    """
+    Merge LoRA weights into base layers in-place and return original LoRA state for restoration.
+
+    Returns:
+        Dictionary mapping module names to their original LoRA state
+    """
+    original_lora_state: dict[str, dict[str, torch.Tensor]] = {}
+    merged_count = 0
+
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            original_lora_state[name] = {
+                "lora_A": module.lora_A.data.clone(),
+                "lora_B": module.lora_B.data.clone(),
+            }
+
+            delta_weight = (module.lora_B @ module.lora_A) * module.scaling
+            module.base_layer.weight.data.add_(delta_weight)
+
+            module.lora_A.data.zero_()
+            module.lora_B.data.zero_()
+            merged_count += 1
+
+    return original_lora_state
+
+
 def apply_lora_to_model(model: nn.Module, config: LoRAConfig) -> None:
     """
     Apply LoRA to target modules in the model and freeze non-LoRA parameters.
