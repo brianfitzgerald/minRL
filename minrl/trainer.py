@@ -236,7 +236,11 @@ class Trainer:
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
 
-            sync_weights_to_vllm(cast(nn.Module, self.model), self.vllm_model)
+            sync_weights_to_vllm(
+                cast(nn.Module, self.model),
+                self.vllm_model,
+                lora=self.config.lora_config is not None,
+            )
 
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]

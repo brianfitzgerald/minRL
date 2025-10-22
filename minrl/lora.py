@@ -217,6 +217,28 @@ def merge_lora_weights_inplace(model: nn.Module) -> dict[str, dict[str, torch.Te
     return original_lora_state
 
 
+def restore_lora_weights_inplace(
+    model: nn.Module, original_lora_state: dict[str, dict[str, torch.Tensor]]
+) -> None:
+    """
+    Restore original LoRA weights and subtract merged weights from base layers.
+
+    Args:
+        model: Model with merged LoRA weights
+        original_lora_state: Original LoRA state from merge_lora_weights_inplace
+    """
+    restored_count = 0
+
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear) and name in original_lora_state:
+            module.lora_A.data.copy_(original_lora_state[name]["lora_A"])
+            module.lora_B.data.copy_(original_lora_state[name]["lora_B"])
+
+            delta_weight = (module.lora_B @ module.lora_A) * module.scaling
+            module.base_layer.weight.data.sub_(delta_weight)
+            restored_count += 1
+
+
 def apply_lora_to_model(model: nn.Module, config: LoRAConfig) -> None:
     """
     Apply LoRA to target modules in the model and freeze non-LoRA parameters.

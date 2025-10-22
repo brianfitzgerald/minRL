@@ -27,6 +27,7 @@ from minrl.constants import (
 )
 from minrl.utils import clear_memory, find_assistant_sections, log_memory_usage
 from minrl.metrics import MetricsWrapper
+from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -359,11 +360,17 @@ def compute_algorithm_loss(
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
+    lora: bool = False,
 ) -> None:
     logger.info("Syncing params to vLLM...")
 
-    state_dict = model.state_dict()
+    # Merge LoRA weights into base layers before syncing
+    original_lora_state = None
+    if lora:
+        logger.info("Merging LoRA weights into base layers...")
+        original_lora_state = merge_lora_weights_inplace(model)
 
+    state_dict = model.state_dict()
     try:
         model_runner: ModelRunnerBase = (
             vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
@@ -375,6 +382,11 @@ def sync_weights_to_vllm(
         logger.warning(
             "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
         )
+    finally:
+        # Restore LoRA weights after syncing
+        if lora:
+            assert original_lora_state is not None
+            restore_lora_weights_inplace(model, original_lora_state)
 
 
 class UpdatePolicyResults(TypedDict):
