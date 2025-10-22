@@ -146,8 +146,8 @@ class Trainer:
     def init_training(self) -> None:
         """Initialize training components including dataloader, optimizer, and logging."""
         assert self.tokenizer is not None, "Tokenizer not initialized"
-        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]["dataset"]
-        self.reward_function = TASK_DATASETS[self.config.task]["reward_function"]
+        dataset_cls: type[MinRLDataset] = TASK_DATASETS[self.config.task]
+        self.reward_function = dataset_cls.reward_function
         self.train_dataset = dataset_cls(
             split="train", host=self.host_type, tokenizer=self.tokenizer
         )

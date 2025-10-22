@@ -1,4 +1,4 @@
-from typing import Any, List, Dict, Tuple, Union, TypedDict
+from typing import List, Dict, Tuple, Union, TypedDict
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import random
 from minrl.tasks.dataset import MinRLDataset, Split
@@ -157,7 +157,9 @@ class HanoiDataset(MinRLDataset):
         # 10k samples
         return self.n_samples if self.split == "train" else 100
 
-    def conversation(self, sample: HanoiSample) -> list[dict[str, Any]]:
+    def initial_conversation(
+        self, sample: HanoiSample, sample_index: int
+    ) -> Conversation:
         return [
             {
                 "role": "system",
@@ -169,38 +171,37 @@ class HanoiDataset(MinRLDataset):
             },
         ]
 
+    def reward_function(self, conversation: Conversation, sample: Sample) -> float:
+        try:
+            game = TowerOfHanoi(sample["n_disks"])
+            moves = extract_result_list(conversation[-1]["content"])  # type: ignore
+            n_valid_moves, required_moves, solved = 0, game.get_minimum_moves(), False
+            for i, move in enumerate(moves):
+                from_stack, to_stack = move[1], move[2]
+                valid = game.make_move(from_stack, to_stack)
+                if valid:
+                    n_valid_moves += 1
+                if not valid:
+                    break
+                if game.is_solved():
+                    solved = True
+                    break
+                if i > required_moves:
+                    return -1.0
+            if not solved and n_valid_moves > 0:
+                return round(n_valid_moves / required_moves, 2)
+            if solved:
+                return 1.0
+            else:
+                return 0.0
+        except Exception as e:
+            logger.error(f"Error in hanoi_reward_func: {e}")
+            return 0.0
+        return 0.0
+
 
 def extract_result_list(s: str) -> list[list[int]]:
     m = re.search(r"<result>(.*?)</result>", s, re.DOTALL)
     if not m:
         return []
     return ast.literal_eval(m.group(1))
-
-
-def hanoi_reward_func(conversation: Conversation, sample: Sample) -> float:
-    try:
-        game = TowerOfHanoi(sample["n_disks"])
-        moves = extract_result_list(conversation[-1]["content"])  # type: ignore
-        n_valid_moves, required_moves, solved = 0, game.get_minimum_moves(), False
-        for i, move in enumerate(moves):
-            from_stack, to_stack = move[1], move[2]
-            valid = game.make_move(from_stack, to_stack)
-            if valid:
-                n_valid_moves += 1
-            if not valid:
-                break
-            if game.is_solved():
-                solved = True
-                break
-            if i > required_moves:
-                return -1.0
-        if not solved and n_valid_moves > 0:
-            return round(n_valid_moves / required_moves, 2)
-        if solved:
-            return 1.0
-        else:
-            return 0.0
-    except Exception as e:
-        logger.error(f"Error in hanoi_reward_func: {e}")
-        return 0.0
-    return 0.0

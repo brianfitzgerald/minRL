@@ -170,19 +170,17 @@ class ConnectionsDataset(MinRLDataset):
             {"role": "user", "content": f"{sample['prompt']}"},
         ]
 
-
-def connections_reward_func(
-    conversation: Conversation, sample: dict[str, Any]
-) -> float:
-    answer_str = conversation[-1]["content"]
-    groups = parse_groups(answer_str)
-    format_score = strict_format_reward_func(answer_str)
-    hard_score = score_connections_hard(sample["answer_groups"], groups)
-    soft_score = score_connections_soft(sample["answer_groups"], groups)
-    score = (hard_score + soft_score) / 2 + format_score
-    if math.isnan(score):
-        return 0.0
-    return score
+    @staticmethod
+    def reward_function(conversation: Conversation, sample: dict[str, Any]) -> float:
+        answer_str = conversation[-1]["content"]
+        groups = parse_groups(answer_str)
+        format_score = strict_format_reward_func(answer_str)
+        hard_score = score_connections_hard(sample["answer_groups"], groups)
+        soft_score = score_connections_soft(sample["answer_groups"], groups)
+        score = (hard_score + soft_score) / 2 + format_score
+        if math.isnan(score):
+            return 0.0
+        return score
 
 
 def strict_format_reward_func(response: str) -> float:
@@ -192,7 +190,7 @@ def strict_format_reward_func(response: str) -> float:
     return 0.25 if match else 0.0
 
 
-def parse_groups(input_string) -> list[list[str]]:
+def parse_groups(input_string: str) -> list[list[str]]:
     # Find all occurrences of text within <group>...</group>
     group_contents = re.findall(r"<group>(.*?)</group>", input_string, re.DOTALL)
 

@@ -125,7 +125,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 class TrainerConfig(BaseModel):
     model_id: str = GEMMA_3_1B
     eval_interval: int = 10
-    max_new_tokens: int = 512
+    max_new_tokens: int = 256
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
@@ -143,10 +143,12 @@ class TrainerConfig(BaseModel):
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
     # TODO implement vocab wise entropy calculation
     entropy_coef: float = 0.00  # Entropy regularization coefficient
+
+    # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 8
 
     use_gradient_checkpointing: bool = True
-    vllm_gpu_memory_utilization: float = 0.25
+    vllm_gpu_memory_utilization: float = 0.2
 
     lora_config: LoRAConfig | None = LoRAConfig()
 
