@@ -69,8 +69,23 @@ class LoRALinear(nn.Module):
         self.alpha = alpha
         self.scaling = alpha / rank
 
-        self.lora_A = Parameter(torch.empty(rank, base_layer.in_features))
-        self.lora_B = Parameter(torch.empty(base_layer.out_features, rank))
+        # Initialize LoRA parameters on the same device and dtype as base layer
+        self.lora_A = Parameter(
+            torch.empty(
+                rank,
+                base_layer.in_features,
+                device=base_layer.weight.device,
+                dtype=base_layer.weight.dtype,
+            )
+        )
+        self.lora_B = Parameter(
+            torch.empty(
+                base_layer.out_features,
+                rank,
+                device=base_layer.weight.device,
+                dtype=base_layer.weight.dtype,
+            )
+        )
 
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
 

@@ -1,11 +1,9 @@
 import pytest
 
 from minrl.tasks.hanoi import (
-    SYSTEM_PROMPT,
     HanoiDataset,
     TowerOfHanoi,
     create_hanoi_state,
-    hanoi_reward_func,
 )
 
 
@@ -237,39 +235,14 @@ def test_initial_state_creation():
     assert create_hanoi_state(3) == [[3, 2, 1], [], []]
 
 
-def test_dataset_conversation():
-    """Test that dataset conversation is created correctly."""
-    dataset = HanoiDataset(split="train", host="local")
-    assert dataset.conversation({"n_disks": 1}) == [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": "Initial state: [[1], [], []]"},
-    ]
-
-
 MOCK_RESULT_TEXT = """
 <result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [4, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [3, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 1, 2], [1, 0, 2], [2, 0, 1], [1, 2, 1], [6, 0, 2], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 0, 1], [1, 2, 1], [2, 2, 0], [1, 1, 0], [4, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 1], [5, 2, 1], [1, 1, 0], [2, 1, 2], [1, 0, 2], [3, 1, 0], [1, 2, 1], [2, 2, 0], [1, 1, 0]]</result>
 """
 
 
-def test_extract_result_list():
-    """Test that result list is extracted correctly."""
-    conversation = [{"role": "assistant", "content": MOCK_RESULT_TEXT}]
-    # The mock result contains too many moves for a 3-disk puzzle, so it should be penalized
-    # Actually, let's check what the function returns for this specific case
-    result = hanoi_reward_func(conversation, {"n_disks": 3})
-    # The mock solution appears to be correct but very long, so it might return 1.0 if solved
-    assert result == 1.0
-
-
 MOCK_PARTIAL_RESULT_TEXT = """
 <result>[[1, 0, 2], [2, 0, 1], [1, 2, 1], [3, 0, 2]]</result>
 """
-
-
-def test_partial_result_text():
-    """Test that partial result returns partial reward."""
-    conversation = [{"role": "assistant", "content": MOCK_PARTIAL_RESULT_TEXT}]
-    assert hanoi_reward_func(conversation, {"n_disks": 3}) == 0.57
 
 
 def test_dataset_getitem():

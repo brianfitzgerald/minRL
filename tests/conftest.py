@@ -15,7 +15,6 @@ def vllm_model():
     # vLLM only supports CUDA and CPU, not MPS
     model = LLM(
         model=SMOL_LM_2_135M,
-        device_map="auto",
         enforce_eager=True,
     )
     logger.info("vLLM model created")
