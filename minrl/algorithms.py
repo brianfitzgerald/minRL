@@ -371,19 +371,40 @@ def sync_weights_to_vllm(
         original_lora_state = merge_lora_weights_inplace(model)
 
     state_dict = model.state_dict()
+
+    # Filter and remap state_dict for vLLM compatibility
+    if lora:
+        # Remove LoRA-specific keys and remap base_layer keys
+        filtered_state_dict = {}
+        for key, value in state_dict.items():
+            # Skip LoRA-specific parameters
+            if "lora_A" in key or "lora_B" in key:
+                continue
+
+            # Remap base_layer keys to remove the .base_layer prefix
+            if ".base_layer.weight" in key:
+                new_key = key.replace(".base_layer.weight", ".weight")
+                filtered_state_dict[new_key] = value
+            elif ".base_layer.bias" in key:
+                new_key = key.replace(".base_layer.bias", ".bias")
+                filtered_state_dict[new_key] = value
+            else:
+                # Keep other keys as-is
+                filtered_state_dict[key] = value
+
+        state_dict = filtered_state_dict
+
     try:
         model_runner: ModelRunnerBase = (
             vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
         )
         model_runner.model.load_weights(state_dict.items())  # type: ignore
         logger.info("Param update succesful.")
-    except AttributeError:
-        # vLLM API change: model_executor might not be available in newer versions
-        logger.warning(
-            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
-        )
+    except Exception as e:
+        logger.error(f"Error syncing params to vLLM: {e}")
+        raise RuntimeError(f"Error syncing params to vLLM: {e}")
     finally:
-        # Restore LoRA weights after syncing
+        # Restore LoRA weights after syncing even if an error occurs
         if lora:
             assert original_lora_state is not None
             restore_lora_weights_inplace(model, original_lora_state)
