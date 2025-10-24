@@ -1,5 +1,6 @@
 from tqdm import tqdm
 from minrl.constants import Conversation
+from minrl.packing import pack_sequences
 from minrl.tasks.dataset import MinRLDataset
 from minrl.trainer import Trainer
 import torch
@@ -11,65 +12,6 @@ from torch.utils.data import DataLoader
 from typing import Any, cast
 import time
 from contextlib import nullcontext
-
-
-def pack_sequences(
-    samples: list[Any],
-    tokenizer: Any,
-    dataset: MinRLDataset,
-    max_seq_length: int = 2048,
-    pad_token_id: int = 0,
-) -> dict[str, torch.Tensor]:
-    all_input_ids = []
-    all_labels = []
-
-    for i, sample in enumerate(samples):
-        # Get the full conversation including ground truth
-        conversation = dataset.initial_conversation(sample, i)
-
-        # Get token IDs and mask for assistant responses
-        token_ids, assistant_mask = get_token_ids_and_assistant_mask(
-            conversation, tokenizer
-        )
-
-        # Create labels: -100 for non-assistant tokens (ignored in loss)
-        # Shift left by 1 for next-token prediction
-        labels = []
-        for j in range(len(token_ids) - 1):
-            if assistant_mask[j + 1]:  # Next token is assistant token
-                labels.append(token_ids[j + 1])
-            else:
-                labels.append(-100)
-
-        # Input is all tokens except the last
-        input_ids = token_ids[:-1]
-
-        # Add to lists if not too long
-        if len(input_ids) <= max_seq_length:
-            all_input_ids.append(input_ids)
-            all_labels.append(labels)
-
-    # Find max length in this batch
-    max_len = max(len(ids) for ids in all_input_ids) if all_input_ids else 1
-
-    # Pad sequences
-    padded_input_ids = []
-    padded_labels = []
-    attention_masks = []
-
-    for input_ids, labels in zip(all_input_ids, all_labels):
-        # Pad input_ids and labels
-        pad_len = max_len - len(input_ids)
-
-        padded_input_ids.append(input_ids + [pad_token_id] * pad_len)
-        padded_labels.append(labels + [-100] * pad_len)
-        attention_masks.append([1] * len(input_ids) + [0] * pad_len)
-
-    return {
-        "input_ids": torch.tensor(padded_input_ids, dtype=torch.long),
-        "labels": torch.tensor(padded_labels, dtype=torch.long),
-        "attention_mask": torch.tensor(attention_masks, dtype=torch.long),
-    }
 
 
 class SFTTrainer(Trainer):
