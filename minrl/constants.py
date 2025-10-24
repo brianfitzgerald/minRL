@@ -158,6 +158,9 @@ class TrainerConfig(BaseModel):
     group_size: int = 4
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
+    # SFT only
+    max_seq_length: int = 2048
+
     @property
     def model_display_name(self) -> str:
         return self.model_id.split("/")[-1].replace("-", "_")

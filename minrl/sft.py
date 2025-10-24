@@ -1,6 +1,6 @@
 from tqdm import tqdm
 from minrl.constants import Conversation
-from minrl.packing import pack_sequences
+from minrl.packing import pack_bfd
 from minrl.tasks.dataset import MinRLDataset
 from minrl.trainer import Trainer
 import torch
@@ -37,13 +37,10 @@ class SFTTrainer(Trainer):
         self.pad_token_id = int(cast(Any, self.tokenizer.pad_token_id))
 
         # Create dataloader with sequence packing collate function
-        def collate_fn(samples):
-            return pack_sequences(
+        def collate_fn(samples: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+            return pack_bfd(
                 samples,
-                self.tokenizer,
-                self.train_dataset,
-                max_seq_length=2048,
-                pad_token_id=self.pad_token_id,
+                self.config.max_seq_length,
             )
 
         generator = torch.Generator(device=self.device)
@@ -52,7 +49,7 @@ class SFTTrainer(Trainer):
             shuffle=True,
             generator=generator,
             batch_size=self.config.groups_per_batch,
-            collate_fn=collate_fn,
+            collate_fn=collate_fn,  # type: ignore
             pin_memory=False,
             num_workers=0,
         )
@@ -254,12 +251,9 @@ class SFTTrainer(Trainer):
                 # 2. Generate responses and compute rewards
 
                 # Option 1: Compute loss on ground truth
-                packed_batch = pack_sequences(
+                packed_batch = pack_bfd(
                     batch,
-                    self.tokenizer,
-                    self.eval_dataset,
-                    max_seq_length=2048,
-                    pad_token_id=self.pad_token_id,
+                    self.config.max_seq_length,
                 )
 
                 _, metrics = self.compute_loss(packed_batch)
