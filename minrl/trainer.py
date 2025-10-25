@@ -199,7 +199,8 @@ class Trainer:
             ]
 
             episodes, rollout_duration = rollout(
-                self.config,
+                temperature_used,
+                self.config.max_new_tokens,
                 self.tokenizer,
                 self.config.group_size,
                 self.train_dataset.max_steps,
@@ -311,7 +312,8 @@ class Trainer:
                 for i, sample in enumerate(batch)
             ]
             batch_episodes, rollout_duration = rollout(
-                self.config,
+                self.config.temperature,
+                self.config.max_new_tokens,
                 self.tokenizer,
                 1,
                 self.eval_dataset.max_steps,

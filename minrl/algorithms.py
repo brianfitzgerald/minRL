@@ -70,7 +70,6 @@ def rollout(
     samples: list[Sample],
     reward_function: RewardFunction,
     vllm_model: LLM,
-    prev_reward_std: float | None = None,
 ) -> tuple[List[Episode], float]:
     """
     Generate completions for each turn in a batch of conversations.
@@ -96,7 +95,7 @@ def rollout(
 
     logger.info(
         f"Generating responses for {num_prompts} prompts × {group_size} group_size = {total_conversations} total conversations, "
-        f"max_tokens={config.max_new_tokens}, temp={temperature:.3f}"
+        f"max_tokens={max_new_tokens}, temp={temperature:.3f}"
     )
 
     # Flatten structure: instead of nested lists, maintain flat list of all conversations
@@ -143,7 +142,7 @@ def rollout(
         outputs = vllm_model.generate(
             vllm_input,
             sampling_params=SamplingParams(
-                max_tokens=config.max_new_tokens,
+                max_tokens=max_new_tokens,
                 temperature=temperature,
                 n=n_responses,
                 stop_token_ids=stop_token_ids,
