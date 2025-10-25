@@ -65,8 +65,7 @@ class Trainer:
         )
         logger.info(f"Logging to: {logger_choice}")
 
-    def init_model(self):
-        """Initialize the model and tokenizer."""
+    def _setup_hf_model(self):
         torch.set_default_device(self.device)
         if self.device_type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
@@ -128,7 +127,11 @@ class Trainer:
             apply_lora_to_model(self.model, self.config.lora_config)
             logger.info("LoRA applied to model")
 
+    def init_model(self):
+        """Initialize the model and tokenizer."""
         logger.info("Initializing vLLM model")
+
+        self._setup_hf_model()
 
         self.vllm_model = LLM(
             max_num_seqs=self.config.max_num_seqs,
