@@ -37,11 +37,17 @@ class SFTTrainer(Trainer):
         self.pad_token_id = int(cast(Any, self.tokenizer.pad_token_id))
 
         # Create dataloader with sequence packing collate function
-        def collate_fn(samples: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-            return pack_bfd(
+        def collate_fn(samples):
+            # First process samples into the expected format
+            processed_batch = pack_sequences(
                 samples,
-                self.config.max_seq_length,
+                self.tokenizer,
+                self.train_dataset,
+                max_seq_length=self.config.max_seq_length,
+                pad_token_id=self.pad_token_id,
             )
+            # Then apply BFD packing
+            return pack_bfd(processed_batch, self.config.max_seq_length)
 
         generator = torch.Generator(device=self.device)
         self.train_dataloader = DataLoader(
@@ -253,7 +259,10 @@ class SFTTrainer(Trainer):
                 # Option 1: Compute loss on ground truth
                 packed_batch = pack_bfd(
                     batch,
-                    self.config.max_seq_length,
+                    self.tokenizer,
+                    self.eval_dataset,
+                    max_seq_length=self.config.max_seq_length,
+                    pad_token_id=self.pad_token_id,
                 )
 
                 _, metrics = self.compute_loss(packed_batch)

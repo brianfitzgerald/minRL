@@ -116,7 +116,9 @@ class ConnectionsDataset(MinRLDataset):
         tokenizer: PreTrainedTokenizerBase | None = None,
     ):
         super().__init__(split, host, tokenizer)
-        dataset_dir = "/data/" if host == "modal" else "data/"
+        dataset_dir = (
+            "/data/" if host == "modal" else "data/" if host == "local" else "../data"
+        )
         generated_prompts_path = f"{dataset_dir}/connections_generated.jsonl"
         logger.info(f"Loading generated prompts from {generated_prompts_path}")
         prompts_pd = pd.read_json(generated_prompts_path, lines=True)
