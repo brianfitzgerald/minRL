@@ -3,9 +3,9 @@ from minrl.trainer import Trainer
 
 
 def main(wandb: bool = False) -> None:
-    trainer = Trainer("local")
+    trainer = Trainer("local", "wandb" if wandb else "tensorboard")
     trainer.init_model()
-    trainer.init_training(logger_choice="wandb" if wandb else "tensorboard")
+    trainer.init_training()
     trainer.train()
 
 

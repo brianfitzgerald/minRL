@@ -1,4 +1,5 @@
 import dataclasses
+import time
 from contextlib import nullcontext
 from collections import defaultdict
 from typing import Dict, List, TypedDict
@@ -24,7 +25,9 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections, log_conversation
+from minrl.utils import clear_memory, find_assistant_sections, log_memory_usage
+from minrl.metrics import MetricsWrapper
+from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -67,12 +70,14 @@ def rollout(
     samples: list[Sample],
     reward_function: RewardFunction,
     vllm_model: LLM,
-) -> List[Episode]:
+    prev_reward_std: float | None = None,
+) -> tuple[List[Episode], float]:
     """
     Generate completions for each turn in a batch of conversations.
     Runs for max_steps turns, and generates group_size completions
     for the first turn, then 1 completion per turn for subsequent turns.
     """
+    rollout_start_time = time.perf_counter()
 
     # Get stop token IDs to stop generation on
     stop_token_ids: list[int] | None = None
@@ -86,114 +91,122 @@ def rollout(
     else:
         logger.info("No EOS token ID found")
 
+    num_prompts = len(conversations)
+    total_conversations = num_prompts * group_size
+
     logger.info(
-        f"Generating responses for {len(conversations)} prompts, "
-        f"max_tokens={max_new_tokens}, n={group_size}, "
-        f"temp={temperature:.3f}"
+        f"Generating responses for {num_prompts} prompts × {group_size} group_size = {total_conversations} total conversations, "
+        f"max_tokens={config.max_new_tokens}, temp={temperature:.3f}"
     )
 
-    # Store all generated responses for all steps
-    # size is len(conversations) * group_size
-    # indexing is [prompt_idx][group_idx]
-    conversations_out: list[list[Conversation]] = [
-        [list(c) for _ in range(group_size)] for c in conversations
-    ]
+    # Flatten structure: instead of nested lists, maintain flat list of all conversations
+    # Index: [group0_resp0, group0_resp1, ..., group0_respN, group1_resp0, ...]
+    # This makes batching simpler and more efficient
+    flat_conversations: list[Conversation] = []
+    group_indices: list[
+        int
+    ] = []  # Track which original prompt each conversation belongs to
 
-    # For turn 1, generate group_size responses, and add them to separate conversations.
-    # For subsequent turns, generate 1 response per conversation so the group size is maintained.
+    # Initialize: create group_size copies of each initial conversation
+    for i, conv in enumerate(conversations):
+        for j in range(group_size):
+            flat_conversations.append(list(conv))
+            group_indices.append(i)
+
+    # Generate responses for all conversations across all steps
     for step_idx in tqdm(range(max_steps), desc="Steps"):
-        # Tokenize the conversations and convert to input for vLLM
+        # Prepare batch: use all flat_conversations for step 0, or vLLM's n parameter
         if step_idx == 0:
-            # First step: use the first conversation from each group for tokenization
-            current_conversations = [
-                conversations_out[i][0] for i in range(len(conversations_out))
-            ]
+            # First step optimization: batch initial prompts and use vLLM's n parameter
+            batch_conversations = [conversations[i] for i in range(num_prompts)]
+            n_responses = group_size
         else:
-            # Subsequent steps: generate a new completion for each conversation in each group
-            # Flatten the conversations in the order expected by vLLM: [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
-            current_conversations = [
-                conversations_out[i][j]
-                for i in range(len(conversations_out))
-                for j in range(group_size)
-            ]
+            # Subsequent steps: batch all existing conversations
+            batch_conversations = flat_conversations
+            n_responses = 1
+
+        # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(
-            current_conversations,  # pyright: ignore[reportArgumentType]
+            batch_conversations,  # pyright: ignore[reportArgumentType]
             tokenize=False,
             add_generation_prompt=True,
         )
         tokenized_conversations = tokenizer(templated_conversations)["input_ids"]  # pyright: ignore[reportArgumentType]
+
+        # Prepare vLLM input as a single batch
         vllm_input: list[TokensPrompt] = [
-            {
-                "prompt_token_ids": tokenized_conversation,
-            }
-            for tokenized_conversation in tokenized_conversations  # type: ignore
+            {"prompt_token_ids": token_ids}
+            for token_ids in tokenized_conversations  # type: ignore
         ]
 
-        # Generate list of n_conversations * group_size responses
-        # Convert to proper type for SamplingParams
-        outputs_for_step = vllm_model.generate(
+        # Single batched generation call
+        outputs = vllm_model.generate(
             vllm_input,
             sampling_params=SamplingParams(
-                max_tokens=max_new_tokens,
-                n=group_size if step_idx == 0 else 1,
+                max_tokens=config.max_new_tokens,
+                temperature=temperature,
+                n=n_responses,
                 stop_token_ids=stop_token_ids,
             ),
         )
 
-        # Parse out the responses, and add to conversation
+        # Parse and append responses
         if step_idx == 0:
-            # First step: add each response to its corresponding conversation in the group
-            for i in range(len(outputs_for_step)):
-                for j in range(len(outputs_for_step[i].outputs)):
-                    generated_text = outputs_for_step[i].outputs[j].text
-                    # Only add this response to the corresponding conversation
-                    conversations_out[i][j].append(
-                        {"role": "assistant", "content": generated_text}
+            # First step: vLLM returned group_size responses per prompt
+            # Update our flat_conversations structure
+            for prompt_idx, output in enumerate(outputs):
+                for resp_idx, completion in enumerate(output.outputs):
+                    flat_idx = prompt_idx * group_size + resp_idx
+                    flat_conversations[flat_idx].append(
+                        {"role": "assistant", "content": completion.text}
                     )
         else:
-            # Subsequent steps: add each response to its corresponding conversation
-            # The flattened order is [group0_conv0, group0_conv1, ..., group1_conv0, group1_conv1, ...]
-            flattened_idx = 0
-            for i in range(len(outputs_for_step)):
-                for j in range(len(outputs_for_step[i].outputs)):
-                    generated_text = outputs_for_step[i].outputs[j].text
-                    # Calculate the group and conversation indices from the flattened index
-                    group_idx = flattened_idx // group_size
-                    conv_idx = flattened_idx % group_size
-                    conversations_out[group_idx][conv_idx].append(
-                        {"role": "assistant", "content": generated_text}
-                    )
-                    flattened_idx += 1
+            # Subsequent steps: vLLM returned 1 response per conversation
+            for conv_idx, output in enumerate(outputs):
+                generated_text = output.outputs[0].text
+                flat_conversations[conv_idx].append(
+                    {"role": "assistant", "content": generated_text}
+                )
 
-        # Clear CUDA cache
+        # Free memory
+        del outputs, vllm_input, tokenized_conversations, templated_conversations
         clear_memory()
 
-    # Create episodes from all generated responses
+    # Create episodes from all generated conversations
     episodes: List[Episode] = []
-    for i, (conversations, sample) in enumerate(zip(conversations_out, samples)):
-        for j in range(group_size):
-            # For the first step, create multiple episodes (one per response in group)
-            reward = reward_function(conversations[j], sample)
-            logger.info(f"Episode {j}: reward: {reward}")
-            conv_to_log = [msg for msg in conversations[j] if msg["role"] != "system"]
-            log_conversation(conv_to_log)
-            episode = Episode(
-                group_index=i,
-                answer_index=j,
-                sample=sample,
-                reward=reward,
-                conversation=conversations[j],
-            )
-            episodes.append(episode)
+    for flat_idx, (conversation, group_idx) in enumerate(
+        zip(flat_conversations, group_indices)
+    ):
+        answer_idx = flat_idx % group_size
+        sample = samples[group_idx]
+        reward = reward_function(conversation, sample)
 
-    return episodes
+        episode = Episode(
+            group_index=group_idx,
+            answer_index=answer_idx,
+            sample=sample,
+            reward=reward,
+            conversation=conversation,
+        )
+        episodes.append(episode)
+
+    rollout_duration = time.perf_counter() - rollout_start_time
+
+    return episodes, rollout_duration
 
 
 def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
-    # Use log_softmax to avoid numerical instability
+    """Compute entropy efficiently in-place to minimize memory allocation.
+
+    Using the identity: entropy = -sum(p * log(p))
+    Where p = softmax(logits) and log(p) = log_softmax(logits)
+    """
+    # Use log_softmax and softmax - PyTorch optimizes these internally
     logp = F.log_softmax(logits, dim=-1)
-    # Compute entropy: -sum(p * log(p)) = -sum(exp(logp) * logp)
-    entropy = -(logp.exp() * logp).sum(dim=-1)
+    p = F.softmax(logits, dim=-1)
+    # Compute entropy: -sum(p * log(p))
+    # Use in-place operations where possible to reduce memory
+    entropy = -(p * logp).sum(dim=-1)
     return entropy
 
 
@@ -345,33 +358,61 @@ def compute_algorithm_loss(
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
+    lora: bool = False,
 ) -> None:
     logger.info("Syncing params to vLLM...")
 
+    # Merge LoRA weights into base layers before syncing
+    original_lora_state = None
+    if lora:
+        logger.info("Merging LoRA weights into base layers...")
+        original_lora_state = merge_lora_weights_inplace(model)
+
     state_dict = model.state_dict()
-    state_dict = {k: v.to(dtype=torch.float16) for k, v in state_dict.items()}
-    state_dict = {
-        k.removeprefix("base_model.model.").replace(".base_layer", ""): v
-        for k, v in state_dict.items()
-    }
+
+    # Filter and remap state_dict for vLLM compatibility
+    if lora:
+        # Remove LoRA-specific keys and remap base_layer keys
+        filtered_state_dict = {}
+        for key, value in state_dict.items():
+            # Skip LoRA-specific parameters
+            if "lora_A" in key or "lora_B" in key:
+                continue
+
+            # Remap base_layer keys to remove the .base_layer prefix
+            if ".base_layer.weight" in key:
+                new_key = key.replace(".base_layer.weight", ".weight")
+                filtered_state_dict[new_key] = value
+            elif ".base_layer.bias" in key:
+                new_key = key.replace(".base_layer.bias", ".bias")
+                filtered_state_dict[new_key] = value
+            else:
+                # Keep other keys as-is
+                filtered_state_dict[key] = value
+
+        state_dict = filtered_state_dict
 
     try:
         model_runner: ModelRunnerBase = (
             vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
         )
-        model_runner.model.load_weights(model.state_dict().items())  # type: ignore
+        model_runner.model.load_weights(state_dict.items())  # type: ignore
         logger.info("Param update succesful.")
-    except AttributeError:
-        # vLLM API change: model_executor might not be available in newer versions
-        logger.warning(
-            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
-        )
+    except Exception as e:
+        logger.error(f"Error syncing params to vLLM: {e}")
+        raise RuntimeError(f"Error syncing params to vLLM: {e}")
+    finally:
+        # Restore LoRA weights after syncing even if an error occurs
+        if lora:
+            assert original_lora_state is not None
+            restore_lora_weights_inplace(model, original_lora_state)
 
 
 class UpdatePolicyResults(TypedDict):
     loss: float
     grad_norm: float
     entropy: float
+    duration: float
 
 
 class EpisodeWithTokens(TypedDict):
@@ -386,6 +427,7 @@ def process_batch(
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
     device: torch.device,
+    entropy_coef: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
@@ -444,13 +486,15 @@ def process_batch(
 
     # Get the cross entropy loss of the label and generated tokens
     # Slice logits to match target tokens (exclude first position)
-    next_token_logits = logits[:, :-1].float()
+    # Keep in bfloat16/float16 to save memory - cross_entropy handles mixed precision
+    next_token_logits = logits[:, :-1]
 
     # Clear logits from memory immediately after use
     del logits
     clear_memory()
 
     bs = batch_token_ids_t.shape[0]
+    # F.cross_entropy handles dtype conversion internally, no need for .float()
     logprobs = -F.cross_entropy(
         next_token_logits.reshape(-1, next_token_logits.size(-1)),
         target_token_ids.reshape(-1),
@@ -458,24 +502,40 @@ def process_batch(
         reduction="none",
     ).reshape(bs, -1)
 
-    # Calculate entropy only for target positions - memory efficient version
-    # Compute entropy in chunks to avoid creating large intermediate tensors
-    bs, seq_len, vocab_size = next_token_logits.shape
-    target_masks_flat = target_masks.reshape(-1)
+    # Only compute entropy if it's being used (entropy_coef > 0)
+    # This saves memory and computation when entropy regularization is disabled
+    if entropy_coef > 0:
+        # Calculate entropy only for target positions - memory efficient version
+        # Compute entropy in chunks to avoid creating large intermediate tensors
+        bs, seq_len, vocab_size = next_token_logits.shape
+        target_masks_flat = target_masks.reshape(-1)
 
-    # Only compute entropy for positions that are actually targets
-    target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
-    if len(target_positions) > 0:
-        next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
-        target_logits = next_token_logits_flat[target_positions]
+        # Only compute entropy for positions that are actually targets
+        target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
+        if len(target_positions) > 0:
+            next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
+            target_logits = next_token_logits_flat[target_positions]
 
-        # Use mixed precision for entropy computation
-        with fwd_ctx:
-            token_entropy = compute_entropy(target_logits)
+            # Use mixed precision for entropy computation
+            with fwd_ctx:
+                token_entropy = compute_entropy(target_logits)
 
-        # single entropy value for the sequence
-        entropy = token_entropy.sum() / n_target_tokens
+            # single entropy value for the sequence
+            entropy = token_entropy.sum() / n_target_tokens
+
+            # Explicitly delete intermediate tensors to free memory
+            del (
+                target_positions,
+                next_token_logits_flat,
+                target_logits,
+                target_masks_flat,
+                token_entropy,
+            )
+        else:
+            entropy = torch.tensor(0.0, device=device)
+            del target_masks_flat, target_positions
     else:
+        # Skip entropy computation entirely if not used
         entropy = torch.tensor(0.0, device=device)
 
     del batch_token_ids_t, target_token_ids, next_token_logits
@@ -496,12 +556,16 @@ def update_policy(
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
     entropy_coef: float = 0.0,
+    metrics_wrapper: MetricsWrapper | None = None,
+    step: int | None = None,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
     by computing the loss from the reward and generated logits.
     This implements a number of different algorithms.
     """
+    update_start_time = time.perf_counter()
+
     if algorithm == "grpo":
         episodes = normalize_rewards_per_group(episodes)
 
@@ -535,6 +599,7 @@ def update_policy(
                 tokenizer=tokenizer,
                 pad_token_id=pad_token_id,
                 device=device,
+                entropy_coef=entropy_coef,
             )
         )
 
@@ -573,6 +638,9 @@ def update_policy(
         del logprobs, target_masks, batch_rewards_t, batch_loss
         clear_memory()
 
+    # Log GPU utilization after compute_loss
+    log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
+
     # Update parameters once after all gradients accumulated
     if apply_loss:
         grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -586,8 +654,12 @@ def update_policy(
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
     avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
 
+    update_duration = time.perf_counter() - update_start_time
+    logger.info(f"Policy update completed in {update_duration:.2f}s")
+
     return {
         "loss": float(avg_loss),
         "grad_norm": float(grad_norm),
         "entropy": float(avg_entropy),
+        "duration": update_duration,
     }

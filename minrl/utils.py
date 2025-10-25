@@ -2,7 +2,8 @@ import gc
 import os
 import re
 from pydoc import html
-from typing import Dict, List
+from typing import Dict, List, TypedDict
+
 
 import numpy as np
 import psutil
@@ -14,7 +15,11 @@ from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
 if not USING_MPS:
-    from pynvml import nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo  # pyright: ignore[reportMissingImports]
+    from pynvml import (  # pyright: ignore[reportMissingImports]
+        nvmlDeviceGetHandleByIndex,
+        nvmlDeviceGetMemoryInfo,
+        nvmlDeviceGetUtilizationRates,
+    )  # pyright: ignore[reportMissingImports]
 
 
 def clean_observation(obs: str) -> str:
@@ -164,8 +169,24 @@ def clear_memory():
         gc.collect()
 
 
-def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
-    """Get current memory usage in MB and percentage of total VRAM available."""
+class GPUStats(TypedDict):
+    cpu_memory_mb: float
+    gpu_memory_allocated: float
+    gpu_memory_reserved: float
+    gpu_memory_total: float
+    gpu_memory_percentage: float
+    gpu_utilization: float
+
+
+def log_memory_usage(
+    label: str = "Memory usage",
+    metrics_wrapper: MetricsWrapper | None = None,
+    step: int | None = None,
+) -> GPUStats:
+    """
+    Get current memory usage in MB and percentage of total VRAM available, plus GPU utilization.
+    If metrics_wrapper is provided, add the memory usage to the metrics wrapper.
+    """
     process = psutil.Process(os.getpid())
     cpu_memory_mb = process.memory_info().rss / 1024 / 1024
     (
@@ -173,16 +194,21 @@ def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
         gpu_memory_percentage,
         gpu_memory_reserved,
         gpu_memory_total,
-    ) = 0, 0, 0, 0
+        gpu_utilization,
+    ) = 0, 0, 0, 0, 0
 
     if torch.cuda.is_available():
-        # Get GPU memory usage
+        # Get GPU memory usage and utilization
         try:
             handle = nvmlDeviceGetHandleByIndex(0)
             info = nvmlDeviceGetMemoryInfo(handle)
             gpu_memory_allocated = info.used
             gpu_memory_reserved = info.reserved
             gpu_memory_total = info.total
+
+            # Get GPU utilization
+            utilization = nvmlDeviceGetUtilizationRates(handle)
+            gpu_utilization = float(utilization.gpu)
         except Exception as e:
             logger.warning(f"Error getting GPU memory usage: {e}")
             gpu_memory_allocated = torch.cuda.memory_allocated()
@@ -191,22 +217,30 @@ def get_memory_usage(print_usage: bool = True) -> dict[str, float]:
 
         # Convert to MB
         gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
         gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
         gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
-        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
 
-    if print_usage:
+    if label:
         logger.info(
-            f"Memory usage - CPU: {cpu_memory_mb:.1f}MB, GPU: {gpu_memory_allocated:.1f}MB ({gpu_memory_percentage:.1f}%)"
+            f"{label} - CPU: {cpu_memory_mb:.1f}MB, GPU: {gpu_memory_allocated:.1f}MB ({gpu_memory_percentage:.1f}%), GPU Util: {gpu_utilization:.1f}%"
         )
 
-    return {
+    out_dict: GPUStats = {
         "cpu_memory_mb": cpu_memory_mb,
         "gpu_memory_allocated": gpu_memory_allocated,
         "gpu_memory_reserved": gpu_memory_reserved,
         "gpu_memory_total": gpu_memory_total,
         "gpu_memory_percentage": gpu_memory_percentage,
+        "gpu_utilization": gpu_utilization,
     }
+
+    if metrics_wrapper is not None:
+        assert step is not None
+        for k, v in out_dict.items():
+            metrics_wrapper.add_scalar(f"resources/{label}_{k}", v, step)  # pyright: ignore[reportArgumentType]
+
+    return out_dict
 
 
 def log_conversation(conversation: Conversation) -> None:
@@ -249,4 +283,3 @@ def log_conversation(conversation: Conversation) -> None:
         log_lines.append(f"{color}{content_str}{reset_color}\n")
 
     logger.info("".join(log_lines))
-    print("".join(log_lines))

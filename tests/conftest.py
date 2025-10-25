@@ -2,6 +2,7 @@ import pytest
 import torch
 from minrl.constants import SMOL_LM_2_135M, TrainerConfig
 from vllm import LLM
+from vllm.envs import set_vllm_use_v1
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
@@ -12,10 +13,11 @@ import torch.nn as nn
 def vllm_model():
     """Fixture that creates a vLLM model instance once per test session."""
     logger.info("Creating vLLM model")
+    # Disable V1 engine to match trainer behavior
+    set_vllm_use_v1(False)
     # vLLM only supports CUDA and CPU, not MPS
     model = LLM(
         model=SMOL_LM_2_135M,
-        device_map="auto",
         enforce_eager=True,
     )
     logger.info("vLLM model created")

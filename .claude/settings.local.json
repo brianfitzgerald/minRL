@@ -22,7 +22,9 @@
       "Bash(source:*)",
       "Bash(nvidia-smi:*)",
       "Bash(timeout:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(uv run pytest:*)"
     ],
     "deny": []
   }

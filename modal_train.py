@@ -62,7 +62,7 @@ def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     timeout=format_timeout(hours=6),
 )
 def training():
-    trainer = Trainer("modal")
+    trainer = Trainer("modal", "wandb")
     trainer.init_model()
-    trainer.init_training("wandb")
+    trainer.init_training()
     trainer.train()

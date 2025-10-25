@@ -18,7 +18,7 @@ def test_rollout_with_sample_batch(
         ]
     ]
     samples = [{"id": 0, "prompt": "Hello, how are you?"}]
-    episodes = rollout(
+    episodes, rollout_duration = rollout(
         config=config,
         tokenizer=tokenizer,
         group_size=1,
@@ -61,7 +61,8 @@ def test_rollout_with_multiple_turns(
     samples = [
         {"id": i, "prompt": f"Hello, how are you? Group {i}"} for i in range(n_groups)
     ]
-    episodes = rollout(
+
+    episodes, rollout_duration = rollout(
         config=config,
         tokenizer=tokenizer,
         group_size=group_size,
@@ -73,6 +74,8 @@ def test_rollout_with_multiple_turns(
     )
 
     assert isinstance(episodes, list)
+    assert isinstance(rollout_duration, float)
+    assert rollout_duration >= 0
     assert len(episodes) == len(conversations) * group_size
 
     # Test that each episode uses the correct group and answer indices

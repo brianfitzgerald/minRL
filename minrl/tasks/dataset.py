@@ -51,3 +51,10 @@ class MinRLDataset(Dataset):
         Returns (obs, done)
         """
         raise NotImplementedError("step is not implemented")
+
+    @staticmethod
+    def reward_function(conversation: Conversation, sample: Sample) -> float:
+        """
+        Given a conversation and a sample, compute the reward.
+        """
+        raise NotImplementedError("reward_function is not implemented")

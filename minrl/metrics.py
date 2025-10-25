@@ -1,6 +1,5 @@
 from tensorboardX import SummaryWriter
 from minrl.constants import LoggerChoice, TaskChoice, TrainerConfig
-from dataclasses import asdict
 
 import wandb
 
@@ -10,7 +9,7 @@ class MetricsWrapper:
         self,
         logger_choice: LoggerChoice,
         task: TaskChoice,
-        model_id: str,
+        trainer_config: TrainerConfig,
         run_name: str,
     ):
         self.logger_choice = logger_choice
@@ -20,8 +19,8 @@ class MetricsWrapper:
             self.wandb_run = wandb.init(
                 project="minrl",
                 name=run_name,
-                config=asdict(TrainerConfig()),
-                tags=[task, model_id],
+                config=trainer_config.model_dump(),
+                tags=[task, trainer_config.model_id],
             )
         else:
             self.writer = SummaryWriter(f"runs/{run_name}")
