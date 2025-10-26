@@ -150,18 +150,18 @@ class TrainerConfig(BaseModel):
     use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.2
 
-    lora_config: LoRAConfig | None = LoRAConfig()
+    lora_config: LoRAConfig | None = None
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 4
+    micro_batch_size: int = 1  # Per LWR examples (was 4)
     # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
-    # 128 to match LWR
-    gradient_accumulation_steps: int | None = None
-    groups_per_batch: int = 8
-    group_size: int = 4
-    # Minibatch size is (groups_per_batch * group_size) / micro_batch_size
+    # 4 to match LWR recommendations
+    gradient_accumulation_steps: int | None = None  # Explicitly set to 4 per LWR
+    groups_per_batch: int = 8  # Keep effective batch = 8*2=16 < 32
+    group_size: int = 2  # Reduced from 4 to keep total under 32
+    # Effective batch size is groups_per_batch * group_size = 16 < 32 (LWR requirement)
 
-    max_seq_length: int = 1024
+    max_seq_length: int = 1024  # Prompt length per LWR
 
     @property
     def model_display_name(self) -> str:

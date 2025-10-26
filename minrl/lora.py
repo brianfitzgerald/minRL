@@ -27,15 +27,14 @@ TARGET_PRESETS = {
 
 
 class LoRAConfig(BaseModel):
-    """Configuration for LoRA (Low-Rank Adaptation)."""
-
-    rank: int = 8
-    alpha: float = 16.0
+    rank: int = 1  # For RL tasks (use 256 for large-scale SFT)
+    alpha: float = 32.0  # Higher alpha for RL
 
     dropout: float = 0.0
 
     # Regex patterns for modules to apply LoRA to
-    target_modules: list[str] = TARGET_PRESETS["attention"]
+    # "linear" applies to ALL weight matrices (recommended over "attention")
+    target_modules: list[str] = TARGET_PRESETS["linear"]
 
     # Regex patterns for modules to keep trainable
     modules_to_save: list[str] = [
@@ -219,12 +218,17 @@ def merge_lora_weights_inplace(model: nn.Module) -> dict[str, dict[str, torch.Te
         if isinstance(module, LoRALinear):
             # Check for NaN before merging
             if torch.isnan(module.lora_A).any() or torch.isnan(module.lora_B).any():
-                logger.error(f"NaN detected in LoRA weights before merge in module {name}")
-                raise ValueError(f"NaN detected in LoRA weights before merge in module {name}")
+                logger.error(
+                    f"NaN detected in LoRA weights before merge in module {name}"
+                )
+                raise ValueError(
+                    f"NaN detected in LoRA weights before merge in module {name}"
+                )
 
             original_lora_state[name] = {
                 "lora_A": module.lora_A.data.clone(),
                 "lora_B": module.lora_B.data.clone(),
+                "base_layer_weight": module.base_layer.weight.data.clone(),
             }
 
             delta_weight = (module.lora_B @ module.lora_A) * module.scaling
@@ -238,9 +242,6 @@ def merge_lora_weights_inplace(model: nn.Module) -> dict[str, dict[str, torch.Te
                 raise ValueError(f"NaN/Inf detected in delta_weight for module {name}")
 
             module.base_layer.weight.data.add_(delta_weight)
-
-            module.lora_A.data.zero_()
-            module.lora_B.data.zero_()
             merged_count += 1
 
     logger.info(f"Merged {merged_count} LoRA modules")
@@ -264,14 +265,10 @@ def restore_lora_weights_inplace(
             module.lora_A.data.copy_(original_lora_state[name]["lora_A"])
             module.lora_B.data.copy_(original_lora_state[name]["lora_B"])
 
-            delta_weight = (module.lora_B @ module.lora_A) * module.scaling
-
-            # Check for NaN
-            if torch.isnan(delta_weight).any() or torch.isinf(delta_weight).any():
-                logger.error(f"NaN/Inf detected in delta_weight during restore for module {name}")
-                raise ValueError(f"NaN/Inf detected in delta_weight during restore")
-
-            module.base_layer.weight.data.sub_(delta_weight)
+            # Restore the original base layer weight directly
+            module.base_layer.weight.data.copy_(
+                original_lora_state[name]["base_layer_weight"]
+            )
             restored_count += 1
 
     logger.info(f"Restored {restored_count} LoRA modules")
