@@ -131,7 +131,7 @@ class TrainerConfig(BaseModel):
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "connections"
 
-    learning_rate: float = 1e-8
+    learning_rate: float = 1e-6
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
 

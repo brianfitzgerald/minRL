@@ -597,7 +597,7 @@ def update_policy(
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
         # advantage is just normalized reward
-        batch_rewards = [episode.reward for episode in episodes]
+        batch_rewards = [episode.reward for episode in batch_episodes]
         batch_rewards_t = torch.tensor(
             batch_rewards, device=device, dtype=torch.float32
         )
