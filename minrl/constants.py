@@ -127,9 +127,9 @@ class TrainerConfig(BaseModel):
     eval_interval: int = 10
     max_new_tokens: int = 256
     eval_batch_size: int = 8
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 1
     ckpt_save_interval: int = 500
-    lr: float = 1e-5
+    lr: float = 1e-6
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"

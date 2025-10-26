@@ -628,6 +628,14 @@ def update_policy(
             entropy_coef=entropy_coef,
         )
 
+        # Check for NaN loss
+        if torch.isnan(batch_loss) or torch.isinf(batch_loss):
+            logger.error(f"NaN or Inf detected in batch_loss: {batch_loss}")
+            logger.error(f"Reward stats - mean: {batch_rewards_t.mean()}, std: {batch_rewards_t.std()}")
+            raise ValueError(f"NaN or Inf detected in batch_loss: {batch_loss}")
+
+        logger.info(f"Micro-batch {i}: loss: {batch_loss:.4f}")
+
         # Track total loss for logging (unscaled). We scale only for backward
         total_loss += batch_loss
         total_entropy += batch_entropy
@@ -654,13 +662,30 @@ def update_policy(
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=max_grad_norm
                 )
+
+                # Check for NaN gradients or weights before update
+                if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                    logger.error(f"NaN or Inf detected in grad_norm: {grad_norm}")
+                    raise ValueError(f"NaN or Inf detected in grad_norm: {grad_norm}")
+
+                logger.info(
+                    f"Gradient norm before clipping: {grad_norm:.4f}, "
+                    f"max_grad_norm: {max_grad_norm}"
+                )
+
                 optimizer.step()
+
+                # Check for NaN in model parameters after update
+                for name, param in model.named_parameters():
+                    if param.requires_grad and (torch.isnan(param).any() or torch.isinf(param).any()):
+                        logger.error(f"NaN or Inf detected in parameter {name} after optimizer step")
+                        raise ValueError(f"NaN or Inf detected in parameter {name}")
+
                 optimizer.zero_grad(set_to_none=True)
                 clear_memory()
 
-                logger.debug(
-                    f"Parameters updated at micro-batch {num_micro_batches}/{total_micro_batches}, "
-                    f"grad_norm: {grad_norm:.4f}"
+                logger.info(
+                    f"Parameters updated successfully at micro-batch {num_micro_batches}/{total_micro_batches}"
                 )
 
         # Clear intermediate tensors to save memory

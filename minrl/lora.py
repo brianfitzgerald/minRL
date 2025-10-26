@@ -217,18 +217,33 @@ def merge_lora_weights_inplace(model: nn.Module) -> dict[str, dict[str, torch.Te
 
     for name, module in model.named_modules():
         if isinstance(module, LoRALinear):
+            # Check for NaN before merging
+            if torch.isnan(module.lora_A).any() or torch.isnan(module.lora_B).any():
+                logger.error(f"NaN detected in LoRA weights before merge in module {name}")
+                raise ValueError(f"NaN detected in LoRA weights before merge in module {name}")
+
             original_lora_state[name] = {
                 "lora_A": module.lora_A.data.clone(),
                 "lora_B": module.lora_B.data.clone(),
             }
 
             delta_weight = (module.lora_B @ module.lora_A) * module.scaling
+
+            # Check for NaN in delta
+            if torch.isnan(delta_weight).any() or torch.isinf(delta_weight).any():
+                logger.error(f"NaN/Inf detected in delta_weight for module {name}")
+                logger.error(f"  lora_A norm: {module.lora_A.norm():.4f}")
+                logger.error(f"  lora_B norm: {module.lora_B.norm():.4f}")
+                logger.error(f"  scaling: {module.scaling}")
+                raise ValueError(f"NaN/Inf detected in delta_weight for module {name}")
+
             module.base_layer.weight.data.add_(delta_weight)
 
             module.lora_A.data.zero_()
             module.lora_B.data.zero_()
             merged_count += 1
 
+    logger.info(f"Merged {merged_count} LoRA modules")
     return original_lora_state
 
 
@@ -250,8 +265,16 @@ def restore_lora_weights_inplace(
             module.lora_B.data.copy_(original_lora_state[name]["lora_B"])
 
             delta_weight = (module.lora_B @ module.lora_A) * module.scaling
+
+            # Check for NaN
+            if torch.isnan(delta_weight).any() or torch.isinf(delta_weight).any():
+                logger.error(f"NaN/Inf detected in delta_weight during restore for module {name}")
+                raise ValueError(f"NaN/Inf detected in delta_weight during restore")
+
             module.base_layer.weight.data.sub_(delta_weight)
             restored_count += 1
+
+    logger.info(f"Restored {restored_count} LoRA modules")
 
 
 def apply_lora_to_model(model: nn.Module, config: LoRAConfig) -> None:
