@@ -141,6 +141,7 @@ class Trainer:
             dtype="float16" if USING_MPS else "bfloat16",
             enable_prefix_caching=self.device_type == "cuda",
             max_model_len=self.config.max_seq_length,
+            enable_sleep_mode=True,
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
@@ -191,6 +192,10 @@ class Trainer:
             assert self.model is not None
             assert self.tokenizer is not None
 
+            # Wake up vLLM before rollout if needed
+            logger.info("Waking up vLLM for rollout")
+            self.vllm_model.wake_up()
+
             conversations = [
                 self.train_dataset.initial_conversation(sample, i)
                 for i, sample in enumerate(batch)
@@ -213,6 +218,13 @@ class Trainer:
 
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
+
+            # Put vLLM to sleep to free GPU memory during policy update
+            logger.info("Putting vLLM to sleep (level 2)")
+            self.vllm_model.sleep(level=2)
+            log_memory_usage(
+                "vllm_sleep", metrics_wrapper=self.metrics_wrapper, step=step
+            )
 
             logger.info(f"Updating policy for step {step}")
 
@@ -240,10 +252,21 @@ class Trainer:
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
 
+            # Wake up only model weights to avoid OOM during weight sync
+            logger.info("Waking up vLLM weights for sync")
+            self.vllm_model.wake_up(tags=["weights"])
+
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),
                 self.vllm_model,
                 lora=self.config.lora_config is not None,
+            )
+
+            # Wake up KV cache after weights are synced
+            logger.info("Waking up vLLM KV cache")
+            self.vllm_model.wake_up(tags=["kv_cache"])
+            log_memory_usage(
+                "vllm_wake", metrics_wrapper=self.metrics_wrapper, step=step
             )
 
             # Compute current reward std for next iteration before clearing memory
@@ -297,6 +320,10 @@ class Trainer:
         Returns:
             float: The evaluation success rate (currently returns 0.0 as placeholder)
         """
+        # Wake up vLLM for evaluation
+        logger.info("Waking up vLLM for evaluation")
+        self.vllm_model.wake_up()
+
         eval_loader = DataLoader(
             self.eval_dataset,
             shuffle=False,
@@ -333,6 +360,10 @@ class Trainer:
         reward = [episode.reward for episode in episodes]
         mean_reward = sum(reward) / len(reward)
         self.metrics_wrapper.add_scalar("eval/mean_reward", mean_reward, step)
+
+        # Put vLLM back to sleep after evaluation
+        logger.info("Putting vLLM to sleep after evaluation")
+        self.vllm_model.sleep(level=2)
 
     @property
     def checkpoint_dir(self) -> Path:

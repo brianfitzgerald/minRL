@@ -1,6 +1,7 @@
 from minrl.constants import TaskChoice
 from minrl.tasks.connections import ConnectionsDataset
 from minrl.tasks.dataset import MinRLDataset
+from minrl.tasks.gsm8k import GSM8KDataset
 from minrl.tasks.hanoi import HanoiDataset
 
 try:
@@ -12,6 +13,7 @@ except ImportError:
 TASK_DATASETS: dict[TaskChoice, type[MinRLDataset]] = {
     "connections": ConnectionsDataset,
     "hanoi": HanoiDataset,
+    "gsm8k": GSM8KDataset,
 }
 
 # Add zork task only if the group is installed

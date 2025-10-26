@@ -217,7 +217,7 @@ def log_memory_usage(
 
         # Convert to MB
         gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
-        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
+        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100  # pyright: ignore[reportOperatorIssue]
         gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
         gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
 

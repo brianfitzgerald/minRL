@@ -61,7 +61,7 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
 DeviceType = Literal["cuda", "mps", "cpu"]
-TaskChoice = Literal["connections", "hanoi", "zork"]
+TaskChoice = Literal["connections", "hanoi", "zork", "gsm8k"]
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 
 EvalSampleStatus = Literal["running", "done", "error"]
@@ -133,7 +133,7 @@ class TrainerConfig(BaseModel):
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "connections"
+    task: TaskChoice = "gsm8k"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
@@ -145,7 +145,7 @@ class TrainerConfig(BaseModel):
     entropy_coef: float = 0.00  # Entropy regularization coefficient
 
     # Determines the number of sequences to run in parallel in vLLM
-    max_num_seqs: int = 8
+    max_num_seqs: int = 16
 
     use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.2
@@ -153,14 +153,15 @@ class TrainerConfig(BaseModel):
     lora_config: LoRAConfig | None = LoRAConfig()
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 2
+    micro_batch_size: int = 4
     # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
-    gradient_accumulation_steps: int | None = 128
+    # 128 to match LWR
+    gradient_accumulation_steps: int | None = None
     groups_per_batch: int = 4
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
-    max_seq_length: int = 2048
+    max_seq_length: int = 1024
 
     @property
     def model_display_name(self) -> str:

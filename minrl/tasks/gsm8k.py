@@ -4,10 +4,12 @@ import re
 from minrl.constants import Conversation, HostType, Sample
 from datasets import load_dataset
 
+from minrl.utils import log_conversation
+
 _SOLUTION_CLIP_CHARS = 300
 
 TEMPLATE = """
-You are a helpful assistant. Reason about an answer to the following question and provide the final answer as a number inside \\boxed{}.
+You are a helpful assistant. Reason about an answer to the following question and provide the final answer after ####.
 Question: {question}
 """
 
@@ -48,8 +50,8 @@ def extract_solution(solution_str, method="strict"):
 def compute_score(
     solution_str: str,
     ground_truth: str,
-    method: str = "strict",
-    format_score: float = 0.0,
+    method: str = "flexible",
+    format_score: float = 0.1,
     score: float = 1.0,
 ) -> float:
     answer = extract_solution(solution_str=solution_str, method=method)
@@ -71,7 +73,8 @@ class GSM8KDataset(MinRLDataset):
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        self.dataset = load_dataset("openai/gsm8k", "main", split=self.split)
+        split_name: str = "test" if self.split == "eval" else self.split
+        self.dataset = load_dataset("openai/gsm8k", "main", split=split_name)
         self.iter = iter(self.dataset)
 
     def __getitem__(self, i: int) -> Sample:
@@ -92,8 +95,9 @@ class GSM8KDataset(MinRLDataset):
 
     @staticmethod
     def reward_function(conversation: Conversation, sample: Sample) -> float:
+        log_conversation(conversation)
         answer = conversation[-1]["content"]
         ground_truth = extract_solution(sample["answer"], method="strict")
         if ground_truth is None:
             return 0.0
-        return compute_score(answer, ground_truth)
+        return float(compute_score(answer, ground_truth))
