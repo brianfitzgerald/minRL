@@ -160,7 +160,6 @@ class TrainerConfig(BaseModel):
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
-    # SFT only
     max_seq_length: int = 2048
 
     @property

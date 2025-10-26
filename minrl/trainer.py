@@ -139,8 +139,8 @@ class Trainer:
             gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
-            # Prefix caching requires CUDA for some model families (Gemma)
             enable_prefix_caching=self.device_type == "cuda",
+            max_model_len=self.config.max_seq_length,
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
