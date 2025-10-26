@@ -123,13 +123,13 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = GEMMA_3_1B
+    model_id: str = QWEN_3_1_7_B
     eval_interval: int = 10
     max_new_tokens: int = 256
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    lr: float = 5e-6
+    lr: float = 1e-4
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
@@ -153,9 +153,11 @@ class TrainerConfig(BaseModel):
     lora_config: LoRAConfig | None = LoRAConfig()
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 4
+    micro_batch_size: int = 2
+    # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
+    gradient_accumulation_steps: int | None = 128
     groups_per_batch: int = 4
-    group_size: int = 4
+    group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
     # SFT only

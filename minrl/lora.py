@@ -29,13 +29,13 @@ TARGET_PRESETS = {
 class LoRAConfig(BaseModel):
     """Configuration for LoRA (Low-Rank Adaptation)."""
 
-    rank: int = 16
-    alpha: float = 16.0
+    rank: int = 1
+    alpha: float = 32.0
 
     dropout: float = 0.0
 
     # Regex patterns for modules to apply LoRA to
-    target_modules: list[str] = TARGET_PRESETS["linear"]
+    target_modules: list[str] = TARGET_PRESETS["attention"]
 
     # Regex patterns for modules to keep trainable
     modules_to_save: list[str] = [

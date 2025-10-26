@@ -66,7 +66,7 @@ class GSM8KDataset(MinRLDataset):
     ):
         super().__init__(split, host, tokenizer)
         self.tokenizer = tokenizer
-        self.dataset = load_dataset("openai/gsm8k", split=self.split)
+        self.dataset = load_dataset("openai/gsm8k", "main", split=self.split)
         self.iter = iter(self.dataset)
 
     def __getitem__(self, i: int) -> Sample:
@@ -88,4 +88,7 @@ class GSM8KDataset(MinRLDataset):
     @staticmethod
     def reward_function(conversation: Conversation, sample: Sample) -> float:
         answer = conversation[-1]["content"]
-        return compute_score(answer, sample["answer"])
+        ground_truth = extract_solution(sample["answer"], method="strict")
+        if ground_truth is None:
+            return 0.0
+        return compute_score(answer, ground_truth)

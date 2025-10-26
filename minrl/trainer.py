@@ -229,6 +229,7 @@ class Trainer:
                 entropy_coef=self.config.entropy_coef,
                 metrics_wrapper=self.metrics_wrapper,
                 step=step,
+                gradient_accumulation_steps=self.config.gradient_accumulation_steps,
             )
             self.metrics_wrapper.add_scalar(
                 "timing/update_policy_duration_sec", results["duration"], step

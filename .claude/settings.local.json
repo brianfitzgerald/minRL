@@ -24,8 +24,10 @@
       "Bash(timeout:*)",
       "Bash(pkill:*)",
       "Bash(python3 -m pytest:*)",
-      "Bash(uv run pytest:*)"
+      "Bash(uv run pytest:*)",
+      "Bash(python3:*)"
     ],
     "deny": []
-  }
+  },
+  "outputStyle": "default"
 }
