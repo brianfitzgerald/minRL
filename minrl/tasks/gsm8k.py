@@ -6,6 +6,11 @@ from datasets import load_dataset
 
 _SOLUTION_CLIP_CHARS = 300
 
+TEMPLATE = """
+You are a helpful assistant. Reason about an answer to the following question and provide the final answer as a number inside \\boxed{}.
+Question: {question}
+"""
+
 
 # https://github.com/volcengine/verl/blob/main/verl/utils/reward_score/gsm8k.py#L20
 def extract_solution(solution_str, method="strict"):
@@ -81,7 +86,7 @@ class GSM8KDataset(MinRLDataset):
         return [
             {
                 "role": "user",
-                "content": sample["question"],
+                "content": TEMPLATE.format(question=sample["question"]),
             },
         ]
 
