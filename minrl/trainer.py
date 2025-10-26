@@ -167,7 +167,7 @@ class Trainer:
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=self.config.prompts_per_batch,
+            batch_size=self.config.prompts_per_full_batch,
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead

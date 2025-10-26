@@ -192,8 +192,10 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        logger.info(f"Episode {flat_idx}: {episode}")
+        logger.info("--------------------------------")
+        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
         log_conversation(conversation)
+        logger.info("--------------------------------")
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -431,7 +433,7 @@ def process_batch(
     pad_token_id: int,
     device: torch.device,
     entropy_coef: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
     which are all needed for computing the loss.
@@ -472,10 +474,6 @@ def process_batch(
 
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
-
-    # advantage is just normalized reward
-    batch_rewards = [episode.reward for episode in episodes]
-    batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
 
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
@@ -537,7 +535,7 @@ def process_batch(
         # Skip entropy computation entirely if not used
         entropy = torch.tensor(0.0, device=device)
 
-    return logprobs, target_masks, batch_rewards_t, entropy, n_target_tokens
+    return logprobs, target_masks, entropy, n_target_tokens
 
 
 def update_policy(
@@ -556,6 +554,13 @@ def update_policy(
     entropy_coef: float = 0.0,
     gradient_accumulation_steps: int | None = None,
 ) -> UpdatePolicyResults:
+    """
+    1. Normalize rewards per group
+    2. Pre-tokenize all episodes once
+    3. Iterate over groups of episodes in micro-batches
+    4. For each micro-batch, perform loss.backward()
+    5. After gradient_accumulation_steps micro-batches, perform optimizer.step()
+    """
     update_start_time = time.perf_counter()
 
     if algorithm == "grpo":
@@ -583,24 +588,19 @@ def update_policy(
         f"effective batch size: {effective_batch_size}"
     )
 
+    # Track micro-batch index for gradient accumulation
+    micro_batch_idx = 0
+
     # Iterate over micro-batches
     # For each micro-batch, process the batch and compute the loss
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
-
-        # Process the batch
-        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
-            process_batch(
-                model=model,
-                episodes=batch_episodes,
-                tokenizer=tokenizer,
-                pad_token_id=pad_token_id,
-                device=device,
-                entropy_coef=entropy_coef,
-            )
+        # advantage is just normalized reward
+        batch_rewards = [episode.reward for episode in episodes]
+        batch_rewards_t = torch.tensor(
+            batch_rewards, device=device, dtype=torch.float32
         )
-
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
         logger.info(
             f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}, values: {batch_rewards_t.tolist()}"
@@ -608,6 +608,16 @@ def update_policy(
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
             continue
+
+        # Process the batch
+        logprobs, target_masks, batch_entropy, n_target_tokens = process_batch(
+            model=model,
+            episodes=batch_episodes,
+            tokenizer=tokenizer,
+            pad_token_id=pad_token_id,
+            device=device,
+            entropy_coef=entropy_coef,
+        )
 
         # Compute algorithm-specific loss
         batch_loss = compute_algorithm_loss(
@@ -642,12 +652,17 @@ def update_policy(
             scaled_loss = batch_loss / gradient_accumulation_steps
             scaled_loss.backward()
 
-            if i % gradient_accumulation_steps == 0 or i + micro_batch_size >= len(
+            # Check if we should perform optimizer step based on micro-batch count
+            should_step = (
+                micro_batch_idx + 1
+            ) % gradient_accumulation_steps == 0 or i + micro_batch_size >= len(
                 episodes
-            ):
+            )
+
+            if should_step:
                 # Clip gradients and update parameters
                 logger.info(
-                    f"Performing optimizer step at micro-batch {i}/{total_micro_batches}"
+                    f"Performing optimizer step at micro-batch {micro_batch_idx + 1}/{total_micro_batches}"
                 )
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=max_grad_norm
@@ -669,8 +684,11 @@ def update_policy(
                 optimizer.zero_grad()
 
                 logger.info(
-                    f"Parameters updated successfully at micro-batch {i}/{total_micro_batches}"
+                    f"Parameters updated successfully at micro-batch {micro_batch_idx + 1}/{total_micro_batches}"
                 )
+
+        # Increment micro-batch index after processing each micro-batch
+        micro_batch_idx += 1
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)

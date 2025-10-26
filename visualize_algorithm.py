@@ -9,7 +9,7 @@ import torch
 import fire
 
 
-config = TrainerConfig(prompts_per_batch=4)
+config = TrainerConfig(prompts_per_full_batch=4)
 
 trainer = Trainer(host_type="local")
 trainer.init_model()

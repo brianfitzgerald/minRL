@@ -131,7 +131,7 @@ class TrainerConfig(BaseModel):
     algorithm: AlgorithmChoice = "grpo"
     task: TaskChoice = "connections"
 
-    learning_rate: float = 1e-6
+    learning_rate: float = 1e-8
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
 
@@ -151,23 +151,28 @@ class TrainerConfig(BaseModel):
 
     max_grad_norm: float = 1
     use_gradient_checkpointing: bool = False
-    vllm_gpu_memory_utilization: float = 0.4
+    vllm_gpu_memory_utilization: float = 0.2
 
     lora_config: LoRAConfig | None = None
 
     # Size of micro-batches, i.e. episodes per micro-batch
     # One micro-batch is one backward pass, without optimizer step
-    micro_batch_size: int = 4
-    # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
-    gradient_accumulation_steps: int | None = 64
+    micro_batch_size: int = 8
+    # Accumulate gradients over this many micro-batches before performing an optimizer step
+    gradient_accumulation_steps: int | None = None
 
-    # N prompts per batch
-    prompts_per_batch: int = 8
+    # N prompts per full batch
+    prompts_per_full_batch: int = 4
     # N completions per prompt
-    completions_per_prompt: int = 2
+    completions_per_prompt: int = 8
 
-    max_seq_length: int = 1024
+    # Max sequence length for vLLM
+    max_seq_length: int = 4096
     max_new_tokens: int = 512
+
+    @property
+    def effective_batch_size(self) -> int:
+        return self.micro_batch_size * (self.gradient_accumulation_steps or 1)
 
     @property
     def model_display_name(self) -> str:

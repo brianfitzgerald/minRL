@@ -163,10 +163,8 @@ class ConnectionsDataset(MinRLDataset):
         return [
             {
                 "role": "system",
-                "content": CONNECTIONS_PROMPT,
+                "content": f"{CONNECTIONS_PROMPT}\n\n# Example\n\nUser: {MOCK_PROMPT}\nAssistant: {MOCK_ANSWER}",
             },
-            {"role": "user", "content": MOCK_PROMPT},
-            {"role": "assistant", "content": MOCK_ANSWER},
             {"role": "user", "content": f"{sample['prompt']}"},
         ]
 
