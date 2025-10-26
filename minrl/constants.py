@@ -129,7 +129,7 @@ class TrainerConfig(BaseModel):
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    lr: float = 1e-4
+    lr: float = 1e-5
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
@@ -157,9 +157,9 @@ class TrainerConfig(BaseModel):
     # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
     # 128 to match LWR
     gradient_accumulation_steps: int | None = None
-    groups_per_batch: int = 4
-    group_size: int = 8
-    # Total batch size is (groups_per_batch * group_size) / micro_batch_size
+    groups_per_batch: int = 8
+    group_size: int = 4
+    # Minibatch size is (groups_per_batch * group_size) / micro_batch_size
 
     max_seq_length: int = 1024
 

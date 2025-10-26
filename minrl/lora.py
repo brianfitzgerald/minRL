@@ -29,8 +29,8 @@ TARGET_PRESETS = {
 class LoRAConfig(BaseModel):
     """Configuration for LoRA (Low-Rank Adaptation)."""
 
-    rank: int = 1
-    alpha: float = 32.0
+    rank: int = 8
+    alpha: float = 16.0
 
     dropout: float = 0.0
 

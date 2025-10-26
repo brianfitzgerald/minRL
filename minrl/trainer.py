@@ -102,6 +102,11 @@ class Trainer:
         self.tokenizer = tokenizer
         self.model = model
 
+        if self.config.lora_config is not None:
+            logger.info("Applying LoRA to model")
+            apply_lora_to_model(self.model, self.config.lora_config)
+            logger.info("LoRA applied to model")
+
         if self.config.optimizer == "adamw":
             if (
                 self.config.use_low_precision_optimizer_if_available
@@ -121,11 +126,6 @@ class Trainer:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
 
         logger.info(f"Using optimizer: {self.optimizer}")
-
-        if self.config.lora_config is not None:
-            logger.info("Applying LoRA to model")
-            apply_lora_to_model(self.model, self.config.lora_config)
-            logger.info("LoRA applied to model")
 
     def init_model(self):
         """Initialize the model and tokenizer."""
