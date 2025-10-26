@@ -7,6 +7,8 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 import torch.nn as nn
 
+from minrl.metrics import DummyMetricsWrapper
+
 
 @pytest.fixture
 def sample_episodes() -> list[Episode]:
@@ -66,6 +68,7 @@ def test_update_policy_grpo_algorithm(
     tokenizer: PreTrainedTokenizerBase,
     device: torch.device,
     sample_episodes: list[Episode],
+    dummy_metrics_wrapper: DummyMetricsWrapper,
 ):
     """Test update_policy with GRPO algorithm."""
     config.algorithm = "grpo"
@@ -83,6 +86,8 @@ def test_update_policy_grpo_algorithm(
         device=device,
         algorithm=config.algorithm,
         tokenizer=tokenizer,
+        metrics_wrapper=dummy_metrics_wrapper,
+        step=0,
         apply_loss=True,
     )
 

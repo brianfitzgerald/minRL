@@ -48,7 +48,7 @@ class SFTTrainer(Trainer):
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=self.config.groups_per_batch,
+            batch_size=self.config.prompts_per_batch,
             collate_fn=collate_fn,  # type: ignore
             pin_memory=False,
             num_workers=0,
@@ -57,7 +57,7 @@ class SFTTrainer(Trainer):
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            f"Batch size: {self.config.groups_per_batch}, micro batch size: {self.config.micro_batch_size}"
+            f"Batch size: {self.config.prompts_per_batch}, micro batch size: {self.config.micro_batch_size}"
         )
 
     def compute_loss(

@@ -123,23 +123,25 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = QWEN_3_1_7_B
+    model_id: str = QWEN_3_0_6B
     eval_interval: int = 10
-    max_new_tokens: int = 256
     eval_batch_size: int = 8
-    max_grad_norm: float = 1
     ckpt_save_interval: int = 500
-    lr: float = 1e-6
+
+    algorithm: AlgorithmChoice = "grpo"
+    task: TaskChoice = "connections"
+
+    learning_rate: float = 1e-6
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
-    algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "gsm8k"
+
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
     temperature_scaling: bool = False
     temperature_min: float = 0.2
     temperature_max: float = 1.5
+
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
     # TODO implement vocab wise entropy calculation
     entropy_coef: float = 0.00  # Entropy regularization coefficient
@@ -147,21 +149,25 @@ class TrainerConfig(BaseModel):
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 16
 
-    use_gradient_checkpointing: bool = True
-    vllm_gpu_memory_utilization: float = 0.2
+    max_grad_norm: float = 1
+    use_gradient_checkpointing: bool = False
+    vllm_gpu_memory_utilization: float = 0.4
 
     lora_config: LoRAConfig | None = None
 
-    # Size of micro-batches for backward pass
-    micro_batch_size: int = 1  # Per LWR examples (was 4)
+    # Size of micro-batches, i.e. episodes per micro-batch
+    # One micro-batch is one backward pass, without optimizer step
+    micro_batch_size: int = 4
     # Number of gradient accumulation steps (None = auto-calculate from micro_batch_size)
-    # 4 to match LWR recommendations
-    gradient_accumulation_steps: int | None = None  # Explicitly set to 4 per LWR
-    groups_per_batch: int = 8  # Keep effective batch = 8*2=16 < 32
-    group_size: int = 2  # Reduced from 4 to keep total under 32
-    # Effective batch size is groups_per_batch * group_size = 16 < 32 (LWR requirement)
+    gradient_accumulation_steps: int | None = 64
 
-    max_seq_length: int = 1024  # Prompt length per LWR
+    # N prompts per batch
+    prompts_per_batch: int = 8
+    # N completions per prompt
+    completions_per_prompt: int = 2
+
+    max_seq_length: int = 1024
+    max_new_tokens: int = 512
 
     @property
     def model_display_name(self) -> str:

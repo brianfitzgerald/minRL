@@ -8,6 +8,8 @@ from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 import torch.nn as nn
 
+from minrl.metrics import DummyMetricsWrapper
+
 
 @pytest.fixture(scope="session")
 def vllm_model():
@@ -118,3 +120,14 @@ class MockVLLMModel:
 def mock_vllm_model():
     """Fixture that provides a mock vLLM model for testing."""
     return MockVLLMModel()
+
+
+@pytest.fixture
+def dummy_metrics_wrapper():
+    """Fixture that provides a dummy metrics wrapper for testing."""
+    return DummyMetricsWrapper(
+        logger_choice="tensorboard",
+        task="connections",
+        trainer_config=TrainerConfig(),
+        run_name="test",
+    )

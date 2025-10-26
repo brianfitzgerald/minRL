@@ -25,9 +25,14 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections, log_memory_usage
+from minrl.utils import (
+    find_assistant_sections,
+    log_memory_usage,
+    log_conversation,
+)
 from minrl.metrics import MetricsWrapper
 from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
+
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -170,10 +175,6 @@ def rollout(
                     {"role": "assistant", "content": generated_text}
                 )
 
-        # Free memory
-        del outputs, vllm_input, tokenized_conversations, templated_conversations
-        clear_memory()
-
     # Create episodes from all generated conversations
     episodes: List[Episode] = []
     for flat_idx, (conversation, group_idx) in enumerate(
@@ -191,6 +192,8 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
+        logger.info(f"Episode {flat_idx}: {episode}")
+        log_conversation(conversation)
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -203,11 +206,9 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     Using the identity: entropy = -sum(p * log(p))
     Where p = softmax(logits) and log(p) = log_softmax(logits)
     """
-    # Use log_softmax and softmax - PyTorch optimizes these internally
     logp = F.log_softmax(logits, dim=-1)
     p = F.softmax(logits, dim=-1)
     # Compute entropy: -sum(p * log(p))
-    # Use in-place operations where possible to reduce memory
     entropy = -(p * logp).sum(dim=-1)
     return entropy
 
@@ -491,10 +492,6 @@ def process_batch(
     # Keep in bfloat16/float16 to save memory - cross_entropy handles mixed precision
     next_token_logits = logits[:, :-1]
 
-    # Clear logits from memory immediately after use
-    del logits
-    clear_memory()
-
     bs = batch_token_ids_t.shape[0]
     # F.cross_entropy handles dtype conversion internally, no need for .float()
     logprobs = -F.cross_entropy(
@@ -540,9 +537,6 @@ def process_batch(
         # Skip entropy computation entirely if not used
         entropy = torch.tensor(0.0, device=device)
 
-    del batch_token_ids_t, target_token_ids, next_token_logits
-    clear_memory()
-
     return logprobs, target_masks, batch_rewards_t, entropy, n_target_tokens
 
 
@@ -556,10 +550,10 @@ def update_policy(
     device: torch.device,
     algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
+    metrics_wrapper: MetricsWrapper,
+    step: int,
     apply_loss: bool = True,
     entropy_coef: float = 0.0,
-    metrics_wrapper: MetricsWrapper | None = None,
-    step: int | None = None,
     gradient_accumulation_steps: int | None = None,
 ) -> UpdatePolicyResults:
     update_start_time = time.perf_counter()
@@ -574,15 +568,12 @@ def update_policy(
     total_entropy = torch.tensor(0.0, device=device)
     total_loss = torch.tensor(0.0, device=device)
     grad_norm = 0.0
-    num_micro_batches = 0
 
     # Compute number of micro-batches up-front for correct gradient accumulation scaling
     # This makes the accumulated gradient equivalent to averaging over the full batch
     total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
 
-    # Use gradient_accumulation_steps if provided, otherwise accumulate over all micro-batches
-    if gradient_accumulation_steps is None:
-        gradient_accumulation_steps = total_micro_batches
+    gradient_accumulation_steps = gradient_accumulation_steps or 1
 
     effective_batch_size = micro_batch_size * gradient_accumulation_steps
 
@@ -593,6 +584,7 @@ def update_policy(
     )
 
     # Iterate over micro-batches
+    # For each micro-batch, process the batch and compute the loss
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
@@ -611,7 +603,7 @@ def update_policy(
 
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
         logger.info(
-            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
+            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}, values: {batch_rewards_t.tolist()}"
         )
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
@@ -631,15 +623,17 @@ def update_policy(
         # Check for NaN loss
         if torch.isnan(batch_loss) or torch.isinf(batch_loss):
             logger.error(f"NaN or Inf detected in batch_loss: {batch_loss}")
-            logger.error(f"Reward stats - mean: {batch_rewards_t.mean()}, std: {batch_rewards_t.std()}")
             raise ValueError(f"NaN or Inf detected in batch_loss: {batch_loss}")
 
         logger.info(f"Micro-batch {i}: loss: {batch_loss:.4f}")
+        rewards_values = [round(reward, 2) for reward in batch_rewards_t.tolist()]
+        logger.info(
+            f"Reward stats - mean: {batch_rewards_t.mean()}, std: {batch_rewards_t.std()}, values: {rewards_values}"
+        )
 
         # Track total loss for logging (unscaled). We scale only for backward
         total_loss += batch_loss
         total_entropy += batch_entropy
-        num_micro_batches += 1
 
         if apply_loss:
             # Scale per micro-batch loss by number of accumulation steps so that
@@ -648,16 +642,12 @@ def update_policy(
             scaled_loss = batch_loss / gradient_accumulation_steps
             scaled_loss.backward()
 
-            # Update parameters every gradient_accumulation_steps micro-batches
-            # or at the end of all micro-batches (whichever comes first)
-            should_update = (num_micro_batches % gradient_accumulation_steps == 0) or (
-                i + micro_batch_size >= len(episodes)
-            )
-
-            if should_update:
+            if i % gradient_accumulation_steps == 0 or i + micro_batch_size >= len(
+                episodes
+            ):
                 # Clip gradients and update parameters
                 logger.info(
-                    f"Updating parameters at micro-batch {num_micro_batches}/{total_micro_batches}"
+                    f"Performing optimizer step at micro-batch {i}/{total_micro_batches}"
                 )
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=max_grad_norm
@@ -673,31 +663,23 @@ def update_policy(
                     f"max_grad_norm: {max_grad_norm}"
                 )
 
+                metrics_wrapper.add_scalar("train/grad_norm", float(grad_norm), step)
+
                 optimizer.step()
-
-                # Check for NaN in model parameters after update
-                for name, param in model.named_parameters():
-                    if param.requires_grad and (torch.isnan(param).any() or torch.isinf(param).any()):
-                        logger.error(f"NaN or Inf detected in parameter {name} after optimizer step")
-                        raise ValueError(f"NaN or Inf detected in parameter {name}")
-
-                optimizer.zero_grad(set_to_none=True)
-                clear_memory()
+                optimizer.zero_grad()
 
                 logger.info(
-                    f"Parameters updated successfully at micro-batch {num_micro_batches}/{total_micro_batches}"
+                    f"Parameters updated successfully at micro-batch {i}/{total_micro_batches}"
                 )
-
-        # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t, batch_loss
-        clear_memory()
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
 
     # Return average loss and entropy across all micro-batches
-    avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_loss = total_loss / total_micro_batches if total_micro_batches > 0 else 0.0
+    avg_entropy = (
+        total_entropy / total_micro_batches if total_micro_batches > 0 else 0.0
+    )
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")

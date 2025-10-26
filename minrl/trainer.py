@@ -77,12 +77,13 @@ class Trainer:
         tokenizer = AutoTokenizer.from_pretrained(self.config.model_id)
         # fallback to eager for mps
         attn_impl = "sdpa" if self.device_type == "mps" else "flash_attention_2"
+        device_map = "cuda:0" if self.device_type == "cuda" else "auto"
 
         # Use more memory-efficient model loading
         logger.info(f"Initializing HF model, attn impl: {attn_impl}")
         model: nn.Module = AutoModelForCausalLM.from_pretrained(  # pyright: ignore[reportAssignmentType]
             self.config.model_id,
-            device_map="auto",
+            device_map=device_map,
             dtype=self.dtype,
             attn_implementation=attn_impl,
             low_cpu_mem_usage=True,
@@ -114,13 +115,14 @@ class Trainer:
             ):
                 self.optimizer = Adam8bit(
                     cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
+                    lr=self.config.learning_rate,
                     betas=(0.9, 0.999),
                     eps=1e-8,
                 )
             else:
                 self.optimizer = torch.optim.AdamW(
-                    cast(nn.Module, self.model).parameters(), lr=self.config.lr
+                    cast(nn.Module, self.model).parameters(),
+                    lr=self.config.learning_rate,
                 )
         else:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")
@@ -141,6 +143,7 @@ class Trainer:
             dtype="float16" if USING_MPS else "bfloat16",
             enable_prefix_caching=self.device_type == "cuda",
             max_model_len=self.config.max_seq_length,
+            max_num_batched_tokens=4096,
             enable_sleep_mode=True,
         )
         log_memory_usage(
@@ -164,7 +167,7 @@ class Trainer:
             self.train_dataset,
             shuffle=True,
             generator=generator,
-            batch_size=self.config.groups_per_batch,
+            batch_size=self.config.prompts_per_batch,
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
@@ -204,7 +207,7 @@ class Trainer:
             episodes, rollout_duration = rollout(
                 self.config,
                 self.tokenizer,
-                self.config.group_size,
+                self.config.completions_per_prompt,
                 self.train_dataset.max_steps,
                 conversations,
                 samples=batch,

@@ -32,8 +32,6 @@ class LoRAConfig(BaseModel):
 
     dropout: float = 0.0
 
-    # Regex patterns for modules to apply LoRA to
-    # "linear" applies to ALL weight matrices (recommended over "attention")
     target_modules: list[str] = TARGET_PRESETS["linear"]
 
     # Regex patterns for modules to keep trainable

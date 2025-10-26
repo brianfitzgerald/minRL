@@ -3,6 +3,8 @@ from minrl.constants import LoggerChoice, TaskChoice, TrainerConfig
 
 import wandb
 
+from loguru import logger
+
 
 class MetricsWrapper:
     def __init__(
@@ -49,3 +51,14 @@ class MetricsWrapper:
         else:
             assert self.writer is not None
             self.writer.close()
+
+
+class DummyMetricsWrapper(MetricsWrapper):
+    def add_scalar(self, tag: str, value: float, step: int) -> None:
+        logger.info(f"Adding scalar {tag}: {value} at step {step}")
+
+    def add_text(self, tag: str, text: str, step: int) -> None:
+        logger.info(f"Adding text {tag}: {text} at step {step}")
+
+    def close(self) -> None:
+        logger.info("Closing dummy metrics wrapper")
