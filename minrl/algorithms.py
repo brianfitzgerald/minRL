@@ -25,7 +25,12 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
-from minrl.utils import clear_memory, find_assistant_sections, log_memory_usage
+from minrl.utils import (
+    clear_memory,
+    find_assistant_sections,
+    log_memory_usage,
+    log_conversation,
+)
 from minrl.metrics import MetricsWrapper
 from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
 
@@ -191,6 +196,8 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
+        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        log_conversation(conversation)
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -360,39 +367,10 @@ def compute_algorithm_loss(
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
-    lora: bool = False,
 ) -> None:
     logger.info("Syncing params to vLLM...")
 
-    # Merge LoRA weights into base layers before syncing
-    original_lora_state = None
-    if lora:
-        logger.info("Merging LoRA weights into base layers...")
-        original_lora_state = merge_lora_weights_inplace(model)
-
     state_dict = model.state_dict()
-
-    # Filter and remap state_dict for vLLM compatibility
-    if lora:
-        # Remove LoRA-specific keys and remap base_layer keys
-        filtered_state_dict = {}
-        for key, value in state_dict.items():
-            # Skip LoRA-specific parameters
-            if "lora_A" in key or "lora_B" in key:
-                continue
-
-            # Remap base_layer keys to remove the .base_layer prefix
-            if ".base_layer.weight" in key:
-                new_key = key.replace(".base_layer.weight", ".weight")
-                filtered_state_dict[new_key] = value
-            elif ".base_layer.bias" in key:
-                new_key = key.replace(".base_layer.bias", ".bias")
-                filtered_state_dict[new_key] = value
-            else:
-                # Keep other keys as-is
-                filtered_state_dict[key] = value
-
-        state_dict = filtered_state_dict
 
     try:
         model_runner: ModelRunnerBase = (
@@ -400,14 +378,11 @@ def sync_weights_to_vllm(
         )
         model_runner.model.load_weights(state_dict.items())  # type: ignore
         logger.info("Param update succesful.")
-    except Exception as e:
-        logger.error(f"Error syncing params to vLLM: {e}")
-        raise RuntimeError(f"Error syncing params to vLLM: {e}")
-    finally:
-        # Restore LoRA weights after syncing even if an error occurs
-        if lora:
-            assert original_lora_state is not None
-            restore_lora_weights_inplace(model, original_lora_state)
+    except AttributeError:
+        # vLLM API change: model_executor might not be available in newer versions
+        logger.warning(
+            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
+        )
 
 
 class UpdatePolicyResults(TypedDict):
@@ -547,6 +522,127 @@ def process_batch(
 
 
 def update_policy(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    episodes: List[Episode],
+    micro_batch_size: int,
+    pad_token_id: int,
+    max_grad_norm: float,
+    device: torch.device,
+    algorithm: AlgorithmChoice,
+    tokenizer: PreTrainedTokenizerBase,
+    apply_loss: bool = True,
+    entropy_coef: float = 0.0,
+    metrics_wrapper: MetricsWrapper | None = None,
+    step: int | None = None,
+) -> UpdatePolicyResults:
+    """
+    Once episodes are generated, use them to update the policy
+    by computing the loss from the reward and generated logits.
+    This implements a number of different algorithms.
+    """
+    update_start_time = time.perf_counter()
+
+    if algorithm == "grpo":
+        episodes = normalize_rewards_per_group(episodes)
+
+    # Pre-tokenize all episodes once
+    for episode in episodes:
+        get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
+
+    total_entropy = torch.tensor(0.0, device=device)
+    total_loss = torch.tensor(0.0, device=device)
+    grad_norm = 0.0
+    num_micro_batches = 0
+
+    # Compute number of micro-batches up-front for correct gradient accumulation scaling
+    # This makes the accumulated gradient equivalent to averaging over the full batch
+    total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
+
+    logger.info(
+        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}"
+    )
+
+    # Iterate over micro-batches
+    for i in range(0, len(episodes), micro_batch_size):
+        j = min(i + micro_batch_size, len(episodes))
+        batch_episodes = episodes[i:j]
+
+        # Process the batch
+        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
+            process_batch(
+                model=model,
+                episodes=batch_episodes,
+                tokenizer=tokenizer,
+                pad_token_id=pad_token_id,
+                device=device,
+                entropy_coef=entropy_coef,
+            )
+        )
+
+        reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
+        logger.info(
+            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
+        )
+        if reward_std == 0:
+            logger.warning("Reward std is 0, skipping micro-batch")
+            continue
+
+        # Compute algorithm-specific loss
+        batch_loss = compute_algorithm_loss(
+            logprobs,
+            target_masks,
+            batch_rewards_t,
+            algorithm,
+            n_target_tokens,
+            entropy=batch_entropy,
+            entropy_coef=entropy_coef,
+        )
+
+        # Track total loss for logging (unscaled). We scale only for backward
+        total_loss += batch_loss
+        total_entropy += batch_entropy
+        num_micro_batches += 1
+
+        # Backward pass - gradients accumulate naturally
+        if apply_loss:
+            # Scale per micro-batch loss by number of accumulation steps so that
+            # the accumulated gradient matches the average gradient over the full batch
+            scaled_loss = batch_loss / max(total_micro_batches, 1)
+            scaled_loss.backward()
+
+        # Clear intermediate tensors to save memory
+        del logprobs, target_masks, batch_rewards_t, batch_loss
+        clear_memory()
+
+    # Log GPU utilization after compute_loss
+    log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
+
+    # Update parameters once after all gradients accumulated
+    if apply_loss:
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(), max_norm=max_grad_norm
+        )
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        clear_memory()
+
+    # Return average loss and entropy across all micro-batches
+    avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+
+    update_duration = time.perf_counter() - update_start_time
+    logger.info(f"Policy update completed in {update_duration:.2f}s")
+
+    return {
+        "loss": float(avg_loss),
+        "grad_norm": float(grad_norm),
+        "entropy": float(avg_entropy),
+        "duration": update_duration,
+    }
+
+
+def update_policy_old(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     episodes: List[Episode],

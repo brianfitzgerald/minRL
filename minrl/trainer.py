@@ -13,7 +13,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
-from minrl.algorithms import compute_scaled_temperature
+from minrl.algorithms import compute_scaled_temperature, update_policy_old
 from minrl.lora import apply_lora_to_model
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
@@ -216,7 +216,7 @@ class Trainer:
 
             logger.info(f"Updating policy for step {step}")
 
-            results = update_policy(
+            results = update_policy_old(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,
@@ -242,7 +242,6 @@ class Trainer:
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),
                 self.vllm_model,
-                lora=self.config.lora_config is not None,
             )
 
             # Compute current reward std for next iteration before clearing memory

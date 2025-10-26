@@ -150,7 +150,7 @@ class TrainerConfig(BaseModel):
     use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.2
 
-    lora_config: LoRAConfig | None = LoRAConfig()
+    lora_config: LoRAConfig | None = None
 
     # Size of micro-batches for backward pass
     micro_batch_size: int = 4
