@@ -51,7 +51,7 @@ def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
 
 @app.function(
     image=MODAL_IMAGE,
-    gpu="A100-40GB:1",
+    gpu="H100:1",
     secrets=[
         modal.Secret.from_name("smolmodels"),
     ],

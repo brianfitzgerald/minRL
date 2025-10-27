@@ -143,7 +143,6 @@ class Trainer:
             dtype="float16" if USING_MPS else "bfloat16",
             enable_prefix_caching=self.device_type == "cuda",
             max_model_len=self.config.max_seq_length,
-            max_num_batched_tokens=4096,
             enable_sleep_mode=True,
         )
         log_memory_usage(
