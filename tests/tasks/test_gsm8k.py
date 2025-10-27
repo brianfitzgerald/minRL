@@ -38,7 +38,9 @@ class TestGSM8KIntegration:
         assert ground_truth is not None, "Sample should have valid answer format"
 
         # Scenario 1: Correct LLM response with proper format
-        correct_response = f"Let me solve this step by step.\n\nFinal answer: #### {ground_truth}"
+        correct_response = (
+            f"Let me solve this step by step.\n\nFinal answer: #### {ground_truth}"
+        )
         correct_conversation: Conversation = [
             {"role": "user", "content": sample["question"]},
             {"role": "assistant", "content": correct_response},
@@ -96,7 +98,9 @@ class TestGSM8KIntegration:
 
             # Simulate correct LLM response
             # Extract the actual ground truth from the sample's full solution
-            correct_llm_response = sample["answer"]  # Use the full answer with reasoning
+            correct_llm_response = sample[
+                "answer"
+            ]  # Use the full answer with reasoning
             full_conversation: Conversation = [
                 {"role": "user", "content": sample["question"]},
                 {"role": "assistant", "content": correct_llm_response},
@@ -104,9 +108,9 @@ class TestGSM8KIntegration:
 
             # Should get perfect score since we're using the ground truth
             reward = dataset.reward_function(full_conversation, sample)
-            assert (
-                reward == 1.0
-            ), f"Sample {i}: Should get perfect score with ground truth answer"
+            assert reward == 1.0, (
+                f"Sample {i}: Should get perfect score with ground truth answer"
+            )
 
 
 class TestGSM8KHelperFunctions:
@@ -143,7 +147,9 @@ class TestGSM8KHelperFunctions:
 
         # No format
         assert (
-            compute_score(solution_str="I don't know", ground_truth="50", method="strict")
+            compute_score(
+                solution_str="I don't know", ground_truth="50", method="strict"
+            )
             == 0
         )
 
