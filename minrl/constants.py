@@ -61,7 +61,7 @@ LoggerChoice = Literal["tensorboard", "wandb"]
 
 HostType = Literal["modal", "local"]
 DeviceType = Literal["cuda", "mps", "cpu"]
-TaskChoice = Literal["connections", "hanoi", "zork"]
+TaskChoice = Literal["connections", "hanoi", "zork", "gsm8k"]
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
 
 EvalSampleStatus = Literal["running", "done", "error"]
@@ -133,7 +133,7 @@ class TrainerConfig(BaseModel):
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "connections"
+    task: TaskChoice = "gsm8k"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
@@ -145,7 +145,7 @@ class TrainerConfig(BaseModel):
     entropy_coef: float = 0.00  # Entropy regularization coefficient
 
     # Determines the number of sequences to run in parallel in vLLM
-    max_num_seqs: int = 8
+    max_num_seqs: int = 128
 
     use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.2
