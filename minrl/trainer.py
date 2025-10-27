@@ -13,7 +13,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
-from minrl.algorithms import compute_scaled_temperature, update_policy_old
+from minrl.algorithms import compute_scaled_temperature
 from minrl.lora import apply_lora_to_model
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
