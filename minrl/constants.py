@@ -129,7 +129,7 @@ class TrainerConfig(BaseModel):
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    lr: float = 5e-6
+    lr: float = 1e-5
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
@@ -147,13 +147,13 @@ class TrainerConfig(BaseModel):
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 128
 
-    use_gradient_checkpointing: bool = True
+    use_gradient_checkpointing: bool = False
     vllm_gpu_memory_utilization: float = 0.2
 
     lora_config: LoRAConfig | None = None
 
     # Size of micro-batches for backward pass
-    micro_batch_size: int = 4
+    micro_batch_size: int = 8
     groups_per_batch: int = 4
     group_size: int = 4
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
