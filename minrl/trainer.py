@@ -216,7 +216,7 @@ class Trainer:
 
             logger.info(f"Updating policy for step {step}")
 
-            results = update_policy_old(
+            results = update_policy(
                 model=cast(nn.Module, self.model),
                 optimizer=self.optimizer,
                 episodes=episodes,

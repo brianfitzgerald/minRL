@@ -274,6 +274,13 @@ def get_token_ids_and_assistant_mask(
             newline_token_id,
         )
 
+    # Assert we found assistant spans; if not, this is likely a chat template mismatch
+    if not assistant_sections:
+        raise ValueError(
+            "No assistant spans found in conversation tokens. "
+            "Ensure the tokenizer's chat template matches the conversation format."
+        )
+
     for start, end in assistant_sections:
         for j in range(start, end):
             assistant_mask[j] = True
@@ -413,14 +420,12 @@ def process_batch(
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
     assistant_mask_list: list[list[bool]] = []
-    n_target_tokens = 0
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer, episode
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
-        n_target_tokens += len(token_ids)
     # Pad token IDs to the same length using PyTorch's pad_sequence
     batch_token_ids_t = [
         torch.tensor(token_ids, dtype=torch.long, device=device)
@@ -446,6 +451,11 @@ def process_batch(
 
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
+
+    # Number of target positions (assistant tokens that are not padding)
+    n_target_tokens = int(target_masks.sum().item())
+    if n_target_tokens == 0:
+        raise ValueError("No target tokens (assistant mask empty) in batch")
 
     # advantage is just normalized reward
     batch_rewards = [episode.reward for episode in episodes]
@@ -498,7 +508,10 @@ def process_batch(
                 token_entropy = compute_entropy(target_logits)
 
             # single entropy value for the sequence
-            entropy = token_entropy.sum() / n_target_tokens
+            if n_target_tokens > 0:
+                entropy = token_entropy.sum() / n_target_tokens
+            else:
+                entropy = torch.tensor(0.0, device=device)
 
             # Explicitly delete intermediate tensors to free memory
             del (
@@ -563,126 +576,18 @@ def update_policy(
         f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}"
     )
 
-    # Iterate over micro-batches
+    # Pre-compute effective micro-batch count based on reward std (cheap prepass)
+    effective_micro_batches = 0
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
-        batch_episodes = episodes[i:j]
-
-        # Process the batch
-        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
-            process_batch(
-                model=model,
-                episodes=batch_episodes,
-                tokenizer=tokenizer,
-                pad_token_id=pad_token_id,
-                device=device,
-                entropy_coef=entropy_coef,
-            )
-        )
-
-        reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
-        logger.info(
-            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
-        )
-        if reward_std == 0:
-            logger.warning("Reward std is 0, skipping micro-batch")
-            continue
-
-        # Compute algorithm-specific loss
-        batch_loss = compute_algorithm_loss(
-            logprobs,
-            target_masks,
-            batch_rewards_t,
-            algorithm,
-            n_target_tokens,
-            entropy=batch_entropy,
-            entropy_coef=entropy_coef,
-        )
-
-        # Track total loss for logging (unscaled). We scale only for backward
-        total_loss += batch_loss
-        total_entropy += batch_entropy
-        num_micro_batches += 1
-
-        # Backward pass - gradients accumulate naturally
-        if apply_loss:
-            # Scale per micro-batch loss by number of accumulation steps so that
-            # the accumulated gradient matches the average gradient over the full batch
-            scaled_loss = batch_loss / max(total_micro_batches, 1)
-            scaled_loss.backward()
-
-        # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t, batch_loss
-        clear_memory()
-
-    # Log GPU utilization after compute_loss
-    log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
-
-    # Update parameters once after all gradients accumulated
-    if apply_loss:
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=max_grad_norm
-        )
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
-        clear_memory()
-
-    # Return average loss and entropy across all micro-batches
-    avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
-
-    update_duration = time.perf_counter() - update_start_time
-    logger.info(f"Policy update completed in {update_duration:.2f}s")
-
-    return {
-        "loss": float(avg_loss),
-        "grad_norm": float(grad_norm),
-        "entropy": float(avg_entropy),
-        "duration": update_duration,
-    }
-
-
-def update_policy_old(
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    episodes: List[Episode],
-    micro_batch_size: int,
-    pad_token_id: int,
-    max_grad_norm: float,
-    device: torch.device,
-    algorithm: AlgorithmChoice,
-    tokenizer: PreTrainedTokenizerBase,
-    apply_loss: bool = True,
-    entropy_coef: float = 0.0,
-    metrics_wrapper: MetricsWrapper | None = None,
-    step: int | None = None,
-) -> UpdatePolicyResults:
-    """
-    Once episodes are generated, use them to update the policy
-    by computing the loss from the reward and generated logits.
-    This implements a number of different algorithms.
-    """
-    update_start_time = time.perf_counter()
-
-    if algorithm == "grpo":
-        episodes = normalize_rewards_per_group(episodes)
-
-    # Pre-tokenize all episodes once
-    for episode in episodes:
-        get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
-
-    total_entropy = torch.tensor(0.0, device=device)
-    total_loss = torch.tensor(0.0, device=device)
-    grad_norm = 0.0
-    num_micro_batches = 0
-
-    # Compute number of micro-batches up-front for correct gradient accumulation scaling
-    # This makes the accumulated gradient equivalent to averaging over the full batch
-    total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
-
-    logger.info(
-        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}"
-    )
+        rewards_slice = [e.reward for e in episodes[i:j]]
+        if len(rewards_slice) > 1:
+            rs = torch.tensor(rewards_slice)
+            if rs.std() != 0:
+                effective_micro_batches += 1
+        else:
+            # Single episode always contributes
+            effective_micro_batches += 1
 
     # Iterate over micro-batches
     for i in range(0, len(episodes), micro_batch_size):
@@ -705,8 +610,14 @@ def update_policy_old(
         logger.info(
             f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
         )
+        logger.info(f"Micro-batch {i}: target_tokens={n_target_tokens}")
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
+            continue
+        if n_target_tokens == 0:
+            logger.warning(
+                "No target tokens (assistant mask empty) in micro-batch, skipping"
+            )
             continue
 
         # Compute algorithm-specific loss
@@ -729,7 +640,7 @@ def update_policy_old(
         if apply_loss:
             # Scale per micro-batch loss by number of accumulation steps so that
             # the accumulated gradient matches the average gradient over the full batch
-            scaled_loss = batch_loss / max(total_micro_batches, 1)
+            scaled_loss = batch_loss / max(effective_micro_batches, 1)
             scaled_loss.backward()
 
         # Clear intermediate tensors to save memory
