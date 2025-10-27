@@ -129,12 +129,8 @@ class TrainerConfig(BaseModel):
     ckpt_save_interval: int = 500
 
     algorithm: AlgorithmChoice = "grpo"
-    task: TaskChoice = "connections"
 
-    learning_rate: float = 1e-6
-    optimizer: OptimizerChoice = "adamw"
-    use_low_precision_optimizer_if_available: bool = True
-
+    task: TaskChoice = "gsm8k"
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
@@ -147,7 +143,7 @@ class TrainerConfig(BaseModel):
     entropy_coef: float = 0.00  # Entropy regularization coefficient
 
     # Determines the number of sequences to run in parallel in vLLM
-    max_num_seqs: int = 16
+    max_num_seqs: int = 128
 
     max_grad_norm: float = 1
     use_gradient_checkpointing: bool = False
