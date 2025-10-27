@@ -26,6 +26,7 @@ from minrl.constants import (
     TrainerConfig,
 )
 from minrl.utils import (
+    clear_memory,
     find_assistant_sections,
     log_memory_usage,
     log_conversation,
@@ -192,10 +193,8 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        logger.info("--------------------------------")
         logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
         log_conversation(conversation)
-        logger.info("--------------------------------")
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -268,6 +267,13 @@ def get_token_ids_and_assistant_mask(
             model_role_tokens,
             end_of_turn_token,
             newline_token_id,
+        )
+
+    # Assert we found assistant spans; if not, this is likely a chat template mismatch
+    if not assistant_sections:
+        raise ValueError(
+            "No assistant spans found in conversation tokens. "
+            "Ensure the tokenizer's chat template matches the conversation format."
         )
 
     for start, end in assistant_sections:
@@ -363,39 +369,10 @@ def compute_algorithm_loss(
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
-    lora: bool = False,
 ) -> None:
     logger.info("Syncing params to vLLM...")
 
-    # Merge LoRA weights into base layers before syncing
-    original_lora_state = None
-    if lora:
-        logger.info("Merging LoRA weights into base layers...")
-        original_lora_state = merge_lora_weights_inplace(model)
-
     state_dict = model.state_dict()
-
-    # Filter and remap state_dict for vLLM compatibility
-    if lora:
-        # Remove LoRA-specific keys and remap base_layer keys
-        filtered_state_dict = {}
-        for key, value in state_dict.items():
-            # Skip LoRA-specific parameters
-            if "lora_A" in key or "lora_B" in key:
-                continue
-
-            # Remap base_layer keys to remove the .base_layer prefix
-            if ".base_layer.weight" in key:
-                new_key = key.replace(".base_layer.weight", ".weight")
-                filtered_state_dict[new_key] = value
-            elif ".base_layer.bias" in key:
-                new_key = key.replace(".base_layer.bias", ".bias")
-                filtered_state_dict[new_key] = value
-            else:
-                # Keep other keys as-is
-                filtered_state_dict[key] = value
-
-        state_dict = filtered_state_dict
 
     try:
         model_runner: ModelRunnerBase = (
@@ -403,14 +380,11 @@ def sync_weights_to_vllm(
         )
         model_runner.model.load_weights(state_dict.items())  # type: ignore
         logger.info("Param update succesful.")
-    except Exception as e:
-        logger.error(f"Error syncing params to vLLM: {e}")
-        raise RuntimeError(f"Error syncing params to vLLM: {e}")
-    finally:
-        # Restore LoRA weights after syncing even if an error occurs
-        if lora:
-            assert original_lora_state is not None
-            restore_lora_weights_inplace(model, original_lora_state)
+    except AttributeError:
+        # vLLM API change: model_executor might not be available in newer versions
+        logger.warning(
+            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
+        )
 
 
 class UpdatePolicyResults(TypedDict):
@@ -441,14 +415,12 @@ def process_batch(
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
     assistant_mask_list: list[list[bool]] = []
-    n_target_tokens = 0
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
             episode.conversation, tokenizer, episode
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
-        n_target_tokens += len(token_ids)
     # Pad token IDs to the same length using PyTorch's pad_sequence
     batch_token_ids_t = [
         torch.tensor(token_ids, dtype=torch.long, device=device)
@@ -474,6 +446,15 @@ def process_batch(
 
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
+
+    # Number of target positions (assistant tokens that are not padding)
+    n_target_tokens = int(target_masks.sum().item())
+    if n_target_tokens == 0:
+        raise ValueError("No target tokens (assistant mask empty) in batch")
+
+    # advantage is just normalized reward
+    batch_rewards = [episode.reward for episode in episodes]
+    batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
 
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
@@ -518,7 +499,10 @@ def process_batch(
                 token_entropy = compute_entropy(target_logits)
 
             # single entropy value for the sequence
-            entropy = token_entropy.sum() / n_target_tokens
+            if n_target_tokens > 0:
+                entropy = token_entropy.sum() / n_target_tokens
+            else:
+                entropy = torch.tensor(0.0, device=device)
 
             # Explicitly delete intermediate tensors to free memory
             del (
@@ -588,8 +572,18 @@ def update_policy(
         f"effective batch size: {effective_batch_size}"
     )
 
-    # Track micro-batch index for gradient accumulation
-    micro_batch_idx = 0
+    # Pre-compute effective micro-batch count based on reward std (cheap prepass)
+    effective_micro_batches = 0
+    for i in range(0, len(episodes), micro_batch_size):
+        j = min(i + micro_batch_size, len(episodes))
+        rewards_slice = [e.reward for e in episodes[i:j]]
+        if len(rewards_slice) > 1:
+            rs = torch.tensor(rewards_slice)
+            if rs.std() != 0:
+                effective_micro_batches += 1
+        else:
+            # Single episode always contributes
+            effective_micro_batches += 1
 
     # Iterate over micro-batches
     # For each micro-batch, process the batch and compute the loss
@@ -605,8 +599,14 @@ def update_policy(
         logger.info(
             f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}, values: {batch_rewards_t.tolist()}"
         )
+        logger.info(f"Micro-batch {i}: target_tokens={n_target_tokens}")
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
+            continue
+        if n_target_tokens == 0:
+            logger.warning(
+                "No target tokens (assistant mask empty) in micro-batch, skipping"
+            )
             continue
 
         # Process the batch
@@ -648,8 +648,7 @@ def update_policy(
         if apply_loss:
             # Scale per micro-batch loss by number of accumulation steps so that
             # the accumulated gradient matches the average gradient over the full batch
-            # This ensures gradient magnitude is independent of accumulation steps
-            scaled_loss = batch_loss / gradient_accumulation_steps
+            scaled_loss = batch_loss / max(effective_micro_batches, 1)
             scaled_loss.backward()
 
             # Check if we should perform optimizer step based on micro-batch count

@@ -262,7 +262,6 @@ class Trainer:
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),
                 self.vllm_model,
-                lora=self.config.lora_config is not None,
             )
 
             # Wake up KV cache after weights are synced
