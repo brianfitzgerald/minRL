@@ -153,14 +153,22 @@ class TrainerConfig(BaseModel):
     use_gradient_checkpointing: bool = False
     vllm_gpu_memory_utilization: float = 0.2
 
+    use_torch_compile: bool = True
+    torch_compile_mode: Literal["default", "reduce-overhead", "max-autotune"] = (
+        "max-autotune"
+    )
+
+    # Fused optimizer operations for additional speedup
+    use_fused_optimizer: bool = True
+
     lora_config: LoRAConfig | None = None
 
     # N samples to process per micro-batch
-    micro_batch_size: int = 4
+    micro_batch_size: int = 16
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
-    gradient_accumulation_steps: int | None = 8
-    groups_per_batch: int = 8
+    gradient_accumulation_steps: int | None = 16
+    groups_per_batch: int = 32
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 

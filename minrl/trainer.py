@@ -97,6 +97,12 @@ class Trainer:
             else:
                 logger.warning("Gradient checkpointing not available for this model")
 
+        # Apply torch.compile for faster training
+        if self.config.use_torch_compile:
+            logger.info(f"Compiling model with mode: {self.config.torch_compile_mode}")
+            model = torch.compile(model, mode=self.config.torch_compile_mode)  # type: ignore
+            logger.info("torch.compile applied to model")
+
         logger.info("Model loaded.")
         logger.info(f"Using device {self.device}, attn impl {attn_impl}")
         self.tokenizer = tokenizer
@@ -114,8 +120,14 @@ class Trainer:
                     eps=1e-8,
                 )
             else:
+                # Use fused AdamW for faster optimizer step if available and enabled
+                use_fused = (
+                    self.config.use_fused_optimizer and self.device_type == "cuda"
+                )
                 self.optimizer = torch.optim.AdamW(
-                    cast(nn.Module, self.model).parameters(), lr=self.config.lr
+                    cast(nn.Module, self.model).parameters(),
+                    lr=self.config.lr,
+                    fused=use_fused,
                 )
         else:
             raise ValueError(f"Invalid optimizer choice: {self.config.optimizer}")

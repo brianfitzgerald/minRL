@@ -464,7 +464,7 @@ def process_batch(
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
     fwd_ctx = (
-        torch.autocast(device_type="cuda", enabled=True)
+        torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16)
         if device.type == "cuda"
         else nullcontext()
     )

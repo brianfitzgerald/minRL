@@ -26,7 +26,8 @@
       "Bash(python3 -m pytest:*)",
       "Bash(uv run pytest:*)",
       "Bash(python3 -m py_compile:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(PYTHONPATH=/Users/brianfitzgerald/Documents/GitHub/minRL python:*)"
     ],
     "deny": []
   }
