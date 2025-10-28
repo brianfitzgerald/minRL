@@ -14,8 +14,11 @@ class StepMetadata(TypedDict):
     reward: float
 
 
+Role = Literal["system", "user", "assistant", "tool"]
+
+
 class ConversationMessage(TypedDict, total=False):
-    role: Required[Literal["system", "user", "assistant"]]
+    role: Required[Role]
     content: Required[str]
     reasoning: NotRequired[str | None]
     step_metadata: NotRequired[StepMetadata | None]
@@ -129,7 +132,7 @@ class TrainerConfig(BaseModel):
     eval_batch_size: int = 8
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    lr: float = 1e-5
+    lr: float = 1e-6
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
@@ -147,20 +150,19 @@ class TrainerConfig(BaseModel):
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 128
 
-    use_gradient_checkpointing: bool = True
+    use_gradient_checkpointing: bool = False
     vllm_gpu_memory_utilization: float = 0.2
 
     lora_config: LoRAConfig | None = None
 
-    # Size of micro-batches for backward pass
+    # N samples to process per micro-batch
     micro_batch_size: int = 4
-    groups_per_batch: int = 4
-    group_size: int = 4
+    # N micro-batches to accumulate gradients over before updating
+    # If None, defaults to the full batch size
+    gradient_accumulation_steps: int | None = 8
+    groups_per_batch: int = 8
+    group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
-
-    # Gradient accumulation steps - if None, defaults to auto-calculation based on micro_batch_size
-    # This controls how many micro-batches to accumulate gradients over before updating
-    gradient_accumulation_steps: int | None = None
 
     # SFT only
     max_seq_length: int = 2048

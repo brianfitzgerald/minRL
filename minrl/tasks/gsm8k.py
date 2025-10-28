@@ -95,7 +95,6 @@ class GSM8KDataset(MinRLDataset):
 
     @staticmethod
     def reward_function(conversation: Conversation, sample: Sample) -> float:
-        log_conversation(conversation)
         answer = conversation[-1]["content"]
         ground_truth = extract_solution(sample["answer"], method="strict")
         if ground_truth is None:

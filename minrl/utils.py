@@ -10,7 +10,7 @@ import psutil
 import torch
 from loguru import logger
 
-from minrl.constants import Episode, Conversation
+from minrl.constants import ConversationMessage, Episode, Conversation, Role
 from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
@@ -243,7 +243,9 @@ def log_memory_usage(
     return out_dict
 
 
-def log_conversation(conversation: Conversation) -> None:
+def log_conversation(
+    conversation: Conversation, only_roles: list[Role] | None = None
+) -> None:
     """
     Log a Conversation to the console using loguru with colored output based on roles.
 
@@ -264,8 +266,10 @@ def log_conversation(conversation: Conversation) -> None:
     # Build the complete log message
     log_lines = []
 
-    for i, message in enumerate(conversation, 1):
+    for i, message in enumerate[ConversationMessage](conversation, 1):
         role = message.get("role", "unknown")
+        if only_roles is not None and role not in only_roles:
+            continue
         content = message.get("content", "")
 
         if isinstance(content, str):

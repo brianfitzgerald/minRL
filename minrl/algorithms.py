@@ -197,7 +197,7 @@ def rollout(
         )
         episodes.append(episode)
         logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
-        log_conversation(conversation)
+        log_conversation(conversation, ["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
