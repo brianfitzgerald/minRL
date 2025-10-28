@@ -548,6 +548,7 @@ def update_policy(
     entropy_coef: float = 0.0,
     metrics_wrapper: MetricsWrapper | None = None,
     step: int | None = None,
+    gradient_accumulation_steps: int | None = None,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
@@ -572,24 +573,20 @@ def update_policy(
     # This makes the accumulated gradient equivalent to averaging over the full batch
     total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
 
+    # If gradient_accumulation_steps is not provided, use total_micro_batches
+    # This maintains backward compatibility and auto-calculates based on batch size
+    if gradient_accumulation_steps is None:
+        gradient_accumulation_steps = total_micro_batches
+        logger.info(
+            f"Auto-setting gradient_accumulation_steps to {gradient_accumulation_steps}"
+        )
+
     logger.info(
-        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}"
+        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}, "
+        f"gradient accumulation steps: {gradient_accumulation_steps}"
     )
-
-    # Pre-compute effective micro-batch count based on reward std (cheap prepass)
-    effective_micro_batches = 0
-    for i in range(0, len(episodes), micro_batch_size):
-        j = min(i + micro_batch_size, len(episodes))
-        rewards_slice = [e.reward for e in episodes[i:j]]
-        if len(rewards_slice) > 1:
-            rs = torch.tensor(rewards_slice)
-            if rs.std() != 0:
-                effective_micro_batches += 1
-        else:
-            # Single episode always contributes
-            effective_micro_batches += 1
-
     # Iterate over micro-batches
+    micro_batch_idx = 0
     for i in range(0, len(episodes), micro_batch_size):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
@@ -608,9 +605,9 @@ def update_policy(
 
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
         logger.info(
-            f"Micro-batch {i}: reward mean: {reward_mean}, reward std: {reward_std}"
+            f"Micro-batch {micro_batch_idx}/{total_micro_batches}: reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}"
         )
-        logger.info(f"Micro-batch {i}: target_tokens={n_target_tokens}")
+        logger.info(f"Micro-batch {micro_batch_idx}: target_tokens={n_target_tokens}")
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
             continue
@@ -638,10 +635,32 @@ def update_policy(
 
         # Backward pass - gradients accumulate naturally
         if apply_loss:
-            # Scale per micro-batch loss by number of accumulation steps so that
-            # the accumulated gradient matches the average gradient over the full batch
-            scaled_loss = batch_loss / max(effective_micro_batches, 1)
+            # Scale per micro-batch loss by gradient_accumulation_steps so that
+            # the accumulated gradient matches the average gradient over the accumulated steps
+            scaled_loss = batch_loss / gradient_accumulation_steps
             scaled_loss.backward()
+            logger.info(
+                f"Accumulated gradients (step {micro_batch_idx % gradient_accumulation_steps + 1}/{gradient_accumulation_steps})"
+            )
+
+        micro_batch_idx += 1
+
+        # Update weights after accumulating gradient_accumulation_steps batches
+        # or if this is the last batch
+        should_update = (micro_batch_idx % gradient_accumulation_steps == 0) or (
+            i + micro_batch_size >= len(episodes)
+        )
+
+        if apply_loss and should_update:
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=max_grad_norm
+            )
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            logger.info(
+                f"Updated weights after {micro_batch_idx} micro-batches (grad_norm: {grad_norm:.4f})"
+            )
+            clear_memory()
 
         # Clear intermediate tensors to save memory
         del logprobs, target_masks, batch_rewards_t, batch_loss
@@ -649,15 +668,6 @@ def update_policy(
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
-
-    # Update parameters once after all gradients accumulated
-    if apply_loss:
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            model.parameters(), max_norm=max_grad_norm
-        )
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
-        clear_memory()
 
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
