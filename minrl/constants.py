@@ -62,7 +62,7 @@ OptimizerChoice = Literal["adamw"]
 AlgorithmChoice = Literal["reinforce", "grpo", "gpg"]
 LoggerChoice = Literal["tensorboard", "wandb"]
 
-HostType = Literal["modal", "local"]
+HostType = Literal["modal", "local", "notebook"]
 DeviceType = Literal["cuda", "mps", "cpu"]
 TaskChoice = Literal["connections", "hanoi", "zork", "gsm8k"]
 ModelType = Literal["openrouter", "openai", "huggingface", "finetuned"]
