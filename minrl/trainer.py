@@ -153,6 +153,8 @@ class Trainer:
             dtype="float16" if USING_MPS else "bfloat16",
             # Prefix caching requires CUDA for some model families (Gemma)
             enable_prefix_caching=self.device_type == "cuda",
+            # Enable sleep mode for memory management
+            enable_sleep_mode=self.config.enable_sleep_mode,
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
@@ -199,6 +201,10 @@ class Trainer:
         for step, batch in enumerate(self.train_dataloader, start=1):
             step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
+
+            # Wake up vLLM model before rollout if it was sleeping
+            if self.config.enable_sleep_mode:
+                self.vllm_model.wake_up()
 
             assert self.model is not None
             assert self.tokenizer is not None
@@ -277,6 +283,12 @@ class Trainer:
             del episodes
             clear_memory()
 
+            if self.config.enable_sleep_mode:
+                # Put vLLM model to sleep to free up GPU resources
+                self.vllm_model.sleep(level=self.config.sleep_level)
+            else:
+                logger.info("Sleep mode is disabled, skipping sleep")
+
             # Log memory usage after clearing
             log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
@@ -315,6 +327,9 @@ class Trainer:
             collate_fn=lambda x: x,
         )
         assert self.model is not None
+
+        if self.config.enable_sleep_mode:
+            self.vllm_model.wake_up()
 
         assert self.tokenizer is not None
         mean_reward = 0

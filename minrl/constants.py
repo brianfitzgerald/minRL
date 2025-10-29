@@ -148,18 +148,21 @@ class TrainerConfig(BaseModel):
     entropy_coef: float = 0.00  # Entropy regularization coefficient
 
     # Determines the number of sequences to run in parallel in vLLM
-    max_num_seqs: int = 128
+    max_num_seqs: int = 256
 
     use_gradient_checkpointing: bool = False
-    vllm_gpu_memory_utilization: float = 0.2
+    vllm_gpu_memory_utilization: float = 0.4
 
     use_torch_compile: bool = False
     torch_compile_mode: Literal["default", "reduce-overhead", "max-autotune"] = (
         "max-autotune"
     )
 
-    # Fused optimizer operations for additional speedup
     use_fused_optimizer: bool = True
+
+    # vLLM sleep mode configuration
+    enable_sleep_mode: bool = True
+    sleep_level: int = 1  # 1: offload to CPU, 2: discard weights and cache
 
     lora_config: LoRAConfig | None = None
 
@@ -167,8 +170,8 @@ class TrainerConfig(BaseModel):
     micro_batch_size: int = 8
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
-    gradient_accumulation_steps: int | None = 16
-    groups_per_batch: int = 16
+    gradient_accumulation_steps: int | None = 32
+    groups_per_batch: int = 32
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 
