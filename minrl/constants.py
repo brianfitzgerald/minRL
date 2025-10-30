@@ -162,7 +162,7 @@ class TrainerConfig(BaseModel):
 
     # vLLM sleep mode configuration
     enable_sleep_mode: bool = True
-    sleep_level: int = 1  # 1: offload to CPU, 2: discard weights and cache
+    sleep_level: int = 2
 
     lora_config: LoRAConfig | None = None
 

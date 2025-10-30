@@ -202,7 +202,6 @@ class Trainer:
             step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
 
-            # Wake up vLLM model before rollout if it was sleeping
             if self.config.enable_sleep_mode:
                 self.vllm_model.wake_up()
 
@@ -284,7 +283,6 @@ class Trainer:
             clear_memory()
 
             if self.config.enable_sleep_mode:
-                # Put vLLM model to sleep to free up GPU resources
                 self.vllm_model.sleep(level=self.config.sleep_level)
             else:
                 logger.info("Sleep mode is disabled, skipping sleep")

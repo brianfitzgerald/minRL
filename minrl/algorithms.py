@@ -32,7 +32,6 @@ from minrl.utils import (
     log_conversation,
 )
 from minrl.metrics import MetricsWrapper
-from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -481,7 +480,6 @@ def process_batch(
     clear_memory()
 
     bs = batch_token_ids_t.shape[0]
-    # F.cross_entropy handles dtype conversion internally, no need for .float()
     logprobs = -F.cross_entropy(
         next_token_logits.reshape(-1, next_token_logits.size(-1)),
         target_token_ids.reshape(-1),
@@ -582,14 +580,15 @@ def update_policy(
         )
 
     logger.info(
-        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}, "
-        f"gradient accumulation steps: {gradient_accumulation_steps}"
+        f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
+
     # Iterate over micro-batches
     micro_batch_idx = 0
-    for i in range(0, len(episodes), micro_batch_size):
+    for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
+        micro_batch_start_time = time.perf_counter()
 
         # Process the batch
         logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
@@ -605,9 +604,8 @@ def update_policy(
 
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
         logger.info(
-            f"Micro-batch {micro_batch_idx}/{total_micro_batches}: reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}"
+            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {batch_rewards_t.tolist()}"
         )
-        logger.info(f"Micro-batch {micro_batch_idx}: target_tokens={n_target_tokens}")
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
             continue
@@ -640,7 +638,7 @@ def update_policy(
             scaled_loss = batch_loss / gradient_accumulation_steps
             scaled_loss.backward()
             logger.info(
-                f"Accumulated gradients (step {micro_batch_idx % gradient_accumulation_steps + 1}/{gradient_accumulation_steps})"
+                f"Applied loss for micro-batch {micro_batch_idx}, scaled loss: {scaled_loss:.4f}"
             )
 
         micro_batch_idx += 1
@@ -658,13 +656,13 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             logger.info(
-                f"Updated weights after {micro_batch_idx} micro-batches (grad_norm: {grad_norm:.4f})"
+                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"
             )
-            clear_memory()
 
-        # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t, batch_loss
-        clear_memory()
+        micro_batch_duration = time.perf_counter() - micro_batch_start_time
+        logger.info(
+            f"Micro-batch {micro_batch_idx} completed in {micro_batch_duration:.2f}s"
+        )
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
