@@ -152,7 +152,8 @@ class Trainer:
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
             # Prefix caching requires CUDA for some model families (Gemma)
-            enable_prefix_caching=self.device_type == "cuda",
+            enable_prefix_caching=self.config.enable_prefix_caching
+            and self.device_type == "cuda",
             # Enable sleep mode for memory management
             enable_sleep_mode=self.config.enable_sleep_mode,
         )
@@ -312,11 +313,13 @@ class Trainer:
         if self.config.enable_sleep_mode:
             if action == "wake":
                 self.vllm_model.wake_up()
-                self.vllm_model.llm_engine.reset_prefix_cache()
+                if self.config.enable_prefix_caching:
+                    self.vllm_model.llm_engine.reset_prefix_cache()
             elif action == "sleep":
                 # https://github.com/vllm-project/vllm/issues/17103
-                self.vllm_model.llm_engine.reset_prefix_cache()
-                self.vllm_model.sleep(level=2)
+                if self.config.enable_prefix_caching:
+                    self.vllm_model.llm_engine.reset_prefix_cache()
+                self.vllm_model.sleep(level=1)
         else:
             logger.info("Sleep mode is disabled, skipping sleep")
 

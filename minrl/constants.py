@@ -162,6 +162,7 @@ class TrainerConfig(BaseModel):
 
     # vLLM sleep mode configuration
     enable_sleep_mode: bool = True
+    enable_prefix_caching: bool = True
 
     lora_config: LoRAConfig | None = None
 
