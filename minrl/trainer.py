@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, Literal
 
 import numpy as np
 import torch
@@ -202,8 +202,7 @@ class Trainer:
             step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
 
-            if self.config.enable_sleep_mode:
-                self.vllm_model.wake_up()
+            self._wake_sleep_vllm("wake")
 
             assert self.model is not None
             assert self.tokenizer is not None
@@ -228,10 +227,7 @@ class Trainer:
                 "timing/train_rollout_duration_sec", rollout_duration, step
             )
 
-            if self.config.enable_sleep_mode:
-                self.vllm_model.sleep(level=self.config.sleep_level)
-            else:
-                logger.info("Sleep mode is disabled, skipping sleep")
+            self._wake_sleep_vllm("sleep")
 
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
@@ -261,11 +257,7 @@ class Trainer:
             log_memory_usage(
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
-            if (
-                self.config.enable_sleep_mode
-                and self.vllm_model.llm_engine.is_sleeping()
-            ):
-                self.vllm_model.wake_up()
+            self._wake_sleep_vllm("wake")
 
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),
@@ -316,6 +308,18 @@ class Trainer:
 
         self.metrics_wrapper.close()
 
+    def _wake_sleep_vllm(self, action: Literal["wake", "sleep"]) -> None:
+        if self.config.enable_sleep_mode:
+            if action == "wake":
+                self.vllm_model.wake_up()
+                self.vllm_model.llm_engine.reset_prefix_cache()
+            elif action == "sleep":
+                # https://github.com/vllm-project/vllm/issues/17103
+                self.vllm_model.llm_engine.reset_prefix_cache()
+                self.vllm_model.sleep(level=2)
+        else:
+            logger.info("Sleep mode is disabled, skipping sleep")
+
     def evaluate(self, step: int) -> None:
         """Evaluate the current model.
 
@@ -330,8 +334,7 @@ class Trainer:
         )
         assert self.model is not None
 
-        if self.config.enable_sleep_mode:
-            self.vllm_model.wake_up()
+        self._wake_sleep_vllm("wake")
 
         assert self.tokenizer is not None
         mean_reward = 0
