@@ -182,6 +182,7 @@ class Trainer:
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
+            drop_last=True,  # Ensure full batches to keep group inference consistent
         )
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -202,6 +203,10 @@ class Trainer:
         for step, batch in enumerate(self.train_dataloader, start=1):
             step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
+
+            self.metrics_wrapper.add_scalar(
+                "train/n_samples_in_batch", len(batch), step
+            )
 
             self._wake_sleep_vllm("wake")
 
