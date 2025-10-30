@@ -195,7 +195,7 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
         log_conversation(conversation, ["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
@@ -404,6 +404,46 @@ class EpisodeWithTokens(TypedDict):
     assistant_mask: list[bool]
 
 
+def chunked_cross_entropy(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    ignore_index: int = -100,
+    reduction: str = "none",
+    chunk_size: int = 8192,
+) -> torch.Tensor:
+    batch_size = logits.shape[0]
+    vocab_size = logits.size(-1)
+
+    flat_logits = logits.reshape(-1, vocab_size)
+    flat_targets = targets.reshape(-1)
+
+    num_tokens = flat_logits.size(0)
+    logprobs_list = []
+
+    for start_idx in range(0, num_tokens, chunk_size):
+        end_idx = min(start_idx + chunk_size, num_tokens)
+        chunk_logprobs = F.cross_entropy(
+            flat_logits[start_idx:end_idx],
+            flat_targets[start_idx:end_idx],
+            ignore_index=ignore_index,
+            reduction="none",
+        )
+        logprobs_list.append(chunk_logprobs)
+
+    result = torch.cat(logprobs_list, dim=0)
+
+    del flat_logits, flat_targets, logprobs_list
+
+    if reduction == "none":
+        return result.reshape(batch_size, -1)
+    elif reduction == "mean":
+        return result.mean()
+    elif reduction == "sum":
+        return result.sum()
+    else:
+        raise ValueError(f"Invalid reduction mode: {reduction}")
+
+
 def process_batch(
     model: nn.Module,
     episodes: List[Episode],
@@ -475,13 +515,17 @@ def process_batch(
     del logits
     clear_memory()
 
-    bs = batch_token_ids_t.shape[0]
-    logprobs = -F.cross_entropy(
-        next_token_logits.reshape(-1, next_token_logits.size(-1)),
-        target_token_ids.reshape(-1),
+    # Compute cross_entropy in chunks to avoid OOM
+    # Negate the result to get log probabilities (cross_entropy returns positive loss)
+    logprobs = -chunked_cross_entropy(
+        next_token_logits,
+        target_token_ids,
         ignore_index=pad_token_id,
         reduction="none",
-    ).reshape(bs, -1)
+    )
+
+    # Clear memory after cross-entropy computation
+    clear_memory()
 
     # Only compute entropy if it's being used (entropy_coef > 0)
     # This saves memory and computation when entropy regularization is disabled
