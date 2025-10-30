@@ -150,7 +150,7 @@ class TrainerConfig(BaseModel):
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 256
 
-    use_gradient_checkpointing: bool = True
+    use_gradient_checkpointing: bool = False
     vllm_gpu_memory_utilization: float = 0.4
 
     use_torch_compile: bool = False
@@ -167,7 +167,7 @@ class TrainerConfig(BaseModel):
     lora_config: LoRAConfig | None = None
 
     # N samples to process per micro-batch
-    micro_batch_size: int = 8
+    micro_batch_size: int = 16
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
     gradient_accumulation_steps: int | None = 32

@@ -261,6 +261,11 @@ class Trainer:
             log_memory_usage(
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
+            if (
+                self.config.enable_sleep_mode
+                and self.vllm_model.llm_engine.is_sleeping()
+            ):
+                self.vllm_model.wake_up()
 
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),

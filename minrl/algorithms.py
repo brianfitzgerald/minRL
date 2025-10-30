@@ -670,13 +670,34 @@ def update_policy(
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
     avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_loss_val = float(avg_loss)
+    avg_entropy_val = float(avg_entropy) if num_micro_batches > 0 else 0.0
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")
 
+    grad_norm_val = float(grad_norm)
+    del (
+        total_loss,
+        total_entropy,
+        grad_norm,
+        num_micro_batches,
+        batch_rewards_t,
+        batch_entropy,
+        n_target_tokens,
+        logprobs,
+        target_masks,
+        batch_episodes,
+        batch_rewards,
+        reward_mean,
+        reward_std,
+        reward_values_list,
+    )
+    clear_memory()
+
     return {
-        "loss": float(avg_loss),
-        "grad_norm": float(grad_norm),
-        "entropy": float(avg_entropy),
+        "loss": avg_loss_val,
+        "grad_norm": grad_norm_val,
+        "entropy": avg_entropy_val,
         "duration": update_duration,
     }
