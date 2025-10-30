@@ -411,7 +411,7 @@ def process_batch(
     pad_token_id: int,
     device: torch.device,
     entropy_coef: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
     which are all needed for computing the loss.
@@ -455,10 +455,6 @@ def process_batch(
     n_target_tokens = int(target_masks.sum().item())
     if n_target_tokens == 0:
         raise ValueError("No target tokens (assistant mask empty) in batch")
-
-    # advantage is just normalized reward
-    batch_rewards = [episode.reward for episode in episodes]
-    batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
 
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
@@ -529,7 +525,7 @@ def process_batch(
     del batch_token_ids_t, target_token_ids, next_token_logits
     clear_memory()
 
-    return logprobs, target_masks, batch_rewards_t, entropy, n_target_tokens
+    return logprobs, target_masks, entropy, n_target_tokens
 
 
 def update_policy(
@@ -589,26 +585,30 @@ def update_policy(
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
         micro_batch_start_time = time.perf_counter()
-
-        # Process the batch
-        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
-            process_batch(
-                model=model,
-                episodes=batch_episodes,
-                tokenizer=tokenizer,
-                pad_token_id=pad_token_id,
-                device=device,
-                entropy_coef=entropy_coef,
-            )
+        # advantage is just normalized reward
+        batch_rewards = [episode.reward for episode in batch_episodes]
+        batch_rewards_t = torch.tensor(
+            batch_rewards, device=device, dtype=torch.float32
         )
 
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
+        reward_values_list = [round(reward, 2) for reward in batch_rewards_t.tolist()]
         logger.info(
-            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {batch_rewards_t.tolist()}"
+            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {reward_values_list}"
         )
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
             continue
+
+        # Process the batch
+        logprobs, target_masks, batch_entropy, n_target_tokens = process_batch(
+            model=model,
+            episodes=batch_episodes,
+            tokenizer=tokenizer,
+            pad_token_id=pad_token_id,
+            device=device,
+            entropy_coef=entropy_coef,
+        )
         if n_target_tokens == 0:
             logger.warning(
                 "No target tokens (assistant mask empty) in micro-batch, skipping"

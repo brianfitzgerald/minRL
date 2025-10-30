@@ -228,6 +228,11 @@ class Trainer:
                 "timing/train_rollout_duration_sec", rollout_duration, step
             )
 
+            if self.config.enable_sleep_mode:
+                self.vllm_model.sleep(level=self.config.sleep_level)
+            else:
+                logger.info("Sleep mode is disabled, skipping sleep")
+
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
 
@@ -281,12 +286,6 @@ class Trainer:
             # Clear memory after each step more aggressively
             del episodes
             clear_memory()
-
-            if self.config.enable_sleep_mode:
-                self.vllm_model.sleep(level=self.config.sleep_level)
-            else:
-                logger.info("Sleep mode is disabled, skipping sleep")
-
             # Log memory usage after clearing
             log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
