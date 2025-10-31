@@ -29,7 +29,6 @@ from minrl.utils import (
     clear_memory,
     find_assistant_sections,
     log_memory_usage,
-    log_conversation,
 )
 from minrl.metrics import MetricsWrapper
 
@@ -196,7 +195,6 @@ def rollout(
         )
         episodes.append(episode)
         # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
-        log_conversation(conversation, ["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -522,6 +520,7 @@ def process_batch(
         target_token_ids,
         ignore_index=pad_token_id,
         reduction="none",
+        chunk_size=4096,
     )
 
     # Clear memory after cross-entropy computation

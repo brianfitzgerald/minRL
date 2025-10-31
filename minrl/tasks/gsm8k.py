@@ -4,7 +4,6 @@ import re
 from minrl.constants import Conversation, HostType, Sample
 from datasets import load_dataset
 
-from minrl.utils import log_conversation
 
 _SOLUTION_CLIP_CHARS = 300
 
