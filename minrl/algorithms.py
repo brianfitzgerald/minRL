@@ -16,6 +16,7 @@ from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
+from minrl.utils import log_conversation
 
 from minrl.constants import (
     AlgorithmChoice,
@@ -119,16 +120,20 @@ def rollout(
             group_indices.append(i)
 
     # Generate responses for all conversations across all steps
-    for step_idx in tqdm(range(max_steps), desc="Steps"):
+    for step_idx in tqdm(range(max_steps), desc="Rollout Step", disable=max_steps == 1):
         # Prepare batch: use all flat_conversations for step 0, or vLLM's n parameter
         if step_idx == 0:
             # First step optimization: batch initial prompts and use vLLM's n parameter
             batch_conversations = [conversations[i] for i in range(num_prompts)]
             n_responses = group_size
+            logger.info(f"BF DEBUG first turn {n_responses} {len(batch_conversations)}")
         else:
             # Subsequent steps: batch all existing conversations
             batch_conversations = flat_conversations
             n_responses = 1
+            logger.info(
+                f"BF DEBUG second turn {n_responses} {len(batch_conversations)}"
+            )
 
         # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(
@@ -199,6 +204,7 @@ def rollout(
         )
         episodes.append(episode)
         # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        # log_conversation(conversation, only_roles=["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -625,6 +631,8 @@ def update_policy(
     logger.info(
         f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
+
+    batch_entropy = torch.tensor(0.0, device=device)
 
     # Iterate over micro-batches
     micro_batch_idx = 0

@@ -270,6 +270,10 @@ class Trainer:
                 self.vllm_model,
             )
 
+            # Reset prefix cache after weight sync - cached KV states are invalid with new weights
+            if self.config.enable_prefix_caching:
+                self.vllm_model.llm_engine.reset_prefix_cache()
+
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
