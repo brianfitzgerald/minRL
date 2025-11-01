@@ -115,7 +115,7 @@ class Trainer:
             ):
                 self.optimizer = Adam8bit(
                     cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
+                    lr=self.config.learning_rate,
                     betas=(0.9, 0.999),
                     eps=1e-8,
                 )
@@ -126,7 +126,7 @@ class Trainer:
                 )
                 self.optimizer = torch.optim.AdamW(
                     cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
+                    lr=self.config.learning_rate,
                     fused=use_fused,
                 )
         else:

@@ -144,6 +144,10 @@ def rollout(
             for token_ids in tokenized_conversations  # type: ignore
         ]
 
+        logger.info(
+            f"N responses: {n_responses} inference batch size: {len(vllm_input)}"
+        )
+
         # Single batched generation call
         outputs = vllm_model.generate(
             vllm_input,
