@@ -127,9 +127,9 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 class TrainerConfig(BaseModel):
     model_id: str = GEMMA_3_1B
-    eval_interval: int = 50
+    eval_interval: int = 25
     max_new_tokens: int = 256
-    eval_batch_size: int = 8
+    eval_batch_size: int = 64
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
     learning_rate: float = 1e-5
