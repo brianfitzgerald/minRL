@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, Literal
 
 import numpy as np
 import torch
@@ -115,7 +115,7 @@ class Trainer:
             ):
                 self.optimizer = Adam8bit(
                     cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
+                    lr=self.config.learning_rate,
                     betas=(0.9, 0.999),
                     eps=1e-8,
                 )
@@ -126,7 +126,7 @@ class Trainer:
                 )
                 self.optimizer = torch.optim.AdamW(
                     cast(nn.Module, self.model).parameters(),
-                    lr=self.config.lr,
+                    lr=self.config.learning_rate,
                     fused=use_fused,
                 )
         else:
@@ -152,7 +152,10 @@ class Trainer:
             enforce_eager=True,
             dtype="float16" if USING_MPS else "bfloat16",
             # Prefix caching requires CUDA for some model families (Gemma)
-            enable_prefix_caching=self.device_type == "cuda",
+            enable_prefix_caching=self.config.enable_prefix_caching
+            and self.device_type == "cuda",
+            # Enable sleep mode for memory management
+            enable_sleep_mode=self.config.enable_sleep_mode,
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
@@ -179,6 +182,7 @@ class Trainer:
             collate_fn=lambda x: x,
             pin_memory=False,  # Disable pin_memory to save memory
             num_workers=0,  # Use single process to avoid memory overhead
+            drop_last=True,  # Ensure full batches to keep group inference consistent
         )
         self.start_time = time.time()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +203,12 @@ class Trainer:
         for step, batch in enumerate(self.train_dataloader, start=1):
             step_start_time = time.time()
             logger.info(f"Starting rollout for step {step}")
+
+            self.metrics_wrapper.add_scalar(
+                "train/n_samples_in_batch", len(batch), step
+            )
+
+            self._wake_sleep_vllm("wake")
 
             assert self.model is not None
             assert self.tokenizer is not None
@@ -222,6 +232,8 @@ class Trainer:
             self.metrics_wrapper.add_scalar(
                 "timing/train_rollout_duration_sec", rollout_duration, step
             )
+
+            self._wake_sleep_vllm("sleep")
 
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
@@ -251,11 +263,16 @@ class Trainer:
             log_memory_usage(
                 "update_policy", metrics_wrapper=self.metrics_wrapper, step=step
             )
+            self._wake_sleep_vllm("wake")
 
             sync_weights_to_vllm(
                 cast(nn.Module, self.model),
                 self.vllm_model,
             )
+
+            # Reset prefix cache after weight sync - cached KV states are invalid with new weights
+            if self.config.enable_prefix_caching:
+                self.vllm_model.llm_engine.reset_prefix_cache()
 
             # Compute current reward std for next iteration before clearing memory
             current_rewards = [episode.reward for episode in episodes]
@@ -276,7 +293,6 @@ class Trainer:
             # Clear memory after each step more aggressively
             del episodes
             clear_memory()
-
             # Log memory usage after clearing
             log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
@@ -302,6 +318,20 @@ class Trainer:
 
         self.metrics_wrapper.close()
 
+    def _wake_sleep_vllm(self, action: Literal["wake", "sleep"]) -> None:
+        if self.config.enable_sleep_mode:
+            if action == "wake":
+                self.vllm_model.wake_up()
+                if self.config.enable_prefix_caching:
+                    self.vllm_model.llm_engine.reset_prefix_cache()
+            elif action == "sleep":
+                # https://github.com/vllm-project/vllm/issues/17103
+                if self.config.enable_prefix_caching:
+                    self.vllm_model.llm_engine.reset_prefix_cache()
+                self.vllm_model.sleep(level=1)
+        else:
+            logger.info("Sleep mode is disabled, skipping sleep")
+
     def evaluate(self, step: int) -> None:
         """Evaluate the current model.
 
@@ -315,6 +345,8 @@ class Trainer:
             collate_fn=lambda x: x,
         )
         assert self.model is not None
+
+        self._wake_sleep_vllm("wake")
 
         assert self.tokenizer is not None
         mean_reward = 0

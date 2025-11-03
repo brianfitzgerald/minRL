@@ -16,6 +16,7 @@ from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
+from minrl.utils import log_conversation
 
 from minrl.constants import (
     AlgorithmChoice,
@@ -29,10 +30,8 @@ from minrl.utils import (
     clear_memory,
     find_assistant_sections,
     log_memory_usage,
-    log_conversation,
 )
 from minrl.metrics import MetricsWrapper
-from minrl.lora import merge_lora_weights_inplace, restore_lora_weights_inplace
 
 debug_tokenizer = AutoTokenizer.from_pretrained(
     TrainerConfig().model_id, use_fast=False
@@ -121,16 +120,20 @@ def rollout(
             group_indices.append(i)
 
     # Generate responses for all conversations across all steps
-    for step_idx in tqdm(range(max_steps), desc="Steps"):
+    for step_idx in tqdm(range(max_steps), desc="Rollout Step", disable=max_steps == 1):
         # Prepare batch: use all flat_conversations for step 0, or vLLM's n parameter
         if step_idx == 0:
             # First step optimization: batch initial prompts and use vLLM's n parameter
             batch_conversations = [conversations[i] for i in range(num_prompts)]
             n_responses = group_size
+            logger.info(f"BF DEBUG first turn {n_responses} {len(batch_conversations)}")
         else:
             # Subsequent steps: batch all existing conversations
             batch_conversations = flat_conversations
             n_responses = 1
+            logger.info(
+                f"BF DEBUG second turn {n_responses} {len(batch_conversations)}"
+            )
 
         # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(
@@ -145,6 +148,10 @@ def rollout(
             {"prompt_token_ids": token_ids}
             for token_ids in tokenized_conversations  # type: ignore
         ]
+
+        logger.info(
+            f"N responses: {n_responses} inference batch size: {len(vllm_input)}"
+        )
 
         # Single batched generation call
         outputs = vllm_model.generate(
@@ -196,8 +203,8 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
-        log_conversation(conversation, ["assistant"])
+        # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        # log_conversation(conversation, only_roles=["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -405,6 +412,46 @@ class EpisodeWithTokens(TypedDict):
     assistant_mask: list[bool]
 
 
+def chunked_cross_entropy(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    ignore_index: int = -100,
+    reduction: str = "none",
+    chunk_size: int = 8192,
+) -> torch.Tensor:
+    batch_size = logits.shape[0]
+    vocab_size = logits.size(-1)
+
+    flat_logits = logits.reshape(-1, vocab_size)
+    flat_targets = targets.reshape(-1)
+
+    num_tokens = flat_logits.size(0)
+    logprobs_list = []
+
+    for start_idx in range(0, num_tokens, chunk_size):
+        end_idx = min(start_idx + chunk_size, num_tokens)
+        chunk_logprobs = F.cross_entropy(
+            flat_logits[start_idx:end_idx],
+            flat_targets[start_idx:end_idx],
+            ignore_index=ignore_index,
+            reduction="none",
+        )
+        logprobs_list.append(chunk_logprobs)
+
+    result = torch.cat(logprobs_list, dim=0)
+
+    del flat_logits, flat_targets, logprobs_list
+
+    if reduction == "none":
+        return result.reshape(batch_size, -1)
+    elif reduction == "mean":
+        return result.mean()
+    elif reduction == "sum":
+        return result.sum()
+    else:
+        raise ValueError(f"Invalid reduction mode: {reduction}")
+
+
 def process_batch(
     model: nn.Module,
     episodes: List[Episode],
@@ -412,7 +459,7 @@ def process_batch(
     pad_token_id: int,
     device: torch.device,
     entropy_coef: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
     which are all needed for computing the loss.
@@ -457,10 +504,6 @@ def process_batch(
     if n_target_tokens == 0:
         raise ValueError("No target tokens (assistant mask empty) in batch")
 
-    # advantage is just normalized reward
-    batch_rewards = [episode.reward for episode in episodes]
-    batch_rewards_t = torch.tensor(batch_rewards, device=device, dtype=torch.float32)
-
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
     fwd_ctx = (
@@ -480,14 +523,18 @@ def process_batch(
     del logits
     clear_memory()
 
-    bs = batch_token_ids_t.shape[0]
-    # F.cross_entropy handles dtype conversion internally, no need for .float()
-    logprobs = -F.cross_entropy(
-        next_token_logits.reshape(-1, next_token_logits.size(-1)),
-        target_token_ids.reshape(-1),
+    # Compute cross_entropy in chunks to avoid OOM
+    # Negate the result to get log probabilities (cross_entropy returns positive loss)
+    logprobs = -chunked_cross_entropy(
+        next_token_logits,
+        target_token_ids,
         ignore_index=pad_token_id,
         reduction="none",
-    ).reshape(bs, -1)
+        chunk_size=4096,
+    )
+
+    # Clear memory after cross-entropy computation
+    clear_memory()
 
     # Only compute entropy if it's being used (entropy_coef > 0)
     # This saves memory and computation when entropy regularization is disabled
@@ -531,7 +578,7 @@ def process_batch(
     del batch_token_ids_t, target_token_ids, next_token_logits
     clear_memory()
 
-    return logprobs, target_masks, batch_rewards_t, entropy, n_target_tokens
+    return logprobs, target_masks, entropy, n_target_tokens
 
 
 def update_policy(
@@ -582,35 +629,41 @@ def update_policy(
         )
 
     logger.info(
-        f"Computing backward pass for {total_micro_batches} micro-batches of size {micro_batch_size}, "
-        f"gradient accumulation steps: {gradient_accumulation_steps}"
+        f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
+
+    batch_entropy = torch.tensor(0.0, device=device)
+
     # Iterate over micro-batches
     micro_batch_idx = 0
-    for i in range(0, len(episodes), micro_batch_size):
+    for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
-
-        # Process the batch
-        logprobs, target_masks, batch_rewards_t, batch_entropy, n_target_tokens = (
-            process_batch(
-                model=model,
-                episodes=batch_episodes,
-                tokenizer=tokenizer,
-                pad_token_id=pad_token_id,
-                device=device,
-                entropy_coef=entropy_coef,
-            )
+        micro_batch_start_time = time.perf_counter()
+        # advantage is just normalized reward
+        batch_rewards = [episode.reward for episode in batch_episodes]
+        batch_rewards_t = torch.tensor(
+            batch_rewards, device=device, dtype=torch.float32
         )
 
         reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
+        reward_values_list = [round(reward, 2) for reward in batch_rewards_t.tolist()]
         logger.info(
-            f"Micro-batch {micro_batch_idx}/{total_micro_batches}: reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}"
+            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {reward_values_list}"
         )
-        logger.info(f"Micro-batch {micro_batch_idx}: target_tokens={n_target_tokens}")
         if reward_std == 0:
             logger.warning("Reward std is 0, skipping micro-batch")
             continue
+
+        # Process the batch
+        logprobs, target_masks, batch_entropy, n_target_tokens = process_batch(
+            model=model,
+            episodes=batch_episodes,
+            tokenizer=tokenizer,
+            pad_token_id=pad_token_id,
+            device=device,
+            entropy_coef=entropy_coef,
+        )
         if n_target_tokens == 0:
             logger.warning(
                 "No target tokens (assistant mask empty) in micro-batch, skipping"
@@ -640,7 +693,7 @@ def update_policy(
             scaled_loss = batch_loss / gradient_accumulation_steps
             scaled_loss.backward()
             logger.info(
-                f"Accumulated gradients (step {micro_batch_idx % gradient_accumulation_steps + 1}/{gradient_accumulation_steps})"
+                f"Applied loss for micro-batch {micro_batch_idx}, scaled loss: {scaled_loss:.4f}"
             )
 
         micro_batch_idx += 1
@@ -658,13 +711,13 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             logger.info(
-                f"Updated weights after {micro_batch_idx} micro-batches (grad_norm: {grad_norm:.4f})"
+                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"
             )
-            clear_memory()
 
-        # Clear intermediate tensors to save memory
-        del logprobs, target_masks, batch_rewards_t, batch_loss
-        clear_memory()
+        micro_batch_duration = time.perf_counter() - micro_batch_start_time
+        logger.info(
+            f"Micro-batch {micro_batch_idx} completed in {micro_batch_duration:.2f}s"
+        )
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
@@ -672,13 +725,34 @@ def update_policy(
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
     avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_loss_val = float(avg_loss)
+    avg_entropy_val = float(avg_entropy) if num_micro_batches > 0 else 0.0
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")
 
+    grad_norm_val = float(grad_norm)
+    del (
+        total_loss,
+        total_entropy,
+        grad_norm,
+        num_micro_batches,
+        batch_rewards_t,
+        batch_entropy,
+        n_target_tokens,
+        logprobs,
+        target_masks,
+        batch_episodes,
+        batch_rewards,
+        reward_mean,
+        reward_std,
+        reward_values_list,
+    )
+    clear_memory()
+
     return {
-        "loss": float(avg_loss),
-        "grad_norm": float(grad_norm),
-        "entropy": float(avg_entropy),
+        "loss": avg_loss_val,
+        "grad_norm": grad_norm_val,
+        "entropy": avg_entropy_val,
         "duration": update_duration,
     }
