@@ -606,15 +606,6 @@ def update_policy(
     micro_batch_idx = 0
     for i, preprocessed_batch in enumerate(preprocessed_batches):
         micro_batch_start_time = time.perf_counter()
-        ref_logprobs.extend(
-            _get_logprobs(
-                model,
-                preprocessed_batch["batch_token_ids_t"],
-                dtype,
-                device,
-            ).detach()
-        )
-
         # Get logprobs for the on policy model
         policy_logprobs = _get_logprobs(
             model,
