@@ -438,17 +438,22 @@ class EpisodeWithTokens(TypedDict):
     assistant_mask: list[bool]
 
 
-def process_batch(
-    model: nn.Module,
+class PreprocessedBatch(TypedDict):
+    batch_token_ids_t: T
+    batch_assistant_masks_t: T
+    target_token_ids: T
+    target_masks: T
+
+
+def preprocess_batch(
     episodes: List[Episode],
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
     device: torch.device,
-    dtype: torch.dtype = torch.bfloat16,
-) -> tuple[T, T, int]:
+) -> PreprocessedBatch:
     """
-    Preprocess a single batch of episodes to compute logprobs, and masks,
-    which are all needed for computing the loss.
+    Preprocess a single batch of episodes to get masks and tokens for
+    forward pass and loss computation.
     """
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
@@ -478,7 +483,6 @@ def process_batch(
         batch_assistant_masks_t, batch_first=True, padding_value=False
     )
 
-    # Shift tokens and masks for next-token prediction
     target_token_ids = batch_token_ids_t[:, 1:]
     target_assistant_masks = batch_assistant_masks_t[:, 1:]
     # Create mask with padding tokens
@@ -487,16 +491,15 @@ def process_batch(
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
 
-    # Number of target positions (assistant tokens that are not padding)
-    n_target_tokens = int(target_masks.sum().item())
-    if n_target_tokens == 0:
-        raise ValueError("No target tokens (assistant mask empty) in batch")
+    return {
+        "batch_token_ids_t": batch_token_ids_t,
+        "batch_assistant_masks_t": batch_assistant_masks_t,
+        "target_token_ids": target_token_ids,
+        "target_masks": target_masks,
+    }
 
-    # TODO re add entropy
-    return next_token_logits, target_masks, n_target_tokens
 
-
-def _get_next_token_logits(
+def _get_logprobs(
     model: nn.Module,
     batch_token_ids_t: T,
     dtype: torch.dtype,
@@ -538,6 +541,7 @@ def update_policy(
     metrics_wrapper: MetricsWrapper | None = None,
     step: int | None = None,
     gradient_accumulation_steps: int | None = None,
+    dtype: torch.dtype = torch.bfloat16,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
@@ -574,73 +578,50 @@ def update_policy(
     )
 
     batch_entropy = torch.tensor(0.0, device=device)
-
-    ref_logprobs = None
-    # Get reference model logprobs for importance sampling
-    for i in tqdm(
-        range(0, len(episodes), micro_batch_size), desc="Micro-batches (on-policy)"
-    ):
-        j = min(i + micro_batch_size, len(episodes))
-        batch_episodes = episodes[i:j]
-        target_masks, batch_entropy, n_target_tokens = process_batch(
-            model=model,
-            episodes=batch_episodes,
-            tokenizer=tokenizer,
-            pad_token_id=pad_token_id,
-            device=device,
-            entropy_coef=entropy_coef,
-        )
-
-    # Iterate over micro-batches
-    micro_batch_idx = 0
+    # Get reference logprobs to compute importance weights
+    preprocessed_batches: list[PreprocessedBatch] = []
+    ref_logprobs: list[T] = []
     for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
+        preprocessed_batch = preprocess_batch(
+            batch_episodes,
+            tokenizer,
+            pad_token_id,
+            device,
+        )
+        preprocessed_batches.append(preprocessed_batch)
+        # _get_logprobs returns a tensor of shape (batch_size, seq_len, vocab_size)
+        # detach as we want to use these for importance sampling
+        ref_logprobs.append(
+            _get_logprobs(
+                model,
+                preprocessed_batch["batch_token_ids_t"],
+                dtype,
+                device,
+            ).detach()
+        )
+    # Iterate over micro-batches
+    # TODO the importance weights for first microbatch are always 1, so we can skip them
+    micro_batch_idx = 0
+    for i, preprocessed_batch in enumerate(preprocessed_batches):
         micro_batch_start_time = time.perf_counter()
-        # advantage is just normalized reward
-        batch_rewards = [episode.reward for episode in batch_episodes]
-        batch_rewards_t = torch.tensor(
-            batch_rewards, device=device, dtype=torch.float32
+        ref_logprobs.extend(
+            _get_logprobs(
+                model,
+                preprocessed_batch["batch_token_ids_t"],
+                dtype,
+                device,
+            ).detach()
         )
 
-        reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
-        reward_values_list = [round(reward, 2) for reward in batch_rewards_t.tolist()]
-        logger.info(
-            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {reward_values_list}"
+        # Get logprobs for the on policy model
+        policy_logprobs = _get_logprobs(
+            model,
+            preprocessed_batch["target_token_ids"],
+            dtype,
+            device,
         )
-        if reward_std == 0:
-            logger.warning("Reward std is 0, skipping micro-batch")
-            continue
-
-        # Process the batch
-        logprobs, target_masks, batch_entropy, n_target_tokens = process_batch(
-            model=model,
-            episodes=batch_episodes,
-            tokenizer=tokenizer,
-            pad_token_id=pad_token_id,
-            device=device,
-        )
-        if n_target_tokens == 0:
-            logger.warning(
-                "No target tokens (assistant mask empty) in micro-batch, skipping"
-            )
-            continue
-
-        # Compute algorithm-specific loss
-        batch_loss = compute_algorithm_loss(
-            logprobs,
-            target_masks,
-            batch_rewards_t,
-            algorithm,
-            n_target_tokens,
-            entropy=batch_entropy,
-            entropy_coef=entropy_coef,
-        )
-
-        # Track total loss for logging (unscaled). We scale only for backward
-        total_loss += batch_loss
-        total_entropy += batch_entropy
-        num_micro_batches += 1
 
         # Backward pass - gradients accumulate naturally
         if apply_loss:

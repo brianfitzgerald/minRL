@@ -1,16 +1,23 @@
 # MinRL
 
-Minimal reimplementation of GRPO and REINFORCE, and other RL algorithms for LLM training.
+Simple, clean, heavily commented implementation of various policy gradient algorithms applied to LLMs.
 
-Attempts to reuse some aspects of TRL's vLLM integration.
+General principles of this codebase:
+- Heavily comment each line as an education reference, a la [nanoGPT](https://github.com/karpathy/nanoGPT).
+- Unit and system tested to allow for easy re-implementation.
+- Easy to follow control flow. No async inference for the time being.
+- Reasonably optimized - use vLLM for inference, with the sleep API, LoRA support
+- Easy to install and use, and easy to hack and add new algorithms / tasks.
 
-Also references GRPO-Zero repo somewhat - but will likely replace over time.
-
+Influences / references:
+- TRL GRPOTrainer
+- GRPO-Zero
+- LoRA Without Regret
+- prime-rl from Prime Intellect
 
 ## Commands
 
-
-To run:
+To run training:
 
 ```bash
 python train.py

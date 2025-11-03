@@ -1,5 +1,5 @@
 import torch
-from minrl.algorithms import process_batch, get_token_ids_and_assistant_mask
+from minrl.algorithms import preprocess_batch, get_token_ids_and_assistant_mask
 from minrl.constants import Episode, Conversation
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import torch.nn as nn
@@ -60,7 +60,7 @@ def test_process_batch_single_turn(
 
     pad_token_id = get_pad_token_id(tokenizer)
 
-    logprobs, target_masks, batch_rewards, entropy, n_target_tokens = process_batch(
+    logprobs, target_masks, batch_rewards, entropy, n_target_tokens = preprocess_batch(
         model=hf_model,
         episodes=episodes,
         tokenizer=tokenizer,
@@ -123,7 +123,7 @@ def test_process_batch_multi_turn(
 
     pad_token_id = get_pad_token_id(tokenizer)
 
-    logprobs, target_masks, batch_rewards, entropy, n_target_tokens = process_batch(
+    logprobs, target_masks, batch_rewards, entropy, n_target_tokens = preprocess_batch(
         model=hf_model,
         episodes=episodes,
         tokenizer=tokenizer,

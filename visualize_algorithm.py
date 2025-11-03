@@ -1,6 +1,6 @@
 from minrl.algorithms import (
     get_token_ids_and_assistant_mask,
-    process_batch,
+    preprocess_batch,
 )
 from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
@@ -100,7 +100,7 @@ def main():
 
     # Process the batch
     logprobs, target_msks, batch_rewards_t, batch_entropy, n_target_tokens = (
-        process_batch(
+        preprocess_batch(
             model=trainer.model,
             episodes=episodes,
             tokenizer=trainer.tokenizer,
