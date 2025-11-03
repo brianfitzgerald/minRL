@@ -444,10 +444,10 @@ def process_batch(
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
     device: torch.device,
-    entropy_coef: float = 0.0,
-) -> tuple[T, T, T, int]:
+    dtype: torch.dtype = torch.bfloat16,
+) -> tuple[T, T, int]:
     """
-    Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
+    Preprocess a single batch of episodes to compute logprobs, and masks,
     which are all needed for computing the loss.
     """
     # Extract token IDs and assistant masks for each episode
@@ -459,7 +459,8 @@ def process_batch(
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
-    # Pad token IDs to the same length using PyTorch's pad_sequence
+
+    # Pad token IDs
     batch_token_ids_t = [
         torch.tensor(token_ids, dtype=torch.long, device=device)
         for token_ids in token_ids_list
@@ -468,7 +469,7 @@ def process_batch(
         batch_token_ids_t, batch_first=True, padding_value=pad_token_id
     )
 
-    # Pad assistant masks to the same length using PyTorch's pad_sequence
+    # Pad assistant masks
     batch_assistant_masks_t = [
         torch.tensor(assistant_mask, dtype=torch.bool, device=device)
         for assistant_mask in assistant_mask_list
@@ -480,6 +481,7 @@ def process_batch(
     # Shift tokens and masks for next-token prediction
     target_token_ids = batch_token_ids_t[:, 1:]
     target_assistant_masks = batch_assistant_masks_t[:, 1:]
+    # Create mask with padding tokens
     pad_masks = target_token_ids != pad_token_id
 
     # Combine assistant mask with padding mask
@@ -490,10 +492,20 @@ def process_batch(
     if n_target_tokens == 0:
         raise ValueError("No target tokens (assistant mask empty) in batch")
 
+    # TODO re add entropy
+    return next_token_logits, target_masks, n_target_tokens
+
+
+def _get_next_token_logits(
+    model: nn.Module,
+    batch_token_ids_t: T,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> T:
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
     fwd_ctx = (
-        torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16)
+        torch.autocast(device_type="cuda", enabled=True, dtype=dtype)
         if device.type == "cuda"
         else nullcontext()
     )
@@ -502,15 +514,13 @@ def process_batch(
 
     # Get the cross entropy loss of the label and generated tokens
     # Slice logits to match target tokens (exclude first position)
-    # Keep in bfloat16/float16 to save memory - cross_entropy handles mixed precision
     next_token_logits = logits[:, :-1]
 
     # Clear logits from memory immediately after use
     del logits
     clear_memory()
 
-    # TODO re add entropy
-    return next_token_logits, target_masks, entropy, n_target_tokens
+    return next_token_logits
 
 
 def update_policy(
@@ -565,6 +575,22 @@ def update_policy(
 
     batch_entropy = torch.tensor(0.0, device=device)
 
+    ref_logprobs = None
+    # Get reference model logprobs for importance sampling
+    for i in tqdm(
+        range(0, len(episodes), micro_batch_size), desc="Micro-batches (on-policy)"
+    ):
+        j = min(i + micro_batch_size, len(episodes))
+        batch_episodes = episodes[i:j]
+        target_masks, batch_entropy, n_target_tokens = process_batch(
+            model=model,
+            episodes=batch_episodes,
+            tokenizer=tokenizer,
+            pad_token_id=pad_token_id,
+            device=device,
+            entropy_coef=entropy_coef,
+        )
+
     # Iterate over micro-batches
     micro_batch_idx = 0
     for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
@@ -593,7 +619,6 @@ def update_policy(
             tokenizer=tokenizer,
             pad_token_id=pad_token_id,
             device=device,
-            entropy_coef=entropy_coef,
         )
         if n_target_tokens == 0:
             logger.warning(
