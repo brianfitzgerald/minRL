@@ -98,7 +98,7 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: T) -> torch.Tensor:
         base_output = self.base_layer(x)
         lora_x = self.lora_dropout(x)
         lora_output = (lora_x @ self.lora_A.T) @ self.lora_B.T * self.scaling

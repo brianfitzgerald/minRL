@@ -65,9 +65,9 @@ episodes = [
 
 
 def compute_algorithm_loss(
-    logprobs: torch.Tensor,
-    target_masks: torch.Tensor,
-    batch_rewards: torch.Tensor,
+    logprobs: T,
+    target_masks: T,
+    batch_rewards: T,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
