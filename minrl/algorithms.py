@@ -63,38 +63,6 @@ def compute_scaled_temperature(
     return scaled_temp
 
 
-def get_response_log_probs(
-    logits: T,
-    targets: T,
-    ignore_index: int = -100,
-    reduction: str = "none",
-    chunk_size: int = 8192,
-) -> T:
-    vocab_size = logits.size(-1)
-
-    flat_logits = logits.reshape(-1, vocab_size)
-    flat_targets = targets.reshape(-1)
-
-    num_tokens = flat_logits.size(0)
-    logprobs_list = []
-
-    for start_idx in range(0, num_tokens, chunk_size):
-        end_idx = min(start_idx + chunk_size, num_tokens)
-        chunk_logprobs = F.cross_entropy(
-            flat_logits[start_idx:end_idx],
-            flat_targets[start_idx:end_idx],
-            ignore_index=ignore_index,
-            reduction="none",
-        )
-        logprobs_list.append(chunk_logprobs)
-
-    result = torch.cat(logprobs_list, dim=0)
-
-    del flat_logits, flat_targets, logprobs_list
-
-    return result
-
-
 @torch.no_grad()
 def rollout(
     config: TrainerConfig,
@@ -448,7 +416,7 @@ class PreprocessedBatch(TypedDict):
     # shape: (batch_size, seq_len) - binary
     target_masks: T
     # shape: (batch_size,) - float
-    rewards: T
+    advantages: T
 
 
 def preprocess_batch(
@@ -497,15 +465,41 @@ def preprocess_batch(
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
 
-    rewards_t = torch.tensor([e.reward for e in episodes], device=device)
+    # get n unique group indices
+    group_indices = list(set([e.group_index for e in episodes]))
+    n_prompts_per_step = len(group_indices)
+    n_groups = len(episodes) // n_prompts_per_step
+
+    raw_reward_tensor = torch.tensor(
+        [e.reward for e in episodes], dtype=torch.float
+    ).reshape((n_prompts_per_step, n_groups))
+    means = raw_reward_tensor.mean(dim=-1).unsqueeze(1)
+    advantages = (raw_reward_tensor - means).reshape((n_prompts_per_step * n_groups,))
 
     return {
         "batch_token_ids_t": batch_token_ids_t,
         "batch_assistant_masks_t": batch_assistant_masks_t,
         "target_token_ids": target_token_ids,
         "target_masks": target_masks,
-        "rewards": rewards_t,
+        "advantages": advantages,
     }
+
+
+def get_response_log_probs(
+    model: torch.nn.Module,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
+    logits = model(input_ids).logits
+    z = logits - logits.max(dim=-1, keepdim=True).values
+    exp_z = torch.exp(z)
+    denom = exp_z.sum(dim=-1, keepdim=True)
+    p = exp_z / denom
+    logprobs = z - torch.log(denom)
+    logprobs_for_label = torch.gather(
+        logprobs, dim=-1, index=labels.unsqueeze(-1)
+    ).squeeze(-1)
+    return logprobs_for_label
 
 
 def _get_logprobs(
@@ -603,11 +597,10 @@ def update_policy(
         # _get_logprobs returns a tensor of shape (batch_size, seq_len, vocab_size)
         # detach as we want to use these for importance sampling
         ref_logprobs.append(
-            _get_logprobs(
+            get_response_log_probs(
                 model,
                 ppb["batch_token_ids_t"],
-                dtype,
-                device,
+                ppb["target_token_ids"],
             ).detach()
         )
 
@@ -616,25 +609,22 @@ def update_policy(
     # Iterate over micro-batches
     # TODO the importance weights for first microbatch are always 1, so we can skip them
     micro_batch_idx = 0
-    for i, (ppb, ref_logprobs_batch) in enumerate(
+    for i, (ppb, ref_logprobs_micro_batch) in enumerate(
         zip(preprocessed_batches, ref_logprobs)
     ):
         micro_batch_start_time = time.perf_counter()
         # Get logprobs for the on policy model
-        policy_logprobs = _get_logprobs(
+        policy_logprobs = get_response_log_probs(
             model,
             ppb["batch_token_ids_t"],
-            dtype,
-            device,
+            ppb["target_token_ids"],
         )
 
         # get the importance weights
         # use exp here to avoid numerical instability
-        ratio = torch.exp(policy_logprobs - ref_logprobs_batch)
+        ratio = torch.exp(policy_logprobs - ref_logprobs_micro_batch)
         # TODO normalize per group
-        reward_t = ppb["rewards"]
-        means = reward_t.mean(dim=-1).unsqueeze(-1).to(device)
-        advantages: T = reward_t - means.reshape(micro_batch_size, 1)
+        advantages = ppb["advantages"]
         micro_batch_adv = advantages[i : i + micro_batch_size].unsqueeze(-1).to(device)
         per_token_loss: T = -ratio * micro_batch_adv
         mask: T = ppb["target_masks"]
