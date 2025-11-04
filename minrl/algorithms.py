@@ -625,7 +625,8 @@ def update_policy(
         ratio = torch.exp(policy_logprobs - ref_logprobs_micro_batch)
         # TODO normalize per group
         advantages = ppb["advantages"]
-        micro_batch_adv = advantages[i : i + micro_batch_size].unsqueeze(-1).to(device)
+        # advantages already contains only the current micro-batch, no need to slice
+        micro_batch_adv = advantages.unsqueeze(-1).to(device)
         per_token_loss: T = -ratio * micro_batch_adv
         mask: T = ppb["target_masks"]
 
