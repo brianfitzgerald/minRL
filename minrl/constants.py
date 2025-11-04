@@ -126,7 +126,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = GEMMA_3_1B
+    model_id: str = SMOL_LM_2_135M
     eval_interval: int = 25
     max_new_tokens: int = 256
     eval_batch_size: int = 64
@@ -171,7 +171,7 @@ class TrainerConfig(BaseModel):
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
     gradient_accumulation_steps: int | None = 16
-    groups_per_batch: int = 32
+    groups_per_batch: int = 4
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
 

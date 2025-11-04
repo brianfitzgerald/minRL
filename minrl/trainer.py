@@ -155,7 +155,8 @@ class Trainer:
             enable_prefix_caching=self.config.enable_prefix_caching
             and self.device_type == "cuda",
             # Enable sleep mode for memory management
-            enable_sleep_mode=self.config.enable_sleep_mode,
+            enable_sleep_mode=self.config.enable_sleep_mode
+            and self.device_type == "cuda",
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
@@ -319,7 +320,7 @@ class Trainer:
         self.metrics_wrapper.close()
 
     def _wake_sleep_vllm(self, action: Literal["wake", "sleep"]) -> None:
-        if self.config.enable_sleep_mode:
+        if self.config.enable_sleep_mode and self.device_type == "cuda":
             if action == "wake":
                 self.vllm_model.wake_up()
                 if self.config.enable_prefix_caching:

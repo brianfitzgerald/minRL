@@ -623,7 +623,7 @@ def update_policy(
         # Get logprobs for the on policy model
         policy_logprobs = _get_logprobs(
             model,
-            ppb["target_token_ids"],
+            ppb["batch_token_ids_t"],
             dtype,
             device,
         )
@@ -632,8 +632,11 @@ def update_policy(
         # use exp here to avoid numerical instability
         ratio = torch.exp(policy_logprobs - ref_logprobs_batch)
         # TODO normalize per group
-        advantages: T = ppb["rewards"] - ppb["rewards"].mean()
-        per_token_loss: T = -ratio * advantages
+        reward_t = ppb["rewards"]
+        means = reward_t.mean(dim=-1).unsqueeze(-1).to(device)
+        advantages: T = reward_t - means.reshape(micro_batch_size, 1)
+        micro_batch_adv = advantages[i : i + micro_batch_size].unsqueeze(-1).to(device)
+        per_token_loss: T = -ratio * micro_batch_adv
         mask: T = ppb["target_masks"]
 
         # Compute KL divergence
@@ -690,34 +693,22 @@ def update_policy(
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
     avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_loss_val = float(avg_loss)
-    avg_entropy_val = float(avg_entropy) if num_micro_batches > 0 else 0.0
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")
 
-    grad_norm_val = float(grad_norm)
     del (
         total_loss,
         total_entropy,
-        grad_norm,
         num_micro_batches,
-        batch_rewards_t,
         batch_entropy,
-        n_target_tokens,
-        logprobs,
-        target_masks,
         batch_episodes,
-        batch_rewards,
-        reward_mean,
-        reward_std,
-        reward_values_list,
     )
     clear_memory()
 
     return {
-        "loss": avg_loss_val,
-        "grad_norm": grad_norm_val,
-        "entropy": avg_entropy_val,
+        "loss": float(avg_loss),
+        "grad_norm": float(grad_norm),
+        "entropy": float(avg_entropy),
         "duration": update_duration,
     }

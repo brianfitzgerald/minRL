@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
 from loguru import logger
+from torch import Tensor as T
 
 """
 Based on src/prime_rl/trainer/lora.py
