@@ -439,10 +439,16 @@ class EpisodeWithTokens(TypedDict):
 
 
 class PreprocessedBatch(TypedDict):
+    # shape: (batch_size, seq_len) - int
     batch_token_ids_t: T
+    # shape: (batch_size, seq_len) - binary
     batch_assistant_masks_t: T
+    # shape: (batch_size, seq_len) - int
     target_token_ids: T
+    # shape: (batch_size, seq_len) - binary
     target_masks: T
+    # shape: (batch_size,) - float
+    rewards: T
 
 
 def preprocess_batch(
@@ -491,11 +497,14 @@ def preprocess_batch(
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
 
+    rewards_t = torch.tensor([e.reward for e in episodes], device=device)
+
     return {
         "batch_token_ids_t": batch_token_ids_t,
         "batch_assistant_masks_t": batch_assistant_masks_t,
         "target_token_ids": target_token_ids,
         "target_masks": target_masks,
+        "rewards": rewards_t,
     }
 
 
@@ -584,44 +593,72 @@ def update_policy(
     for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
         j = min(i + micro_batch_size, len(episodes))
         batch_episodes = episodes[i:j]
-        preprocessed_batch = preprocess_batch(
+        ppb = preprocess_batch(
             batch_episodes,
             tokenizer,
             pad_token_id,
             device,
         )
-        preprocessed_batches.append(preprocessed_batch)
+        preprocessed_batches.append(ppb)
         # _get_logprobs returns a tensor of shape (batch_size, seq_len, vocab_size)
         # detach as we want to use these for importance sampling
         ref_logprobs.append(
             _get_logprobs(
                 model,
-                preprocessed_batch["batch_token_ids_t"],
+                ppb["batch_token_ids_t"],
                 dtype,
                 device,
             ).detach()
         )
+
+    epoch_kl_divs = []
+    epoch_policy_ratios = []
     # Iterate over micro-batches
     # TODO the importance weights for first microbatch are always 1, so we can skip them
     micro_batch_idx = 0
-    for i, preprocessed_batch in enumerate(preprocessed_batches):
+    for i, (ppb, ref_logprobs_batch) in enumerate(
+        zip(preprocessed_batches, ref_logprobs)
+    ):
         micro_batch_start_time = time.perf_counter()
         # Get logprobs for the on policy model
         policy_logprobs = _get_logprobs(
             model,
-            preprocessed_batch["target_token_ids"],
+            ppb["target_token_ids"],
             dtype,
             device,
         )
 
-        # Backward pass - gradients accumulate naturally
+        # get the importance weights
+        # use exp here to avoid numerical instability
+        ratio = torch.exp(policy_logprobs - ref_logprobs_batch)
+        # TODO normalize per group
+        advantages: T = ppb["rewards"] - ppb["rewards"].mean()
+        per_token_loss: T = -ratio * advantages
+        mask: T = ppb["target_masks"]
+
+        # Compute KL divergence
+        with torch.no_grad():
+            approx_kl = ((ratio - 1) - torch.log(ratio)) * mask
+            approx_kl_mean = approx_kl.sum() / mask.sum()
+            # Log the KL divergence for this micro-batch
+            epoch_kl_divs.append(approx_kl_mean.item())
+
+            # Policy ratio statistics for this micro-batch
+            policy_ratio_mean = (ratio * mask).sum() / mask.sum()
+            epoch_policy_ratios.append(policy_ratio_mean.item())
+
+        # Get the loss per token, by multiplying by the mask
+        masked_loss: T = per_token_loss * mask
+        # normalize by the number of target tokens, clamp to 1 to avoid division by zero
+        denom = mask.sum(dim=-1).clamp_min(1)
+        loss_per_prompt = masked_loss.sum(dim=-1) / denom
+        # Scale by the number of gradient accumulation steps
+        loss = loss_per_prompt.mean() / gradient_accumulation_steps
+
         if apply_loss:
-            # Scale per micro-batch loss by gradient_accumulation_steps so that
-            # the accumulated gradient matches the average gradient over the accumulated steps
-            scaled_loss = batch_loss / gradient_accumulation_steps
-            scaled_loss.backward()
+            loss.backward()
             logger.info(
-                f"Applied loss for micro-batch {micro_batch_idx}, scaled loss: {scaled_loss:.4f}"
+                f"Applied loss for micro-batch {micro_batch_idx}, loss: {loss:.4f}"
             )
 
         micro_batch_idx += 1
