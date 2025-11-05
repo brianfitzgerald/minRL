@@ -701,13 +701,16 @@ def update_policy(
 
         # Get the loss per token, by multiplying by the mask
         masked_loss: T = per_token_loss * mask
-        # normalize by the number of target tokens, clamp to 1 to avoid division by zero
-        denom = mask.sum(dim=-1).clamp_min(1)
-        loss_per_prompt = masked_loss.sum(dim=-1) / denom
+        # Compute loss as mean over all masked tokens (not per-prompt average)
+        # This avoids the issue where averaging per-prompt losses zeros out due to normalized advantages
+        total_masked_tokens = mask.sum().clamp_min(1)
+        loss = masked_loss.sum() / total_masked_tokens / gradient_accumulation_steps
 
         # Debug: Log masked loss and loss per prompt
         with torch.no_grad():
             masked_mean = masked_loss[mask].mean().item() if mask.sum() > 0 else 0.0
+            denom = mask.sum(dim=-1).clamp_min(1)
+            loss_per_prompt = masked_loss.sum(dim=-1) / denom
             logger.debug(
                 f"Micro-batch {micro_batch_idx}: Masked loss - "
                 f"sum={masked_loss.sum().item():.6f}, "
@@ -723,14 +726,12 @@ def update_policy(
                 f"denom_mean={denom.float().mean().item():.2f}"
             )
 
-        # Scale by the number of gradient accumulation steps
-        loss = loss_per_prompt.mean() / gradient_accumulation_steps
-
         logger.debug(
             f"Micro-batch {micro_batch_idx}: Final loss - "
             f"loss={loss.item():.8f}, "
             f"gradient_accumulation_steps={gradient_accumulation_steps}, "
-            f"unscaled_mean={loss_per_prompt.mean().item():.8f}"
+            f"unscaled_mean={masked_loss.sum().item() / total_masked_tokens.item():.8f}, "
+            f"total_masked_tokens={total_masked_tokens.item()}"
         )
 
         if apply_loss:
