@@ -1,8 +1,6 @@
-import dataclasses
 import time
-from collections import defaultdict
 from contextlib import nullcontext
-from typing import Dict, List, TypedDict
+from typing import List, TypedDict
 
 import torch
 import torch.nn as nn
@@ -10,7 +8,6 @@ import torch.nn.functional as F
 from loguru import logger
 from torch import Tensor as T
 from tqdm import tqdm
-from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM, TokensPrompt
 from vllm.sampling_params import (
@@ -30,11 +27,8 @@ from minrl.metrics import MetricsWrapper
 from minrl.utils import (
     clear_memory,
     find_assistant_sections,
+    log_conversation,
     log_memory_usage,
-)
-
-debug_tokenizer = AutoTokenizer.from_pretrained(
-    TrainerConfig().model_id, use_fast=False
 )
 
 
@@ -203,8 +197,8 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
-        # log_conversation(conversation, only_roles=["assistant"])
+        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        log_conversation(conversation, only_roles=["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
@@ -292,47 +286,6 @@ def get_token_ids_and_assistant_mask(
             assistant_mask[j] = True
 
     return all_token_ids, assistant_mask
-
-
-def normalize_rewards_per_group(
-    episodes: List[Episode], divide_by_std: bool = True
-) -> List[Episode]:
-    """
-    Normalize rewards per group.
-    This is done by subtracting the mean and dividing by the standard deviation
-    of the rewards in each group. If std is 0, returns the original rewards.
-    """
-    # Group episodes by prefix and calculate stats
-    groups: Dict[int, List[Episode]] = defaultdict(list)
-    for episode in episodes:
-        groups[episode.group_index].append(episode)
-
-    # Normalize rewards within each group
-    normalized_episodes: List[Episode] = []
-    for group in groups.values():
-        rewards = torch.tensor([e.reward for e in group])
-        mean = rewards.mean()
-        std = rewards.std(unbiased=False)  # Use biased std for small groups
-
-        # Handle edge cases
-        if torch.isnan(std) or std == 0:
-            # If all rewards are identical, keep them as-is (will be zero after mean subtraction)
-            # This happens when all responses get same reward
-            # Small epsilon prevents completely killing gradient signal
-            normalized_rewards = torch.zeros_like(rewards)
-        else:
-            if divide_by_std:
-                # Add epsilon for numerical stability
-                normalized_rewards = (rewards - mean) / (std + 1e-8)
-            else:
-                normalized_rewards = rewards - mean
-
-        for episode, norm_reward in zip(group, normalized_rewards):
-            normalized_episodes.append(
-                dataclasses.replace(episode, reward=float(norm_reward))
-            )
-
-    return normalized_episodes
 
 
 def compute_algorithm_loss(
@@ -476,6 +429,20 @@ def preprocess_batch(
     means = raw_reward_tensor.mean(dim=-1).unsqueeze(1)
     advantages = (raw_reward_tensor - means).reshape((n_prompts_per_step * n_groups,))
 
+    # Debug: Log advantage computation details
+    logger.debug(
+        f"preprocess_batch: n_prompts_per_step={n_prompts_per_step}, n_groups={n_groups}, "
+        f"raw_rewards - mean={raw_reward_tensor.mean().item():.4f}, "
+        f"std={raw_reward_tensor.std().item():.4f}, "
+        f"min={raw_reward_tensor.min().item():.4f}, max={raw_reward_tensor.max().item():.4f}, "
+        f"means_per_prompt={means.squeeze().tolist()}, "
+        f"advantages - mean={advantages.mean().item():.6f}, "
+        f"std={advantages.std().item():.6f}, "
+        f"min={advantages.min().item():.6f}, max={advantages.max().item():.6f}, "
+        f"zeros={torch.sum(advantages == 0).item()}/{len(advantages)}, "
+        f"all_zero={torch.all(advantages == 0).item()}"
+    )
+
     return {
         "batch_token_ids_t": batch_token_ids_t,
         "batch_assistant_masks_t": batch_assistant_masks_t,
@@ -494,7 +461,6 @@ def get_response_log_probs(
     z = logits - logits.max(dim=-1, keepdim=True).values
     exp_z = torch.exp(z)
     denom = exp_z.sum(dim=-1, keepdim=True)
-    p = exp_z / denom
     logprobs = z - torch.log(denom)
     logprobs_for_label = torch.gather(
         logprobs, dim=-1, index=labels.unsqueeze(-1)
@@ -553,15 +519,21 @@ def update_policy(
     """
     update_start_time = time.perf_counter()
 
-    if algorithm == "grpo":
-        episodes = normalize_rewards_per_group(episodes)
+    # Debug: Log overall episode statistics
+    all_rewards = [e.reward for e in episodes]
+    logger.debug(
+        f"update_policy: Total episodes={len(episodes)}, "
+        f"rewards - mean={sum(all_rewards) / len(all_rewards):.4f}, "
+        f"min={min(all_rewards):.4f}, max={max(all_rewards):.4f}, "
+        f"std={torch.tensor(all_rewards).std().item():.4f}, "
+        f"all_zero={all(r == 0 for r in all_rewards)}"
+    )
 
     # Pre-tokenize all episodes once
     for episode in episodes:
         get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
 
-    total_entropy = torch.tensor(0.0, device=device)
-    total_loss = torch.tensor(0.0, device=device)
+    total_loss = 0.0
     grad_norm = 0.0
     num_micro_batches = 0
 
@@ -580,39 +552,70 @@ def update_policy(
         f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
 
-    batch_entropy = torch.tensor(0.0, device=device)
-    # Get reference logprobs to compute importance weights
-    preprocessed_batches: list[PreprocessedBatch] = []
-    ref_logprobs: list[T] = []
-    for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
-        j = min(i + micro_batch_size, len(episodes))
-        batch_episodes = episodes[i:j]
+    epoch_kl_divs = []
+    epoch_policy_ratios = []
+    # Iterate over micro-batches
+    # TODO the importance weights for first microbatch are always 1, so we can skip them
+    micro_batch_idx = 0
+    for micro_batch_start in tqdm(
+        range(0, len(episodes), micro_batch_size), desc="Micro-batches"
+    ):
+        micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
+        batch_episodes = episodes[micro_batch_start:micro_batch_end]
+        micro_batch_start_time = time.perf_counter()
+
+        # Debug: Log episode rewards before preprocessing
+        batch_rewards = [e.reward for e in batch_episodes]
+        logger.debug(
+            f"Micro-batch {micro_batch_idx}: Episode rewards - "
+            f"mean={sum(batch_rewards) / len(batch_rewards):.4f}, "
+            f"min={min(batch_rewards):.4f}, max={max(batch_rewards):.4f}, "
+            f"std={torch.tensor(batch_rewards).std().item():.4f}, "
+            f"all_zero={all(r == 0 for r in batch_rewards)}"
+        )
+
         ppb = preprocess_batch(
             batch_episodes,
             tokenizer,
             pad_token_id,
             device,
         )
-        preprocessed_batches.append(ppb)
-        # _get_logprobs returns a tensor of shape (batch_size, seq_len, vocab_size)
-        # detach as we want to use these for importance sampling
-        ref_logprobs.append(
-            get_response_log_probs(
-                model,
-                ppb["batch_token_ids_t"],
-                ppb["target_token_ids"],
-            ).detach()
+
+        # Debug: Log advantage statistics
+        advantages = ppb["advantages"]
+        mask: T = ppb["target_masks"]
+        logger.debug(
+            f"Micro-batch {micro_batch_idx}: Advantages - "
+            f"mean={advantages.mean().item():.6f}, "
+            f"std={advantages.std().item():.6f}, "
+            f"min={advantages.min().item():.6f}, "
+            f"max={advantages.max().item():.6f}, "
+            f"zeros={torch.sum(advantages == 0).item()}/{len(advantages)}, "
+            f"all_zero={torch.all(advantages == 0).item()}"
         )
 
-    epoch_kl_divs = []
-    epoch_policy_ratios = []
-    # Iterate over micro-batches
-    # TODO the importance weights for first microbatch are always 1, so we can skip them
-    micro_batch_idx = 0
-    for i, (ppb, ref_logprobs_micro_batch) in enumerate(
-        zip(preprocessed_batches, ref_logprobs)
-    ):
-        micro_batch_start_time = time.perf_counter()
+        # Debug: Log mask statistics
+        logger.debug(
+            f"Micro-batch {micro_batch_idx}: Target mask - "
+            f"shape={mask.shape}, "
+            f"total_tokens={mask.numel()}, "
+            f"masked_tokens={mask.sum().item()}, "
+            f"unmasked_tokens={(~mask).sum().item()}, "
+            f"mask_ratio={mask.sum().item() / mask.numel():.4f}, "
+            f"tokens_per_sample={mask.sum(dim=-1).float().mean().item():.2f}"
+        )
+
+        with torch.no_grad():
+            ref_logprobs_cpu = (
+                get_response_log_probs(
+                    model,
+                    ppb["batch_token_ids_t"],
+                    ppb["target_token_ids"],
+                )
+                .detach()
+                .cpu()
+            )
+
         # Get logprobs for the on policy model
         policy_logprobs = get_response_log_probs(
             model,
@@ -620,15 +623,70 @@ def update_policy(
             ppb["target_token_ids"],
         )
 
+        ref_logprobs = ref_logprobs_cpu.to(device)
+
+        # Debug: Log logprobs statistics
+        with torch.no_grad():
+            policy_logprobs_masked = policy_logprobs[mask]
+            ref_logprobs_masked = ref_logprobs[mask]
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Policy logprobs (masked) - "
+                f"mean={policy_logprobs_masked.mean().item():.6f}, "
+                f"std={policy_logprobs_masked.std().item():.6f}, "
+                f"min={policy_logprobs_masked.min().item():.6f}, "
+                f"max={policy_logprobs_masked.max().item():.6f}"
+            )
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Reference logprobs (masked) - "
+                f"mean={ref_logprobs_masked.mean().item():.6f}, "
+                f"std={ref_logprobs_masked.std().item():.6f}, "
+                f"min={ref_logprobs_masked.min().item():.6f}, "
+                f"max={ref_logprobs_masked.max().item():.6f}"
+            )
+            logprob_diff = policy_logprobs_masked - ref_logprobs_masked
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Logprob diff (policy - ref, masked) - "
+                f"mean={logprob_diff.mean().item():.6f}, "
+                f"std={logprob_diff.std().item():.6f}, "
+                f"min={logprob_diff.min().item():.6f}, "
+                f"max={logprob_diff.max().item():.6f}"
+            )
+
         # get the importance weights
         # use exp here to avoid numerical instability
-        ratio = torch.exp(policy_logprobs - ref_logprobs_micro_batch)
+        ratio = torch.exp(policy_logprobs - ref_logprobs)
         # TODO normalize per group
-        advantages = ppb["advantages"]
         # advantages already contains only the current micro-batch, no need to slice
         micro_batch_adv = advantages.unsqueeze(-1).to(device)
+
+        # Debug: Log ratio statistics
+        with torch.no_grad():
+            ratio_masked = ratio[mask]
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Ratio (masked) - "
+                f"mean={ratio_masked.mean().item():.6f}, "
+                f"std={ratio_masked.std().item():.6f}, "
+                f"min={ratio_masked.min().item():.6f}, "
+                f"max={ratio_masked.max().item():.6f}, "
+            )
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Advantages (expanded) - "
+                f"shape={micro_batch_adv.shape}, "
+                f"mean={micro_batch_adv.mean().item():.6f}, "
+            )
+
         per_token_loss: T = -ratio * micro_batch_adv
-        mask: T = ppb["target_masks"]
+
+        # Debug: Log per-token loss before masking
+        with torch.no_grad():
+            per_token_loss_masked = per_token_loss[mask]
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Per-token loss (before masking) - "
+                f"mean={per_token_loss_masked.mean().item():.6f}, "
+                f"std={per_token_loss_masked.std().item():.6f}, "
+                f"min={per_token_loss_masked.min().item():.6f}, "
+                f"max={per_token_loss_masked.max().item():.6f}, "
+            )
 
         # Compute KL divergence
         with torch.no_grad():
@@ -646,8 +704,34 @@ def update_policy(
         # normalize by the number of target tokens, clamp to 1 to avoid division by zero
         denom = mask.sum(dim=-1).clamp_min(1)
         loss_per_prompt = masked_loss.sum(dim=-1) / denom
+
+        # Debug: Log masked loss and loss per prompt
+        with torch.no_grad():
+            masked_mean = masked_loss[mask].mean().item() if mask.sum() > 0 else 0.0
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Masked loss - "
+                f"sum={masked_loss.sum().item():.6f}, "
+                f"mean={masked_mean:.6f}"
+            )
+            logger.debug(
+                f"Micro-batch {micro_batch_idx}: Loss per prompt - "
+                f"mean={loss_per_prompt.mean().item():.6f}, "
+                f"std={loss_per_prompt.std().item():.6f}, "
+                f"min={loss_per_prompt.min().item():.6f}, "
+                f"max={loss_per_prompt.max().item():.6f}, "
+                f"denom_min={denom.min().item():.0f}, "
+                f"denom_mean={denom.float().mean().item():.2f}"
+            )
+
         # Scale by the number of gradient accumulation steps
         loss = loss_per_prompt.mean() / gradient_accumulation_steps
+
+        logger.debug(
+            f"Micro-batch {micro_batch_idx}: Final loss - "
+            f"loss={loss.item():.8f}, "
+            f"gradient_accumulation_steps={gradient_accumulation_steps}, "
+            f"unscaled_mean={loss_per_prompt.mean().item():.8f}"
+        )
 
         if apply_loss:
             loss.backward()
@@ -655,12 +739,14 @@ def update_policy(
                 f"Applied loss for micro-batch {micro_batch_idx}, loss: {loss:.4f}"
             )
 
+        total_loss += float(loss.detach().cpu())
+        num_micro_batches += 1
         micro_batch_idx += 1
 
         # Update weights after accumulating gradient_accumulation_steps batches
         # or if this is the last batch
         should_update = (micro_batch_idx % gradient_accumulation_steps == 0) or (
-            i + micro_batch_size >= len(episodes)
+            micro_batch_end >= len(episodes)
         )
 
         if apply_loss and should_update:
@@ -678,23 +764,38 @@ def update_policy(
             f"Micro-batch {micro_batch_idx} completed in {micro_batch_duration:.2f}s"
         )
 
+        del policy_logprobs
+        del ratio
+        del mask
+        del micro_batch_adv
+        del masked_loss
+        del loss_per_prompt
+        del loss
+        del ref_logprobs
+        del ref_logprobs_cpu
+        del ppb
+        del batch_episodes
+        clear_memory()
+
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
 
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
+    avg_entropy = 0.0
+
+    # Debug: Log final statistics
+    logger.debug(
+        f"update_policy: Final statistics - "
+        f"avg_loss={avg_loss:.8f}, "
+        f"total_loss={total_loss:.8f}, "
+        f"num_micro_batches={num_micro_batches}, "
+        f"grad_norm={grad_norm:.6f}"
+    )
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")
 
-    del (
-        total_loss,
-        total_entropy,
-        num_micro_batches,
-        batch_entropy,
-        batch_episodes,
-    )
     clear_memory()
 
     return {
