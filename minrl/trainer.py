@@ -239,6 +239,10 @@ class Trainer:
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
 
+            # Clean up conversations to free memory
+            del conversations
+            clear_memory()
+
             logger.info(f"Updating policy for step {step}")
 
             results = update_policy(
@@ -292,7 +296,7 @@ class Trainer:
             )
 
             # Clear memory after each step more aggressively
-            del episodes
+            del episodes, batch
             clear_memory()
             # Log memory usage after clearing
             log_memory_usage(
@@ -374,9 +378,17 @@ class Trainer:
 
             episodes.extend(batch_episodes)
 
+            # Clean up batch episodes after extending
+            del batch_episodes
+            clear_memory()
+
         reward = [episode.reward for episode in episodes]
         mean_reward = sum(reward) / len(reward)
         self.metrics_wrapper.add_scalar("eval/mean_reward", mean_reward, step)
+
+        # Clean up episodes after evaluation
+        del episodes, reward
+        clear_memory()
 
     @property
     def checkpoint_dir(self) -> Path:

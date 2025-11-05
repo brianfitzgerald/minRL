@@ -457,14 +457,20 @@ def get_response_log_probs(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
 ) -> torch.Tensor:
+    """
+    Compute log probabilities for given labels efficiently.
+    Uses F.log_softmax which is more memory efficient than manual computation.
+    """
     logits = model(input_ids).logits
-    z = logits - logits.max(dim=-1, keepdim=True).values
-    exp_z = torch.exp(z)
-    denom = exp_z.sum(dim=-1, keepdim=True)
-    logprobs = z - torch.log(denom)
+    # Use F.log_softmax which is more memory efficient than manual computation
+    log_probs = F.log_softmax(logits, dim=-1)
+    # Free logits immediately
+    del logits
+    # Gather only the logprobs for the labels
     logprobs_for_label = torch.gather(
-        logprobs, dim=-1, index=labels.unsqueeze(-1)
+        log_probs, dim=-1, index=labels.unsqueeze(-1)
     ).squeeze(-1)
+    del log_probs
     return logprobs_for_label
 
 
@@ -474,6 +480,10 @@ def _get_logprobs(
     dtype: torch.dtype,
     device: torch.device,
 ) -> T:
+    """
+    DEPRECATED: This function is unused and kept for reference only.
+    Use get_response_log_probs instead which is more memory efficient.
+    """
     # Use mixed precision for forward pass to reduce memory usage
     # Use autocast even without scaler for BFloat16 models to save memory
     fwd_ctx = (
@@ -552,10 +562,36 @@ def update_policy(
         f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
 
+    # Preprocess episodes
+    logger.info("Preprocessing all episodes...")
+    all_preprocessed: list[PreprocessedBatch] = []
+    for micro_batch_start in range(0, len(episodes), micro_batch_size):
+        micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
+        batch_episodes = episodes[micro_batch_start:micro_batch_end]
+        ppb = preprocess_batch(batch_episodes, tokenizer, pad_token_id, device)
+        all_preprocessed.append(ppb)
+
+    # Compute reference logprobs
+    logger.info("Computing reference logprobs...")
+    ref_logprobs_all: list[T] = []
+    with torch.no_grad():
+        for ppb in all_preprocessed:
+            ref_logprobs = (
+                get_response_log_probs(
+                    model, ppb["batch_token_ids_t"], ppb["target_token_ids"]
+                )
+                .detach()
+                .cpu()
+            )  # Move to CPU to save GPU memory
+            ref_logprobs_all.append(ref_logprobs)
+            del ref_logprobs
+        clear_memory()
+
+    logger.info("Starting gradient updates...")
     epoch_kl_divs = []
     epoch_policy_ratios = []
-    # Iterate over micro-batches
-    # TODO the importance weights for first microbatch are always 1, so we can skip them
+
+    # Iterate over micro-batches using pre-computed data
     micro_batch_idx = 0
     for micro_batch_start in tqdm(
         range(0, len(episodes), micro_batch_size), desc="Micro-batches"
@@ -564,7 +600,7 @@ def update_policy(
         batch_episodes = episodes[micro_batch_start:micro_batch_end]
         micro_batch_start_time = time.perf_counter()
 
-        # Debug: Log episode rewards before preprocessing
+        # Debug: Log episode rewards
         batch_rewards = [e.reward for e in batch_episodes]
         logger.debug(
             f"Micro-batch {micro_batch_idx}: Episode rewards - "
@@ -574,12 +610,8 @@ def update_policy(
             f"all_zero={all(r == 0 for r in batch_rewards)}"
         )
 
-        ppb = preprocess_batch(
-            batch_episodes,
-            tokenizer,
-            pad_token_id,
-            device,
-        )
+        # Use pre-computed preprocessed batch
+        ppb = all_preprocessed[micro_batch_idx]
 
         # Debug: Log advantage statistics
         advantages = ppb["advantages"]
@@ -605,25 +637,15 @@ def update_policy(
             f"tokens_per_sample={mask.sum(dim=-1).float().mean().item():.2f}"
         )
 
-        with torch.no_grad():
-            ref_logprobs_cpu = (
-                get_response_log_probs(
-                    model,
-                    ppb["batch_token_ids_t"],
-                    ppb["target_token_ids"],
-                )
-                .detach()
-                .cpu()
-            )
+        # Get pre-computed reference logprobs
+        ref_logprobs = ref_logprobs_all[micro_batch_idx].to(device)
 
-        # Get logprobs for the on policy model
+        # Compute policy logprobs (single forward pass with gradients)
         policy_logprobs = get_response_log_probs(
             model,
             ppb["batch_token_ids_t"],
             ppb["target_token_ids"],
         )
-
-        ref_logprobs = ref_logprobs_cpu.to(device)
 
         # Debug: Log logprobs statistics
         with torch.no_grad():
@@ -773,10 +795,13 @@ def update_policy(
         del loss_per_prompt
         del loss
         del ref_logprobs
-        del ref_logprobs_cpu
-        del ppb
         del batch_episodes
+        # Note: ppb is from all_preprocessed list, don't delete it here
         clear_memory()
+
+    # Clean up stored data
+    del ref_logprobs_all, all_preprocessed
+    clear_memory()
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
