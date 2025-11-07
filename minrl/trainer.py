@@ -364,7 +364,7 @@ class Trainer:
             batch_episodes, rollout_duration = rollout(
                 self.config,
                 self.tokenizer,
-                1,
+                self.config.group_size,
                 self.eval_dataset.max_steps,
                 conversations,
                 samples=batch,
@@ -383,11 +383,16 @@ class Trainer:
             clear_memory()
 
         reward = [episode.reward for episode in episodes]
-        mean_reward = sum(reward) / len(reward)
+        if len(reward) == 0:
+            logger.warning("No episodes found in evaluation")
+            mean_reward = 0.0
+        else:
+            mean_reward = sum(reward) / len(reward)
+        self.metrics_wrapper.add_scalar("eval/num_episodes", len(episodes), step)
         self.metrics_wrapper.add_scalar("eval/mean_reward", mean_reward, step)
 
         # Clean up episodes after evaluation
-        del episodes, reward
+        del episodes, reward, conversations
         clear_memory()
 
     @property

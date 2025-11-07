@@ -392,18 +392,17 @@ def preprocess_batch(
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
 
-    # Pad token IDs
+    # Pad token IDs on CPU and optionally pin memory for faster H2D copies
     batch_token_ids_t = [
-        torch.tensor(token_ids, dtype=torch.long, device=device)
-        for token_ids in token_ids_list
+        torch.tensor(token_ids, dtype=torch.long) for token_ids in token_ids_list
     ]
     batch_token_ids_t = torch.nn.utils.rnn.pad_sequence(
         batch_token_ids_t, batch_first=True, padding_value=pad_token_id
     )
 
-    # Pad assistant masks
+    # Pad assistant masks on CPU and optionally pin memory
     batch_assistant_masks_t = [
-        torch.tensor(assistant_mask, dtype=torch.bool, device=device)
+        torch.tensor(assistant_mask, dtype=torch.bool)
         for assistant_mask in assistant_mask_list
     ]
     batch_assistant_masks_t = torch.nn.utils.rnn.pad_sequence(
@@ -576,16 +575,16 @@ def update_policy(
     ref_logprobs_all: list[T] = []
     with torch.no_grad():
         for ppb in all_preprocessed:
+            batch_token_ids_t = ppb["batch_token_ids_t"].to(device)
+            target_token_ids = ppb["target_token_ids"].to(device)
             ref_logprobs = (
-                get_response_log_probs(
-                    model, ppb["batch_token_ids_t"], ppb["target_token_ids"]
-                )
+                get_response_log_probs(model, batch_token_ids_t, target_token_ids)
                 .detach()
                 .cpu()
-            )  # Move to CPU to save GPU memory
+            )
             ref_logprobs_all.append(ref_logprobs)
-            del ref_logprobs
-        clear_memory()
+            del ref_logprobs, batch_token_ids_t, target_token_ids
+            clear_memory()
 
     logger.info("Starting gradient updates...")
     epoch_kl_divs = []
@@ -612,10 +611,12 @@ def update_policy(
 
         # Use pre-computed preprocessed batch
         ppb = all_preprocessed[micro_batch_idx]
+        batch_token_ids_t = ppb["batch_token_ids_t"].to(device, non_blocking=True)
+        target_token_ids = ppb["target_token_ids"].to(device, non_blocking=True)
+        mask: T = ppb["target_masks"].to(device, non_blocking=True)
+        advantages = ppb["advantages"].to(device, non_blocking=True)
 
         # Debug: Log advantage statistics
-        advantages = ppb["advantages"]
-        mask: T = ppb["target_masks"]
         logger.debug(
             f"Micro-batch {micro_batch_idx}: Advantages - "
             f"mean={advantages.mean().item():.6f}, "
@@ -638,13 +639,13 @@ def update_policy(
         )
 
         # Get pre-computed reference logprobs
-        ref_logprobs = ref_logprobs_all[micro_batch_idx].to(device)
+        ref_logprobs = ref_logprobs_all[micro_batch_idx].to(device, non_blocking=True)
 
         # Compute policy logprobs (single forward pass with gradients)
         policy_logprobs = get_response_log_probs(
             model,
-            ppb["batch_token_ids_t"],
-            ppb["target_token_ids"],
+            batch_token_ids_t,
+            target_token_ids,
         )
 
         # Debug: Log logprobs statistics
@@ -679,7 +680,7 @@ def update_policy(
         ratio = torch.exp(policy_logprobs - ref_logprobs)
         # TODO normalize per group
         # advantages already contains only the current micro-batch, no need to slice
-        micro_batch_adv = advantages.unsqueeze(-1).to(device)
+        micro_batch_adv = advantages.unsqueeze(-1)
 
         # Debug: Log ratio statistics
         with torch.no_grad():
@@ -795,6 +796,9 @@ def update_policy(
         del loss_per_prompt
         del loss
         del ref_logprobs
+        del batch_token_ids_t
+        del target_token_ids
+        del advantages
         del batch_episodes
         # Note: ppb is from all_preprocessed list, don't delete it here
         clear_memory()
