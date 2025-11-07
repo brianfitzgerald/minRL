@@ -23,7 +23,7 @@ MODAL_IMAGE = (
     .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
     .add_local_file("uv.lock", "/uv.lock", copy=True)
     .env({"UV_PROJECT_ENVIRONMENT": "/usr/local"})
-    .apt_install("git")
+    .apt_install("git", "build-essential", "ninja-build")
     .env(
         {
             "CUDA_HOME": "/usr/local/cuda",
@@ -31,6 +31,8 @@ MODAL_IMAGE = (
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
+    # Prefer GCC toolchain for PyTorch C++/CUDA extensions
+    .env({"CC": "gcc", "CXX": "g++"})
     .run_commands(
         [
             "uv sync --no-group training --no-group games",

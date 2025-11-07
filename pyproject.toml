@@ -31,14 +31,14 @@ dependencies = [
     "tensorboard==2.20.0",
     "tensorboardx==2.6.4",
     "tokenizers>=0.21.1",
-    "torch>=2.6.0",
+    "torch",
     "transformers>=4.51.3",
     "uvicorn>=0.34.2",
     "wandb>=0.20.1",
 ]
 
 [dependency-groups]
-training = ["vllm==0.8.4", "flash-attn; sys_platform == 'linux'"]
+training = ["vllm==0.10.2", "flash-attn; sys_platform == 'linux'"]
 games = ["textworld", "pip>=25.1.1"]
 
 
