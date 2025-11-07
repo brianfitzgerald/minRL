@@ -132,7 +132,7 @@ class TrainerConfig(BaseModel):
     eval_batch_size: int = 64
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
-    learning_rate: float = 5e-5
+    learning_rate: float = 1e-5
     optimizer: OptimizerChoice = "adamw"
     use_low_precision_optimizer_if_available: bool = True
     algorithm: AlgorithmChoice = "grpo"
