@@ -120,14 +120,10 @@ def rollout(
             # First step optimization: batch initial prompts and use vLLM's n parameter
             batch_conversations = [conversations[i] for i in range(num_prompts)]
             n_responses = group_size
-            logger.info(f"BF DEBUG first turn {n_responses} {len(batch_conversations)}")
         else:
             # Subsequent steps: batch all existing conversations
             batch_conversations = flat_conversations
             n_responses = 1
-            logger.info(
-                f"BF DEBUG second turn {n_responses} {len(batch_conversations)}"
-            )
 
         # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(

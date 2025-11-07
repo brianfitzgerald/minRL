@@ -153,7 +153,7 @@ class TrainerConfig(BaseModel):
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 256
 
-    use_gradient_checkpointing: bool = False
+    use_gradient_checkpointing: bool = True
     vllm_gpu_memory_utilization: float = 0.4
 
     use_torch_compile: bool = False

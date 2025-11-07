@@ -157,6 +157,8 @@ class Trainer:
             # Enable sleep mode for memory management
             enable_sleep_mode=self.config.enable_sleep_mode
             and self.device_type == "cuda",
+            max_model_len=self.config.max_seq_length,
+            logprobs_mode="processed_logprobs",
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
