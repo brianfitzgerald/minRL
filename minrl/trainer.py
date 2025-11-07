@@ -1,3 +1,4 @@
+import gc
 import time
 from pathlib import Path
 from typing import Any, cast, Literal
@@ -13,7 +14,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
-from minrl.algorithms import compute_scaled_temperature
+from minrl.algorithms import compute_metrics, compute_scaled_temperature
 from minrl.lora import apply_lora_to_model
 from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
@@ -22,7 +23,6 @@ from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
 from minrl.utils import (
     clear_memory,
-    compute_metrics,
     USING_MPS,
     log_memory_usage,
 )
@@ -244,6 +244,7 @@ class Trainer:
             # Clean up conversations to free memory
             del conversations
             clear_memory()
+            gc.collect()  # Force garbage collection
 
             logger.info(f"Updating policy for step {step}")
 
@@ -300,6 +301,7 @@ class Trainer:
             # Clear memory after each step more aggressively
             del episodes, batch
             clear_memory()
+            gc.collect()  # Force garbage collection
             # Log memory usage after clearing
             log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step

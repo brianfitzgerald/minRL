@@ -78,7 +78,7 @@ class GSM8KDataset(MinRLDataset):
             self.dataset = self.dataset.select(range(128))  # type: ignore
 
     def __getitem__(self, i: int) -> Sample:
-        return next(self.iter)
+        return next(self.iter)  # pyright: ignore[reportReturnType]
 
     def __len__(self) -> int:
         # mock value to satisfy dataloader

@@ -2,15 +2,14 @@ import gc
 import os
 import re
 from pydoc import html
-from typing import Dict, List, TypedDict
-
+from typing import TypedDict
 
 import numpy as np
 import psutil
 import torch
 from loguru import logger
 
-from minrl.constants import ConversationMessage, Episode, Conversation, Role
+from minrl.constants import Conversation, ConversationMessage, Episode, Role
 from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
@@ -42,57 +41,6 @@ def clean_observation(obs: str) -> str:
         processed_lines.append(cleaned_line)
 
     return "\n".join(processed_lines).strip()
-
-
-def compute_metrics(
-    episodes: List[Episode],
-    results: Dict[str, float],
-    metrics_wrapper: MetricsWrapper,
-    step: int,
-    optimizer: torch.optim.Optimizer,
-    temperature: float | None = None,
-) -> Dict[str, float]:
-    reward = [episode.reward for episode in episodes]
-    # Assume all episodes are finished since rollout completes them
-    num_finished_episodes = len(episodes)
-    mean_reward = float(np.mean(reward))
-    std_reward = float(np.std(reward))
-    grad_norm = results["grad_norm"]
-    entropy = results["entropy"]
-    lr = optimizer.param_groups[0]["lr"]
-    loss = results["loss"]
-    metrics_wrapper.add_scalar("train/loss", loss, step)
-    metrics_wrapper.add_scalar("train/mean_reward", mean_reward, step)
-    metrics_wrapper.add_scalar("train/std_reward", std_reward, step)
-    metrics_wrapper.add_scalar("train/grad_norm", grad_norm, step)
-    metrics_wrapper.add_scalar(
-        "train/num_finished_episodes", num_finished_episodes, step
-    )
-    metrics_wrapper.add_scalar("train/learning_rate", lr, step)
-    metrics_wrapper.add_scalar("train/entropy", entropy, step)
-    if temperature is not None:
-        metrics_wrapper.add_scalar("train/temperature", temperature, step)
-    for i, episode in enumerate(episodes):
-        # Convert conversation to text format for logging
-        conversation_text = "\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in episode.conversation]
-        )
-        text = html.escape(conversation_text)
-        metrics_wrapper.add_text(f"sample_{i}", text, step)
-
-    log_dict = {
-        "mean_reward": mean_reward,
-        "std_reward": std_reward,
-        "grad_norm": grad_norm,
-        "entropy": entropy,
-        "learning_rate": lr,
-        "loss": loss,
-        "num_finished_episodes": float(num_finished_episodes),
-    }
-    if temperature is not None:
-        log_dict["temperature"] = temperature
-    logger.info(f"Metrics: {log_dict}")
-    return log_dict
 
 
 NEWLINE_TOKEN_ID = 198  # Token ID for newline character
