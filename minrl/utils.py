@@ -2,15 +2,14 @@ import gc
 import os
 import re
 from pydoc import html
-from typing import Dict, List, TypedDict
-
+from typing import TypedDict
 
 import numpy as np
 import psutil
 import torch
 from loguru import logger
 
-from minrl.constants import ConversationMessage, Episode, Conversation, Role
+from minrl.constants import Conversation, ConversationMessage, Episode, Role
 from minrl.metrics import MetricsWrapper
 
 USING_MPS = torch.backends.mps.is_available() and torch.backends.mps.is_built()
@@ -42,57 +41,6 @@ def clean_observation(obs: str) -> str:
         processed_lines.append(cleaned_line)
 
     return "\n".join(processed_lines).strip()
-
-
-def compute_metrics(
-    episodes: List[Episode],
-    results: Dict[str, float],
-    metrics_wrapper: MetricsWrapper,
-    step: int,
-    optimizer: torch.optim.Optimizer,
-    temperature: float | None = None,
-) -> Dict[str, float]:
-    reward = [episode.reward for episode in episodes]
-    # Assume all episodes are finished since rollout completes them
-    num_finished_episodes = len(episodes)
-    mean_reward = float(np.mean(reward))
-    std_reward = float(np.std(reward))
-    grad_norm = results["grad_norm"]
-    entropy = results["entropy"]
-    lr = optimizer.param_groups[0]["lr"]
-    loss = results["loss"]
-    metrics_wrapper.add_scalar("train/loss", loss, step)
-    metrics_wrapper.add_scalar("train/mean_reward", mean_reward, step)
-    metrics_wrapper.add_scalar("train/std_reward", std_reward, step)
-    metrics_wrapper.add_scalar("train/grad_norm", grad_norm, step)
-    metrics_wrapper.add_scalar(
-        "train/num_finished_episodes", num_finished_episodes, step
-    )
-    metrics_wrapper.add_scalar("train/learning_rate", lr, step)
-    metrics_wrapper.add_scalar("train/entropy", entropy, step)
-    if temperature is not None:
-        metrics_wrapper.add_scalar("train/temperature", temperature, step)
-    for i, episode in enumerate(episodes):
-        # Convert conversation to text format for logging
-        conversation_text = "\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in episode.conversation]
-        )
-        text = html.escape(conversation_text)
-        metrics_wrapper.add_text(f"sample_{i}", text, step)
-
-    log_dict = {
-        "mean_reward": mean_reward,
-        "std_reward": std_reward,
-        "grad_norm": grad_norm,
-        "entropy": entropy,
-        "learning_rate": lr,
-        "loss": loss,
-        "num_finished_episodes": float(num_finished_episodes),
-    }
-    if temperature is not None:
-        log_dict["temperature"] = temperature
-    logger.info(f"Metrics: {log_dict}")
-    return log_dict
 
 
 NEWLINE_TOKEN_ID = 198  # Token ID for newline character
@@ -195,31 +143,50 @@ def log_memory_usage(
         gpu_memory_reserved,
         gpu_memory_total,
         gpu_utilization,
-    ) = 0, 0, 0, 0, 0
+    ) = 0.0, 0.0, 0.0, 0.0, 0.0
 
     if torch.cuda.is_available():
-        # Get GPU memory usage and utilization
+        # Try NVML first
         try:
-            handle = nvmlDeviceGetHandleByIndex(0)
-            info = nvmlDeviceGetMemoryInfo(handle)
-            gpu_memory_allocated = info.used
-            gpu_memory_reserved = info.reserved
-            gpu_memory_total = info.total
+            if not USING_MPS:
+                handle = nvmlDeviceGetHandleByIndex(0)
+                info = nvmlDeviceGetMemoryInfo(handle)
+                gpu_memory_allocated = info.used
+                gpu_memory_reserved = info.reserved
+                gpu_memory_total = info.total
 
-            # Get GPU utilization
-            utilization = nvmlDeviceGetUtilizationRates(handle)
-            gpu_utilization = float(utilization.gpu)
+                # Get GPU utilization
+                utilization = nvmlDeviceGetUtilizationRates(handle)
+                gpu_utilization = float(utilization.gpu)
+
+                # Convert to MB
+                gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
         except Exception as e:
-            logger.warning(f"Error getting GPU memory usage: {e}")
-            gpu_memory_allocated = torch.cuda.memory_allocated()
-            gpu_memory_reserved = torch.cuda.memory_reserved()
-            gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
+            logger.debug(f"NVML failed, trying PyTorch CUDA: {e}")
+            # Fallback to PyTorch CUDA
+            try:
+                if torch.cuda.is_initialized():
+                    gpu_memory_allocated = torch.cuda.memory_allocated()
+                    gpu_memory_reserved = torch.cuda.memory_reserved()
+                    gpu_memory_total = torch.cuda.get_device_properties(0).total_memory
 
-        # Convert to MB
-        gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
-        gpu_memory_percentage = (gpu_memory_allocated / gpu_memory_total) * 100
-        gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
-        gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                    # Convert to MB
+                    gpu_memory_allocated = gpu_memory_allocated / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                    gpu_memory_reserved = gpu_memory_reserved / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                    gpu_memory_total = gpu_memory_total / 1024 / 1024  # pyright: ignore[reportOperatorIssue]
+                    gpu_memory_percentage = (
+                        gpu_memory_allocated / gpu_memory_total
+                    ) * 100
+                    # Note: PyTorch doesn't provide GPU utilization, so it remains 0
+                else:
+                    logger.debug(
+                        "CUDA is available but not initialized, skipping GPU stats"
+                    )
+            except Exception as e2:
+                logger.debug(f"PyTorch CUDA also failed: {e2}, skipping GPU stats")
 
     if label:
         logger.info(
@@ -227,12 +194,12 @@ def log_memory_usage(
         )
 
     out_dict: GPUStats = {
-        "cpu_memory_mb": cpu_memory_mb,
-        "gpu_memory_allocated": gpu_memory_allocated,
-        "gpu_memory_reserved": gpu_memory_reserved,
-        "gpu_memory_total": gpu_memory_total,
-        "gpu_memory_percentage": gpu_memory_percentage,
-        "gpu_utilization": gpu_utilization,
+        "cpu_memory_mb": float(cpu_memory_mb),
+        "gpu_memory_allocated": float(gpu_memory_allocated),
+        "gpu_memory_reserved": float(gpu_memory_reserved),
+        "gpu_memory_total": float(gpu_memory_total),
+        "gpu_memory_percentage": float(gpu_memory_percentage),
+        "gpu_utilization": float(gpu_utilization),
     }
 
     if metrics_wrapper is not None:

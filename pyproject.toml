@@ -9,7 +9,7 @@ dependencies = [
     "bitsandbytes>=0.45.5; sys_platform == 'linux'",
     "datasets>=3.5.0",
     "fire>=0.7.0",
-    "huggingface-hub[hf-transfer]>=0.32.3",
+    "huggingface-hub[cli,hf-transfer]>=0.32.3",
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
     "jinja2>=3.1.6",
@@ -31,14 +31,14 @@ dependencies = [
     "tensorboard==2.20.0",
     "tensorboardx==2.6.4",
     "tokenizers>=0.21.1",
-    "torch>=2.6.0",
+    "torch",
     "transformers>=4.51.3",
     "uvicorn>=0.34.2",
     "wandb>=0.20.1",
 ]
 
 [dependency-groups]
-training = ["vllm==0.8.4", "flash-attn; sys_platform == 'linux'"]
+training = ["vllm==0.10.2", "flash-attn; sys_platform == 'linux'"]
 games = ["textworld", "pip>=25.1.1"]
 
 
@@ -47,14 +47,14 @@ default-groups = ["training", "games"]
 no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
-torchvision = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
-torchaudio = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
+torch = [{ index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }]
+torchvision = { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }
+torchaudio = { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" }
 
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.pytest.ini_options]

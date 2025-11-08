@@ -1,4 +1,5 @@
 import fire
+
 from minrl.trainer import Trainer
 
 

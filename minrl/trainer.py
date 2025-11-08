@@ -1,6 +1,7 @@
+import gc
 import time
 from pathlib import Path
-from typing import Any, cast, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -13,22 +14,26 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
-from minrl.algorithms import compute_scaled_temperature
-from minrl.lora import apply_lora_to_model
-from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
+
+from minrl.algorithms import (
+    compute_metrics,
+    rollout,
+    sync_weights_to_vllm,
+    update_policy,
+)
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
+from minrl.lora import apply_lora_to_model
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
 from minrl.utils import (
-    clear_memory,
-    compute_metrics,
     USING_MPS,
+    clear_memory,
     log_memory_usage,
 )
 
 if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports]
+    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports, reportPrivateImportUsage]
 else:
     Adam8bit = torch.optim.AdamW
 
@@ -155,7 +160,10 @@ class Trainer:
             enable_prefix_caching=self.config.enable_prefix_caching
             and self.device_type == "cuda",
             # Enable sleep mode for memory management
-            enable_sleep_mode=self.config.enable_sleep_mode,
+            enable_sleep_mode=self.config.enable_sleep_mode
+            and self.device_type == "cuda",
+            max_model_len=self.config.max_seq_length,
+            logprobs_mode="processed_logprobs",
         )
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
@@ -238,6 +246,11 @@ class Trainer:
             # Log GPU utilization after rollout
             log_memory_usage("rollout", metrics_wrapper=self.metrics_wrapper, step=step)
 
+            # Clean up conversations to free memory
+            del conversations
+            clear_memory()
+            gc.collect()  # Force garbage collection
+
             logger.info(f"Updating policy for step {step}")
 
             results = update_policy(
@@ -249,8 +262,6 @@ class Trainer:
                 pad_token_id=int(cast(Any, self.tokenizer.pad_token_id)),
                 max_grad_norm=self.config.max_grad_norm,
                 device=self.device,
-                algorithm=self.config.algorithm,
-                entropy_coef=self.config.entropy_coef,
                 metrics_wrapper=self.metrics_wrapper,
                 step=step,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
@@ -278,21 +289,18 @@ class Trainer:
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
 
-            # Get temperature used for logging
-            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
-
             compute_metrics(
                 episodes,
                 results,  # pyright: ignore[reportArgumentType]
                 self.metrics_wrapper,
                 step,
                 self.optimizer,
-                temperature_used,
             )
 
             # Clear memory after each step more aggressively
-            del episodes
+            del episodes, batch
             clear_memory()
+            gc.collect()  # Force garbage collection
             # Log memory usage after clearing
             log_memory_usage(
                 "end_of_step", metrics_wrapper=self.metrics_wrapper, step=step
@@ -319,7 +327,7 @@ class Trainer:
         self.metrics_wrapper.close()
 
     def _wake_sleep_vllm(self, action: Literal["wake", "sleep"]) -> None:
-        if self.config.enable_sleep_mode:
+        if self.config.enable_sleep_mode and self.device_type == "cuda":
             if action == "wake":
                 self.vllm_model.wake_up()
                 if self.config.enable_prefix_caching:
@@ -359,7 +367,7 @@ class Trainer:
             batch_episodes, rollout_duration = rollout(
                 self.config,
                 self.tokenizer,
-                1,
+                self.config.group_size,
                 self.eval_dataset.max_steps,
                 conversations,
                 samples=batch,
@@ -373,9 +381,22 @@ class Trainer:
 
             episodes.extend(batch_episodes)
 
+            # Clean up batch episodes after extending
+            del batch_episodes
+            clear_memory()
+
         reward = [episode.reward for episode in episodes]
-        mean_reward = sum(reward) / len(reward)
+        if len(reward) == 0:
+            logger.warning("No episodes found in evaluation")
+            mean_reward = 0.0
+        else:
+            mean_reward = sum(reward) / len(reward)
+        self.metrics_wrapper.add_scalar("eval/num_episodes", len(episodes), step)
         self.metrics_wrapper.add_scalar("eval/mean_reward", mean_reward, step)
+
+        # Clean up episodes after evaluation
+        del episodes, reward, conversations
+        clear_memory()
 
     @property
     def checkpoint_dir(self) -> Path:

@@ -4,9 +4,10 @@ Script to iterate through all Z5 games and print available information.
 """
 
 import os
+from pathlib import Path
+
 import textworld
 import textworld.gym
-from pathlib import Path
 from dotenv import load_dotenv
 
 

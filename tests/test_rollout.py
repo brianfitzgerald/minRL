@@ -1,7 +1,7 @@
-from minrl.algorithms import rollout
-from minrl.constants import Conversation
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.constants import TrainerConfig
+
+from minrl.algorithms import rollout
+from minrl.constants import Conversation, TrainerConfig
 from tests.conftest import MOCK_VLLM_RESPONSE, MockVLLMModel
 
 

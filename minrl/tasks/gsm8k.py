@@ -1,16 +1,15 @@
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.tasks.dataset import MinRLDataset, Split
 import re
-from minrl.constants import Conversation, HostType, Sample
-from datasets import load_dataset
 
+from datasets import load_dataset
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
+from minrl.constants import Conversation, HostType, Sample
+from minrl.tasks.dataset import MinRLDataset, Split
 
 _SOLUTION_CLIP_CHARS = 300
 
-TEMPLATE = """
-You are a helpful assistant. Reason about an answer to the following question and provide the final answer after ####.
-Question: {question}
-"""
+SYSTEM_PROMPT = "You are a helpful assistant. Reason about an answer to the following question and provide the final answer after ####"
+TEMPLATE = "Question: {question}"
 
 
 # https://github.com/volcengine/verl/blob/main/verl/utils/reward_score/gsm8k.py#L20
@@ -75,9 +74,12 @@ class GSM8KDataset(MinRLDataset):
         split_name: str = "test" if self.split == "eval" else self.split
         self.dataset = load_dataset("openai/gsm8k", "main", split=split_name)
         self.iter = iter(self.dataset)
+        if split == "eval":
+            # Only select first 128 samples for evaluation
+            self.dataset = self.dataset.select(range(128))  # type: ignore
 
     def __getitem__(self, i: int) -> Sample:
-        return next(self.iter)
+        return next(self.iter)  # pyright: ignore[reportReturnType]
 
     def __len__(self) -> int:
         # mock value to satisfy dataloader
@@ -86,6 +88,10 @@ class GSM8KDataset(MinRLDataset):
 
     def initial_conversation(self, sample: Sample, sample_index: int) -> Conversation:
         return [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            },
             {
                 "role": "user",
                 "content": TEMPLATE.format(question=sample["question"]),

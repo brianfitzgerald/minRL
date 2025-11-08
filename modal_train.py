@@ -1,12 +1,13 @@
-from modal import Image, App
 import modal
-from minrl.trainer import Trainer
+from modal import App, Image
+
 from minrl.modal_utils import (
-    MODELS_VOLUME_PATH,
+    DATASET_VOLUME,
     DATASET_VOLUME_PATH,
     MODEL_WEIGHTS_VOLUME,
-    DATASET_VOLUME,
+    MODELS_VOLUME_PATH,
 )
+from minrl.trainer import Trainer
 
 APP_NAME = "minRL"
 app = App(APP_NAME)
@@ -23,7 +24,7 @@ MODAL_IMAGE = (
     .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
     .add_local_file("uv.lock", "/uv.lock", copy=True)
     .env({"UV_PROJECT_ENVIRONMENT": "/usr/local"})
-    .apt_install("git")
+    .apt_install("git", "build-essential", "ninja-build")
     .env(
         {
             "CUDA_HOME": "/usr/local/cuda",
@@ -31,6 +32,8 @@ MODAL_IMAGE = (
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
+    # Prefer GCC toolchain for PyTorch C++/CUDA extensions
+    .env({"CC": "gcc", "CXX": "g++"})
     .run_commands(
         [
             "uv sync --no-group training --no-group games",

@@ -1,5 +1,15 @@
+import os
+import random
+import re
 from pathlib import Path
+from typing import Any, Literal, TypedDict
+
+import textworld
+import textworld.gym
 from loguru import logger
+from textworld.gym.envs import TextworldGymEnv
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
 from minrl.constants import (
     Conversation,
     ConversationMessage,
@@ -8,16 +18,6 @@ from minrl.constants import (
     StepMetadata,
 )
 from minrl.tasks.dataset import MinRLDataset, Split
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-import textworld
-import textworld.gym
-from typing import Any, TypedDict
-from textworld.gym.envs import TextworldGymEnv
-import re
-import os
-import random
-from typing import Literal
-
 from minrl.utils import clean_observation
 
 SYSTEM_PROMPT = """

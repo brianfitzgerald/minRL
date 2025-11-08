@@ -11,7 +11,6 @@ from minrl.constants import (
     Sample,
 )
 
-
 Split = Literal["train", "test", "eval"]
 
 EpisodeStatus = Literal["finished", "terminated"]

@@ -1,7 +1,8 @@
-from pathlib import Path
 import re
-import pandas as pd
+from pathlib import Path
 from typing import Any, List, TypedDict
+
+import pandas as pd
 from torch.utils.data import Dataset
 
 SYSTEM_MESSAGE = (

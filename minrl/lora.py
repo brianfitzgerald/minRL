@@ -1,11 +1,13 @@
 import math
 import re
 from typing import List
-from pydantic import BaseModel
+
 import torch
 import torch.nn as nn
-from torch.nn.parameter import Parameter
 from loguru import logger
+from pydantic import BaseModel
+from torch import Tensor as T
+from torch.nn.parameter import Parameter
 
 """
 Based on src/prime_rl/trainer/lora.py
@@ -98,7 +100,7 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: T) -> torch.Tensor:
         base_output = self.base_layer(x)
         lora_x = self.lora_dropout(x)
         lora_output = (lora_x @ self.lora_A.T) @ self.lora_B.T * self.scaling

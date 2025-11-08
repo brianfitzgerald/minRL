@@ -1,10 +1,10 @@
 import os
-from tqdm import tqdm
-
-from loguru import logger
-import modal
-from modal.volume import FileEntryType
 from pathlib import Path
+
+import modal
+from loguru import logger
+from modal.volume import FileEntryType
+from tqdm import tqdm
 
 MODAL_MODELS_VOLUME_NAME = "minrl-models"
 MODAL_DATASET_VOLUME_NAME = "minrl-datasets"

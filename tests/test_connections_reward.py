@@ -1,6 +1,5 @@
 from minrl.tasks.connections import parse_groups, score_connections_hard
 
-
 FIRST_SAMPLE = {
     "groups": [
         {"reason": "defeat badly", "words": ["crush", "rout", "shellac", "trash"]},

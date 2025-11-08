@@ -1,8 +1,10 @@
 from collections import defaultdict, deque
-import torch
 from typing import Any
-from minrl.tasks.dataset import MinRLDataset
+
+import torch
+
 from minrl.algorithms import get_token_ids_and_assistant_mask
+from minrl.tasks.dataset import MinRLDataset
 
 
 class _SegmentTree:

@@ -1,8 +1,8 @@
 from minrl.constants import TaskChoice
 from minrl.tasks.connections import ConnectionsDataset
 from minrl.tasks.dataset import MinRLDataset
-from minrl.tasks.hanoi import HanoiDataset
 from minrl.tasks.gsm8k import GSM8KDataset
+from minrl.tasks.hanoi import HanoiDataset
 
 try:
     from minrl.tasks.zork import ZorkDataset, zork_reward_func

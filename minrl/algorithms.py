@@ -1,22 +1,21 @@
-import dataclasses
+import html
 import time
-from contextlib import nullcontext
 from collections import defaultdict
-from typing import Dict, List, TypedDict
-import torch.nn.functional as F
+from typing import List, TypedDict
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from loguru import logger
+from torch import Tensor as T
 from tqdm import tqdm
-from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM, TokensPrompt
 from vllm.sampling_params import (
     SamplingParams,
 )
 from vllm.worker.model_runner_base import ModelRunnerBase
-from minrl.utils import log_conversation
 
 from minrl.constants import (
     AlgorithmChoice,
@@ -26,41 +25,13 @@ from minrl.constants import (
     Sample,
     TrainerConfig,
 )
+from minrl.metrics import MetricsWrapper
 from minrl.utils import (
     clear_memory,
     find_assistant_sections,
+    log_conversation,
     log_memory_usage,
 )
-from minrl.metrics import MetricsWrapper
-
-debug_tokenizer = AutoTokenizer.from_pretrained(
-    TrainerConfig().model_id, use_fast=False
-)
-
-
-def compute_scaled_temperature(
-    config: TrainerConfig,
-    prev_reward_std: float | None = None,
-    reference_std: float = 1.0,
-) -> float:
-    """
-    Compute temperature scaled based on previous batch reward standard deviation.
-    As reward std decreases, temperature increases.
-
-    """
-    if not config.temperature_scaling or prev_reward_std is None:
-        return config.temperature
-
-    if prev_reward_std <= 0:
-        return config.temperature_max
-
-    scale_factor = reference_std / prev_reward_std
-
-    scaled_temp = config.temperature * scale_factor
-
-    scaled_temp = max(config.temperature_min, min(config.temperature_max, scaled_temp))
-
-    return scaled_temp
 
 
 @torch.no_grad()
@@ -82,27 +53,18 @@ def rollout(
     """
     rollout_start_time = time.perf_counter()
 
-    # Compute scaled temperature based on previous reward std
-    temperature = compute_scaled_temperature(config, prev_reward_std)
-
     # Get stop token IDs to stop generation on
     stop_token_ids: list[int] | None = None
     eos_token_id = tokenizer.eos_token_id
     if isinstance(eos_token_id, int):
         stop_token_ids = [eos_token_id]
-    if eos_token_id is not None:
-        logger.info(
-            f"Stop token IDs: {eos_token_id} decoded: {tokenizer.decode(eos_token_id)}"
-        )
-    else:
-        logger.info("No EOS token ID found")
 
     num_prompts = len(conversations)
     total_conversations = num_prompts * group_size
 
     logger.info(
-        f"Generating responses for {num_prompts} prompts × {group_size} group_size = {total_conversations} total conversations, "
-        f"max_tokens={config.max_new_tokens}, temp={temperature:.3f}"
+        f"Generating responses for {num_prompts} prompts x {group_size} group_size = {total_conversations} total conversations, "  # noqa: E501
+        f"max_tokens={config.max_new_tokens}, temp={config.temperature:.3f}"
     )
 
     # Flatten structure: instead of nested lists, maintain flat list of all conversations
@@ -126,14 +88,10 @@ def rollout(
             # First step optimization: batch initial prompts and use vLLM's n parameter
             batch_conversations = [conversations[i] for i in range(num_prompts)]
             n_responses = group_size
-            logger.info(f"BF DEBUG first turn {n_responses} {len(batch_conversations)}")
         else:
             # Subsequent steps: batch all existing conversations
             batch_conversations = flat_conversations
             n_responses = 1
-            logger.info(
-                f"BF DEBUG second turn {n_responses} {len(batch_conversations)}"
-            )
 
         # Tokenize all conversations in one batch
         templated_conversations = tokenizer.apply_chat_template(
@@ -158,7 +116,7 @@ def rollout(
             vllm_input,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
-                temperature=temperature,
+                temperature=config.temperature,
                 n=n_responses,
                 stop_token_ids=stop_token_ids,
             ),
@@ -203,15 +161,15 @@ def rollout(
             conversation=conversation,
         )
         episodes.append(episode)
-        # logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
-        # log_conversation(conversation, only_roles=["assistant"])
+        logger.info(f"Episode {group_idx}:{answer_idx}: reward: {reward:.4f}")
+        log_conversation(conversation, only_roles=["assistant"])
 
     rollout_duration = time.perf_counter() - rollout_start_time
 
     return episodes, rollout_duration
 
 
-def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
+def compute_entropy(logits: T) -> T:
     """Compute entropy efficiently in-place to minimize memory allocation.
 
     Using the identity: entropy = -sum(p * log(p))
@@ -229,7 +187,6 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
 def get_token_ids_and_assistant_mask(
     conversation: Conversation,
     tokenizer: PreTrainedTokenizerBase,
-    episode: Episode | None = None,
 ) -> tuple[list[int], list[bool]]:
     """Get token IDs and assistant mask, using cache if available."""
     # Check cache first
@@ -295,63 +252,17 @@ def get_token_ids_and_assistant_mask(
     return all_token_ids, assistant_mask
 
 
-def normalize_rewards_per_group(episodes: List[Episode]) -> List[Episode]:
-    """
-    Normalize rewards per group.
-    This is done by subtracting the mean and dividing by the standard deviation
-    of the rewards in each group. If std is 0, returns the original rewards.
-    """
-    # Group episodes by prefix and calculate stats
-    groups: Dict[int, List[Episode]] = defaultdict(list)
-    for episode in episodes:
-        groups[episode.group_index].append(episode)
-
-    # Normalize rewards within each group
-    normalized_episodes: List[Episode] = []
-    for group in groups.values():
-        rewards = torch.tensor([e.reward for e in group])
-        mean = rewards.mean()
-        std = rewards.std(unbiased=False)  # Use biased std for small groups
-
-        # Handle edge cases
-        if torch.isnan(std) or std == 0:
-            # If all rewards are identical, keep them as-is (will be zero after mean subtraction)
-            # This happens when all responses get same reward
-            # Small epsilon prevents completely killing gradient signal
-            normalized_rewards = torch.zeros_like(rewards)
-        else:
-            normalized_rewards = (rewards - mean) / (
-                std + 1e-8
-            )  # Add epsilon for numerical stability
-
-        for episode, norm_reward in zip(group, normalized_rewards):
-            normalized_episodes.append(
-                dataclasses.replace(episode, reward=float(norm_reward))
-            )
-
-    return normalized_episodes
-
-
 def compute_algorithm_loss(
-    logprobs: torch.Tensor,
-    target_masks: torch.Tensor,
-    batch_advantages: torch.Tensor,
+    logprobs: T,
+    target_masks: T,
+    batch_advantages: T,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
-    entropy: torch.Tensor | None = None,
+    entropy: T | None = None,
     entropy_coef: float = 0.0,
-) -> torch.Tensor:
+) -> T:
     """
-    Math: Policy gradient theorem says gradient should be: grad = E[grad log π(a|s) * A]
-    where A is advantage/reward. Since we minimize loss, we set:
-    loss = -log π(a|s) * A
-
-    Here logprobs = -cross_entropy = log π(a|s) (negative values)
-    So: advantage_t = logprobs * reward = (negative) * (pos/neg)
-        loss = -advantage_t.sum()
-    This gives correct gradients via SGD.
-
-    Entropy regularization encourages exploration by penalizing low entropy (peaked distributions).
+    Compute the loss for the given algorithm and other required inputs.
     """
     # multiply the log probs by the advantages
     if algorithm == "grpo":
@@ -402,7 +313,8 @@ def sync_weights_to_vllm(
 class UpdatePolicyResults(TypedDict):
     loss: float
     grad_norm: float
-    entropy: float
+    mean_policy_ratio: float
+    mean_kl: float
     duration: float
 
 
@@ -412,173 +324,105 @@ class EpisodeWithTokens(TypedDict):
     assistant_mask: list[bool]
 
 
-def chunked_cross_entropy(
-    logits: torch.Tensor,
-    targets: torch.Tensor,
-    ignore_index: int = -100,
-    reduction: str = "none",
-    chunk_size: int = 8192,
-) -> torch.Tensor:
-    batch_size = logits.shape[0]
-    vocab_size = logits.size(-1)
-
-    flat_logits = logits.reshape(-1, vocab_size)
-    flat_targets = targets.reshape(-1)
-
-    num_tokens = flat_logits.size(0)
-    logprobs_list = []
-
-    for start_idx in range(0, num_tokens, chunk_size):
-        end_idx = min(start_idx + chunk_size, num_tokens)
-        chunk_logprobs = F.cross_entropy(
-            flat_logits[start_idx:end_idx],
-            flat_targets[start_idx:end_idx],
-            ignore_index=ignore_index,
-            reduction="none",
-        )
-        logprobs_list.append(chunk_logprobs)
-
-    result = torch.cat(logprobs_list, dim=0)
-
-    del flat_logits, flat_targets, logprobs_list
-
-    if reduction == "none":
-        return result.reshape(batch_size, -1)
-    elif reduction == "mean":
-        return result.mean()
-    elif reduction == "sum":
-        return result.sum()
-    else:
-        raise ValueError(f"Invalid reduction mode: {reduction}")
+class PreprocessedBatch(TypedDict):
+    # shape: (batch_size, seq_len) - int
+    batch_token_ids_t: T
+    # shape: (batch_size, seq_len) - binary
+    batch_assistant_masks_t: T
+    # shape: (batch_size, seq_len) - int
+    target_token_ids: T
+    # shape: (batch_size, seq_len) - binary
+    target_masks: T
+    # shape: (batch_size,) - float
+    advantages: T
 
 
-def process_batch(
-    model: nn.Module,
+def preprocess_batch(
     episodes: List[Episode],
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
-    device: torch.device,
-    entropy_coef: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+) -> PreprocessedBatch:
     """
-    Preprocess a single batch of episodes to compute logprobs, masks, rewards, and entropy,
-    which are all needed for computing the loss.
+    Preprocess a single batch of episodes to get masks and tokens for
+    forward pass and loss computation.
     """
     # Extract token IDs and assistant masks for each episode
     token_ids_list: list[list[int]] = []
     assistant_mask_list: list[list[bool]] = []
     for episode in episodes:
         token_ids, assistant_mask = get_token_ids_and_assistant_mask(
-            episode.conversation, tokenizer, episode
+            episode.conversation, tokenizer
         )
         token_ids_list.append(token_ids)
         assistant_mask_list.append(assistant_mask)
-    # Pad token IDs to the same length using PyTorch's pad_sequence
+
+    # Pad token IDs on CPU and optionally pin memory for faster H2D copies
     batch_token_ids_t = [
-        torch.tensor(token_ids, dtype=torch.long, device=device)
-        for token_ids in token_ids_list
+        torch.tensor(token_ids, dtype=torch.long) for token_ids in token_ids_list
     ]
     batch_token_ids_t = torch.nn.utils.rnn.pad_sequence(
         batch_token_ids_t, batch_first=True, padding_value=pad_token_id
     )
 
-    # Pad assistant masks to the same length using PyTorch's pad_sequence
+    # Pad assistant masks on CPU and optionally pin memory
     batch_assistant_masks_t = [
-        torch.tensor(assistant_mask, dtype=torch.bool, device=device)
+        torch.tensor(assistant_mask, dtype=torch.bool)
         for assistant_mask in assistant_mask_list
     ]
     batch_assistant_masks_t = torch.nn.utils.rnn.pad_sequence(
         batch_assistant_masks_t, batch_first=True, padding_value=False
     )
 
-    # Shift tokens and masks for next-token prediction
     target_token_ids = batch_token_ids_t[:, 1:]
     target_assistant_masks = batch_assistant_masks_t[:, 1:]
+    # Create mask with padding tokens
     pad_masks = target_token_ids != pad_token_id
 
     # Combine assistant mask with padding mask
     target_masks = target_assistant_masks & pad_masks
 
-    # Number of target positions (assistant tokens that are not padding)
-    n_target_tokens = int(target_masks.sum().item())
-    if n_target_tokens == 0:
-        raise ValueError("No target tokens (assistant mask empty) in batch")
+    # get n unique group indices
+    group_indices = list(set([e.group_index for e in episodes]))
+    n_prompts_per_step = len(group_indices)
+    n_groups = len(episodes) // n_prompts_per_step
 
-    # Use mixed precision for forward pass to reduce memory usage
-    # Use autocast even without scaler for BFloat16 models to save memory
-    fwd_ctx = (
-        torch.autocast(device_type="cuda", enabled=True, dtype=torch.bfloat16)
-        if device.type == "cuda"
-        else nullcontext()
-    )
-    with fwd_ctx:
-        logits: torch.Tensor = model(batch_token_ids_t).logits
+    raw_reward_tensor = torch.tensor(
+        [e.reward for e in episodes], dtype=torch.float
+    ).reshape((n_prompts_per_step, n_groups))
+    means = raw_reward_tensor.mean(dim=-1).unsqueeze(1)
+    advantages = (raw_reward_tensor - means).reshape((n_prompts_per_step * n_groups,))
 
-    # Get the cross entropy loss of the label and generated tokens
-    # Slice logits to match target tokens (exclude first position)
-    # Keep in bfloat16/float16 to save memory - cross_entropy handles mixed precision
-    next_token_logits = logits[:, :-1]
+    return {
+        "batch_token_ids_t": batch_token_ids_t,
+        "batch_assistant_masks_t": batch_assistant_masks_t,
+        "target_token_ids": target_token_ids,
+        "target_masks": target_masks,
+        "advantages": advantages,
+    }
 
-    # Clear logits from memory immediately after use
+
+def get_response_log_probs(
+    model: torch.nn.Module,
+    batch: PreprocessedBatch,
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    Compute log probabilities for given labels efficiently.
+    Uses F.log_softmax which is more memory efficient than manual computation.
+    """
+    input_ids = batch["batch_token_ids_t"].to(device)
+    labels = batch["target_token_ids"].to(device)
+    logits = model(input_ids).logits
+    # Use F.log_softmax which is more memory efficient than manual computation
+    log_probs = F.log_softmax(logits, dim=-1)
+    # Free logits immediately
     del logits
-    clear_memory()
-
-    # Compute cross_entropy in chunks to avoid OOM
-    # Negate the result to get log probabilities (cross_entropy returns positive loss)
-    logprobs = -chunked_cross_entropy(
-        next_token_logits,
-        target_token_ids,
-        ignore_index=pad_token_id,
-        reduction="none",
-        chunk_size=4096,
-    )
-
-    # Clear memory after cross-entropy computation
-    clear_memory()
-
-    # Only compute entropy if it's being used (entropy_coef > 0)
-    # This saves memory and computation when entropy regularization is disabled
-    if entropy_coef > 0:
-        # Calculate entropy only for target positions - memory efficient version
-        # Compute entropy in chunks to avoid creating large intermediate tensors
-        bs, seq_len, vocab_size = next_token_logits.shape
-        target_masks_flat = target_masks.reshape(-1)
-
-        # Only compute entropy for positions that are actually targets
-        target_positions = target_masks_flat.nonzero(as_tuple=True)[0]
-        if len(target_positions) > 0:
-            next_token_logits_flat = next_token_logits.reshape(-1, vocab_size)
-            target_logits = next_token_logits_flat[target_positions]
-
-            # Use mixed precision for entropy computation
-            with fwd_ctx:
-                token_entropy = compute_entropy(target_logits)
-
-            # single entropy value for the sequence
-            if n_target_tokens > 0:
-                entropy = token_entropy.sum() / n_target_tokens
-            else:
-                entropy = torch.tensor(0.0, device=device)
-
-            # Explicitly delete intermediate tensors to free memory
-            del (
-                target_positions,
-                next_token_logits_flat,
-                target_logits,
-                target_masks_flat,
-                token_entropy,
-            )
-        else:
-            entropy = torch.tensor(0.0, device=device)
-            del target_masks_flat, target_positions
-    else:
-        # Skip entropy computation entirely if not used
-        entropy = torch.tensor(0.0, device=device)
-
-    del batch_token_ids_t, target_token_ids, next_token_logits
-    clear_memory()
-
-    return logprobs, target_masks, entropy, n_target_tokens
+    # Gather only the logprobs for the labels
+    logprobs_for_label = torch.gather(
+        log_probs, dim=-1, index=labels.unsqueeze(-1)
+    ).squeeze(-1)
+    del log_probs
+    return logprobs_for_label
 
 
 def update_policy(
@@ -589,10 +433,8 @@ def update_policy(
     pad_token_id: int,
     max_grad_norm: float,
     device: torch.device,
-    algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
-    entropy_coef: float = 0.0,
     metrics_wrapper: MetricsWrapper | None = None,
     step: int | None = None,
     gradient_accumulation_steps: int | None = None,
@@ -604,15 +446,27 @@ def update_policy(
     """
     update_start_time = time.perf_counter()
 
-    if algorithm == "grpo":
-        episodes = normalize_rewards_per_group(episodes)
+    # Filter out groups where mean or std == 0
+    grouped_eps = defaultdict(list)
+    for ep in episodes:
+        grouped_eps[ep.group_index].append(ep)
 
-    # Pre-tokenize all episodes once
-    for episode in episodes:
-        get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
+    filtered_episodes = []
+    for group_index, group in grouped_eps.items():
+        rewards = [ep.reward for ep in group]
+        group_mean = np.mean(rewards)
+        group_std = np.std(rewards)
+        # Filter out groups where mean or std == 0
+        if group_std == 0:
+            logger.info(
+                f"Skipping group {group_index} with mean {group_mean} and std {group_std}"
+            )
+        else:
+            filtered_episodes.extend(group)
 
-    total_entropy = torch.tensor(0.0, device=device)
-    total_loss = torch.tensor(0.0, device=device)
+    episodes = filtered_episodes
+
+    total_loss = 0.0
     grad_norm = 0.0
     num_micro_batches = 0
 
@@ -621,7 +475,6 @@ def update_policy(
     total_micro_batches = (len(episodes) + micro_batch_size - 1) // micro_batch_size
 
     # If gradient_accumulation_steps is not provided, use total_micro_batches
-    # This maintains backward compatibility and auto-calculates based on batch size
     if gradient_accumulation_steps is None:
         gradient_accumulation_steps = total_micro_batches
         logger.info(
@@ -632,75 +485,81 @@ def update_policy(
         f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
 
-    batch_entropy = torch.tensor(0.0, device=device)
+    all_ref_logprobs = []
 
-    # Iterate over micro-batches
-    micro_batch_idx = 0
-    for i in tqdm(range(0, len(episodes), micro_batch_size), desc="Micro-batches"):
-        j = min(i + micro_batch_size, len(episodes))
-        batch_episodes = episodes[i:j]
+    logger.info("Starting gradient updates with on-the-fly preprocessing...")
+    epoch_kl_divs = []
+    epoch_policy_ratios = []
+    preprocessed_batches = []
+    for micro_batch_start in tqdm(
+        range(0, len(episodes), micro_batch_size), desc="Ref logprobs"
+    ):
+        micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
+        batch_episodes = episodes[micro_batch_start:micro_batch_end]
+        ppb = preprocess_batch(
+            batch_episodes,
+            tokenizer,
+            pad_token_id,
+        )
+        preprocessed_batches.append(ppb)
+        with torch.no_grad():
+            ref_logprobs = get_response_log_probs(model, ppb, device).detach()
+            all_ref_logprobs.append(ref_logprobs)
+
+    # Iterate over micro-batches, preprocessing on-the-fly to save memory
+    for i, ppb in tqdm(enumerate(preprocessed_batches), desc="Policy training"):
         micro_batch_start_time = time.perf_counter()
-        # advantage is just normalized reward
-        batch_rewards = [episode.reward for episode in batch_episodes]
-        batch_rewards_t = torch.tensor(
-            batch_rewards, device=device, dtype=torch.float32
+
+        mask: T = ppb["target_masks"].to(device, non_blocking=True)
+        advantages = ppb["advantages"].to(device, non_blocking=True)
+        # Compute reference logprobs for this micro-batch only (on-the-fly)
+
+        # Compute policy logprobs (single forward pass with gradients)
+        policy_logprobs = get_response_log_probs(
+            model,
+            ppb,
+            device,
         )
 
-        reward_mean, reward_std = batch_rewards_t.mean(), batch_rewards_t.std()
-        reward_values_list = [round(reward, 2) for reward in batch_rewards_t.tolist()]
-        logger.info(
-            f"Micro-batch {micro_batch_idx}/{total_micro_batches}, episodes {i}-{j}: Reward mean: {reward_mean:.4f}, reward std: {reward_std:.4f}, values {reward_values_list}"
-        )
-        if reward_std == 0:
-            logger.warning("Reward std is 0, skipping micro-batch")
-            continue
+        # get the importance weights
+        # use exp here to avoid numerical instability
+        ratio = torch.exp(policy_logprobs - all_ref_logprobs[i])
+        # TODO normalize per group
+        # advantages already contains only the current micro-batch, no need to slice
+        micro_batch_adv = advantages.unsqueeze(-1)
 
-        # Process the batch
-        logprobs, target_masks, batch_entropy, n_target_tokens = process_batch(
-            model=model,
-            episodes=batch_episodes,
-            tokenizer=tokenizer,
-            pad_token_id=pad_token_id,
-            device=device,
-            entropy_coef=entropy_coef,
-        )
-        if n_target_tokens == 0:
-            logger.warning(
-                "No target tokens (assistant mask empty) in micro-batch, skipping"
-            )
-            continue
+        per_token_loss: T = -ratio * micro_batch_adv
 
-        # Compute algorithm-specific loss
-        batch_loss = compute_algorithm_loss(
-            logprobs,
-            target_masks,
-            batch_rewards_t,
-            algorithm,
-            n_target_tokens,
-            entropy=batch_entropy,
-            entropy_coef=entropy_coef,
-        )
+        # Compute KL divergence
+        with torch.no_grad():
+            approx_kl = ((ratio - 1) - torch.log(ratio)) * mask
+            approx_kl_mean = approx_kl.sum() / mask.sum()
+            # Log the KL divergence for this micro-batch
+            epoch_kl_divs.append(approx_kl_mean.item())
 
-        # Track total loss for logging (unscaled). We scale only for backward
-        total_loss += batch_loss
-        total_entropy += batch_entropy
-        num_micro_batches += 1
+            # Policy ratio statistics for this micro-batch
+            policy_ratio_mean = (ratio * mask).sum() / mask.sum()
+            epoch_policy_ratios.append(policy_ratio_mean.item())
 
-        # Backward pass - gradients accumulate naturally
+        # Get the loss per token, by multiplying by the mask
+        masked_loss: T = per_token_loss * mask
+
+        # normalize by the number of tokens in the prompt
+        denom = mask.sum(dim=-1).clamp_min(1)
+        # sum loss over all tokens and divide by the number of tokens in the prompt
+        loss_per_prompt = masked_loss.sum(dim=-1) / denom
+        # average loss over all prompts and divide by the number of gradient accumulation steps
+        loss = loss_per_prompt.mean() / gradient_accumulation_steps
         if apply_loss:
-            # Scale per micro-batch loss by gradient_accumulation_steps so that
-            # the accumulated gradient matches the average gradient over the accumulated steps
-            scaled_loss = batch_loss / gradient_accumulation_steps
-            scaled_loss.backward()
-            logger.info(
-                f"Applied loss for micro-batch {micro_batch_idx}, scaled loss: {scaled_loss:.4f}"
-            )
+            loss.backward()
+            logger.info(f"Applied loss for micro-batch {i}, loss: {loss:.4f}")
 
-        micro_batch_idx += 1
+        total_loss += float(loss.detach().cpu())
+        num_micro_batches += 1
 
         # Update weights after accumulating gradient_accumulation_steps batches
         # or if this is the last batch
-        should_update = (micro_batch_idx % gradient_accumulation_steps == 0) or (
+        should_update = (i % gradient_accumulation_steps == 0) or (
             i + micro_batch_size >= len(episodes)
         )
 
@@ -711,48 +570,95 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             logger.info(
-                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"
+                f"Updated weights after micro-batch {i}, grad_norm: {grad_norm:.4f}"
             )
 
         micro_batch_duration = time.perf_counter() - micro_batch_start_time
-        logger.info(
-            f"Micro-batch {micro_batch_idx} completed in {micro_batch_duration:.2f}s"
-        )
+        logger.info(f"Micro-batch {i} completed in {micro_batch_duration:.2f}s")
+
+        del policy_logprobs
+        del ratio
+        del mask
+        del micro_batch_adv
+        del masked_loss
+        del loss
+        del advantages
+        del ppb
+        clear_memory()
 
     # Log GPU utilization after compute_loss
     log_memory_usage("update_policy", metrics_wrapper=metrics_wrapper, step=step)
 
     # Return average loss and entropy across all micro-batches
     avg_loss = total_loss / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_entropy = total_entropy / num_micro_batches if num_micro_batches > 0 else 0.0
-    avg_loss_val = float(avg_loss)
-    avg_entropy_val = float(avg_entropy) if num_micro_batches > 0 else 0.0
+
+    mean_policy_ratio = (
+        sum(epoch_policy_ratios) / len(epoch_policy_ratios)
+        if epoch_policy_ratios
+        else 0
+    )
+    mean_kl = sum(epoch_kl_divs) / len(epoch_kl_divs) if epoch_kl_divs else 0
 
     update_duration = time.perf_counter() - update_start_time
     logger.info(f"Policy update completed in {update_duration:.2f}s")
 
-    grad_norm_val = float(grad_norm)
-    del (
-        total_loss,
-        total_entropy,
-        grad_norm,
-        num_micro_batches,
-        batch_rewards_t,
-        batch_entropy,
-        n_target_tokens,
-        logprobs,
-        target_masks,
-        batch_episodes,
-        batch_rewards,
-        reward_mean,
-        reward_std,
-        reward_values_list,
-    )
     clear_memory()
 
     return {
-        "loss": avg_loss_val,
-        "grad_norm": grad_norm_val,
-        "entropy": avg_entropy_val,
+        "loss": float(avg_loss),
+        "grad_norm": float(grad_norm),
         "duration": update_duration,
+        "mean_policy_ratio": mean_policy_ratio,
+        "mean_kl": mean_kl,
     }
+
+
+def compute_metrics(
+    episodes: List[Episode],
+    results: UpdatePolicyResults,
+    metrics_wrapper: MetricsWrapper,
+    step: int,
+    optimizer: torch.optim.Optimizer,
+    log_text: bool = False,
+) -> dict[str, float]:
+    reward = [episode.reward for episode in episodes]
+    # Assume all episodes are finished since rollout completes them
+    num_finished_episodes = len(episodes)
+    mean_reward = float(np.mean(reward))
+    std_reward = float(np.std(reward))
+    grad_norm = results["grad_norm"]
+    mean_policy_ratio = results["mean_policy_ratio"]
+    mean_kl = results["mean_kl"]
+    lr = optimizer.param_groups[0]["lr"]
+    loss = results["loss"]
+    metrics_wrapper.add_scalar("train/loss", loss, step)
+    metrics_wrapper.add_scalar("train/mean_reward", mean_reward, step)
+    metrics_wrapper.add_scalar("train/std_reward", std_reward, step)
+    metrics_wrapper.add_scalar("train/grad_norm", grad_norm, step)
+    metrics_wrapper.add_scalar(
+        "train/num_finished_episodes", num_finished_episodes, step
+    )
+    metrics_wrapper.add_scalar("train/learning_rate", lr, step)
+    metrics_wrapper.add_scalar("train/mean_policy_ratio", mean_policy_ratio, step)
+    metrics_wrapper.add_scalar("train/mean_kl", mean_kl, step)
+    if log_text:
+        for i, episode in enumerate(episodes):
+            # Convert conversation to text format for logging
+            conversation_text = "\n".join(
+                [f"{msg['role']}: {msg['content']}" for msg in episode.conversation]
+            )
+            text = html.escape(conversation_text)
+            metrics_wrapper.add_text(f"sample_{i}", text, step)
+
+    log_dict = {
+        "mean_reward": mean_reward,
+        "std_reward": std_reward,
+        "grad_norm": grad_norm,
+        "mean_policy_ratio": mean_policy_ratio,
+        "mean_kl": mean_kl,
+        "learning_rate": lr,
+        "loss": loss,
+        "num_finished_episodes": float(num_finished_episodes),
+    }
+    logger.info(f"Metrics: {log_dict}")
+    return log_dict

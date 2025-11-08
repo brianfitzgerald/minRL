@@ -1,13 +1,12 @@
+import fire
+import torch
+
 from minrl.algorithms import (
     get_token_ids_and_assistant_mask,
-    process_batch,
+    preprocess_batch,
 )
 from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
-import torch
-
-import fire
-
 
 config = TrainerConfig(groups_per_batch=4)
 
@@ -65,9 +64,9 @@ episodes = [
 
 
 def compute_algorithm_loss(
-    logprobs: torch.Tensor,
-    target_masks: torch.Tensor,
-    batch_rewards: torch.Tensor,
+    logprobs: T,
+    target_masks: T,
+    batch_rewards: T,
     algorithm: AlgorithmChoice,
     n_target_tokens: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -100,7 +99,7 @@ def main():
 
     # Process the batch
     logprobs, target_msks, batch_rewards_t, batch_entropy, n_target_tokens = (
-        process_batch(
+        preprocess_batch(
             model=trainer.model,
             episodes=episodes,
             tokenizer=trainer.tokenizer,

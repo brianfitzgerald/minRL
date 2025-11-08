@@ -1,8 +1,9 @@
 import pytest
 import torch
 from transformers import AutoTokenizer
+
+from minrl.constants import GEMMA_3_1B, QWEN_3_0_6B, SMOL_LM_2_135M, Conversation
 from minrl.sft import pack_sequences
-from minrl.constants import Conversation, SMOL_LM_2_135M, QWEN_3_0_6B, GEMMA_3_1B
 
 
 class MockDataset:

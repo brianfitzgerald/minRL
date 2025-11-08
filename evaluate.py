@@ -1,7 +1,7 @@
 import asyncio
-from datetime import datetime
-import random
 import os
+import random
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -22,10 +22,10 @@ from minrl.constants import (
     EvalSample,
     ModelName,
 )
+from minrl.modal_utils import download_checkpoint_from_modal
 from minrl.tasks import TASK_DATASETS, TaskChoice
 from minrl.tasks.dataset import MinRLDataset
 from minrl.tasks.zork import ZorkDataset
-from minrl.modal_utils import download_checkpoint_from_modal
 
 """
 Evaluate against any task in the minrl.tasks module.

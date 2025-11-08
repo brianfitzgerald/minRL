@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, TypedDict
 
+from pydantic import BaseModel
+
 from minrl.lora import LoRAConfig
-from dataclasses import dataclass
 
 
 class StepMetadata(TypedDict):
@@ -126,10 +127,10 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = GEMMA_3_1B
-    eval_interval: int = 25
-    max_new_tokens: int = 256
+    model_id: str = QWEN_3_1_7_B
+    eval_interval: int = 10
     eval_batch_size: int = 64
+    max_new_tokens: int = 256
     max_grad_norm: float = 1.0
     ckpt_save_interval: int = 500
     learning_rate: float = 1e-5
@@ -140,12 +141,12 @@ class TrainerConfig(BaseModel):
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
-    temperature_scaling: bool = False
-    temperature_min: float = 0.2
-    temperature_max: float = 1.5
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
     # TODO implement vocab wise entropy calculation
     entropy_coef: float = 0.00  # Entropy regularization coefficient
+
+    # Limit the number of user/assistant turns retained per conversation to reduce memory usage
+    conversation_max_turns: int | None = 4
 
     # Determines the number of sequences to run in parallel in vLLM
     max_num_seqs: int = 256
@@ -167,10 +168,10 @@ class TrainerConfig(BaseModel):
     lora_config: LoRAConfig | None = None
 
     # N samples to process per micro-batch
-    micro_batch_size: int = 16
+    micro_batch_size: int = 4
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
-    gradient_accumulation_steps: int | None = 16
+    gradient_accumulation_steps: int | None = 64
     groups_per_batch: int = 32
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size

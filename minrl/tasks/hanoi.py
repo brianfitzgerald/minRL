@@ -1,12 +1,14 @@
-from typing import List, Dict, Tuple, Union, TypedDict
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-import random
-from minrl.tasks.dataset import MinRLDataset, Split
-from loguru import logger
-import re
 import ast
+import random
+import re
+from typing import Dict, List, Tuple, TypedDict, Union
+
 import numpy as np
+from loguru import logger
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
 from minrl.constants import Conversation, HostType, Sample
+from minrl.tasks.dataset import MinRLDataset, Split
 
 SYSTEM_PROMPT = """
 You are a helpful assistant. Solve this puzzle for me.
