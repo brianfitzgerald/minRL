@@ -598,7 +598,6 @@ def update_policy(
         del micro_batch_adv
         del masked_loss
         del loss
-        del ref_logprobs
         del advantages
         del batch_episodes
         del ppb
