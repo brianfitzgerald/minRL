@@ -1,10 +1,9 @@
-import gc
 import html
 import time
-from contextlib import nullcontext
+from collections import defaultdict
 from typing import List, TypedDict
-import numpy as np
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,31 +34,6 @@ from minrl.utils import (
 )
 
 
-def compute_scaled_temperature(
-    config: TrainerConfig,
-    prev_reward_std: float | None = None,
-    reference_std: float = 1.0,
-) -> float:
-    """
-    Compute temperature scaled based on previous batch reward standard deviation.
-    As reward std decreases, temperature increases.
-
-    """
-    if not config.temperature_scaling or prev_reward_std is None:
-        return config.temperature
-
-    if prev_reward_std <= 0:
-        return config.temperature_max
-
-    scale_factor = reference_std / prev_reward_std
-
-    scaled_temp = config.temperature * scale_factor
-
-    scaled_temp = max(config.temperature_min, min(config.temperature_max, scaled_temp))
-
-    return scaled_temp
-
-
 @torch.no_grad()
 def rollout(
     config: TrainerConfig,
@@ -79,9 +53,6 @@ def rollout(
     """
     rollout_start_time = time.perf_counter()
 
-    # Compute scaled temperature based on previous reward std
-    temperature = compute_scaled_temperature(config, prev_reward_std)
-
     # Get stop token IDs to stop generation on
     stop_token_ids: list[int] | None = None
     eos_token_id = tokenizer.eos_token_id
@@ -92,8 +63,8 @@ def rollout(
     total_conversations = num_prompts * group_size
 
     logger.info(
-        f"Generating responses for {num_prompts} prompts × {group_size} group_size = {total_conversations} total conversations, "
-        f"max_tokens={config.max_new_tokens}, temp={temperature:.3f}"
+        f"Generating responses for {num_prompts} prompts x {group_size} group_size = {total_conversations} total conversations, "  # noqa: E501
+        f"max_tokens={config.max_new_tokens}, temp={config.temperature:.3f}"
     )
 
     # Flatten structure: instead of nested lists, maintain flat list of all conversations
@@ -145,7 +116,7 @@ def rollout(
             vllm_input,
             sampling_params=SamplingParams(
                 max_tokens=config.max_new_tokens,
-                temperature=temperature,
+                temperature=config.temperature,
                 n=n_responses,
                 stop_token_ids=stop_token_ids,
             ),
@@ -370,7 +341,6 @@ def preprocess_batch(
     episodes: List[Episode],
     tokenizer: PreTrainedTokenizerBase,
     pad_token_id: int,
-    device: torch.device,
 ) -> PreprocessedBatch:
     """
     Preprocess a single batch of episodes to get masks and tokens for
@@ -422,20 +392,6 @@ def preprocess_batch(
     means = raw_reward_tensor.mean(dim=-1).unsqueeze(1)
     advantages = (raw_reward_tensor - means).reshape((n_prompts_per_step * n_groups,))
 
-    # Debug: Log advantage computation details
-    logger.debug(
-        f"preprocess_batch: n_prompts_per_step={n_prompts_per_step}, n_groups={n_groups}, "
-        f"raw_rewards - mean={raw_reward_tensor.mean().item():.4f}, "
-        f"std={raw_reward_tensor.std().item():.4f}, "
-        f"min={raw_reward_tensor.min().item():.4f}, max={raw_reward_tensor.max().item():.4f}, "
-        f"means_per_prompt={means.squeeze().tolist()}, "
-        f"advantages - mean={advantages.mean().item():.6f}, "
-        f"std={advantages.std().item():.6f}, "
-        f"min={advantages.min().item():.6f}, max={advantages.max().item():.6f}, "
-        f"zeros={torch.sum(advantages == 0).item()}/{len(advantages)}, "
-        f"all_zero={torch.all(advantages == 0).item()}"
-    )
-
     return {
         "batch_token_ids_t": batch_token_ids_t,
         "batch_assistant_masks_t": batch_assistant_masks_t,
@@ -447,13 +403,15 @@ def preprocess_batch(
 
 def get_response_log_probs(
     model: torch.nn.Module,
-    input_ids: torch.Tensor,
-    labels: torch.Tensor,
+    batch: PreprocessedBatch,
+    device: torch.device,
 ) -> torch.Tensor:
     """
     Compute log probabilities for given labels efficiently.
     Uses F.log_softmax which is more memory efficient than manual computation.
     """
+    input_ids = batch["batch_token_ids_t"].to(device)
+    labels = batch["target_token_ids"].to(device)
     logits = model(input_ids).logits
     # Use F.log_softmax which is more memory efficient than manual computation
     log_probs = F.log_softmax(logits, dim=-1)
@@ -475,14 +433,11 @@ def update_policy(
     pad_token_id: int,
     max_grad_norm: float,
     device: torch.device,
-    algorithm: AlgorithmChoice,
     tokenizer: PreTrainedTokenizerBase,
     apply_loss: bool = True,
-    entropy_coef: float = 0.0,
     metrics_wrapper: MetricsWrapper | None = None,
     step: int | None = None,
     gradient_accumulation_steps: int | None = None,
-    dtype: torch.dtype = torch.bfloat16,
 ) -> UpdatePolicyResults:
     """
     Once episodes are generated, use them to update the policy
@@ -490,6 +445,25 @@ def update_policy(
     This implements a number of different algorithms.
     """
     update_start_time = time.perf_counter()
+
+    # Filter out groups where mean or std == 0
+    grouped_eps = defaultdict(list)
+    for ep in episodes:
+        grouped_eps[ep.group_index].append(ep)
+
+    filtered_episodes = []
+    for group_index, group in grouped_eps.items():
+        rewards = [ep.reward for ep in group]
+        group_mean = np.mean(rewards)
+        group_std = np.std(rewards)
+        # Filter out groups where mean or std == 0
+        if not (group_std == 0 or group_mean == 0):
+            logger.info(
+                f"Filtering group {group_index} with mean {group_mean} and std {group_std}"
+            )
+            filtered_episodes.extend(group)
+
+    episodes = filtered_episodes
 
     # Debug: Log overall episode statistics
     all_rewards = [e.reward for e in episodes]
@@ -500,10 +474,6 @@ def update_policy(
         f"std={torch.tensor(all_rewards).std().item():.4f}, "
         f"all_zero={all(r == 0 for r in all_rewards)}"
     )
-
-    # Pre-tokenize all episodes once
-    for episode in episodes:
-        get_token_ids_and_assistant_mask(episode.conversation, tokenizer)
 
     total_loss = 0.0
     grad_norm = 0.0
@@ -524,41 +494,51 @@ def update_policy(
         f"Processing {total_micro_batches} micro-batches, {gradient_accumulation_steps} total accumulation steps"
     )
 
+    all_ref_logprobs = []
+
     logger.info("Starting gradient updates with on-the-fly preprocessing...")
     epoch_kl_divs = []
     epoch_policy_ratios = []
+    preprocessed_batches = []
+    for micro_batch_start in tqdm(
+        range(0, len(episodes), micro_batch_size), desc="Ref logprobs"
+    ):
+        micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
+        batch_episodes = episodes[micro_batch_start:micro_batch_end]
+        ppb = preprocess_batch(
+            batch_episodes,
+            tokenizer,
+            pad_token_id,
+        )
+        preprocessed_batches.append(ppb)
+        with torch.no_grad():
+            ref_logprobs = get_response_log_probs(model, ppb, device).detach()
+            all_ref_logprobs.append(ref_logprobs)
 
     # Iterate over micro-batches, preprocessing on-the-fly to save memory
     micro_batch_idx = 0
     for micro_batch_start in tqdm(
-        range(0, len(episodes), micro_batch_size), desc="Micro-batches"
+        range(0, len(episodes), micro_batch_size), desc="Policy training"
     ):
         micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
         batch_episodes = episodes[micro_batch_start:micro_batch_end]
         micro_batch_start_time = time.perf_counter()
+        ppb = preprocessed_batches[micro_batch_idx]
 
-        # Preprocess this micro-batch only (on-the-fly)
-        ppb = preprocess_batch(batch_episodes, tokenizer, pad_token_id, device)
-        batch_token_ids_t = ppb["batch_token_ids_t"].to(device, non_blocking=True)
-        target_token_ids = ppb["target_token_ids"].to(device, non_blocking=True)
         mask: T = ppb["target_masks"].to(device, non_blocking=True)
         advantages = ppb["advantages"].to(device, non_blocking=True)
         # Compute reference logprobs for this micro-batch only (on-the-fly)
-        with torch.no_grad():
-            ref_logprobs = get_response_log_probs(
-                model, batch_token_ids_t, target_token_ids
-            ).detach()
 
         # Compute policy logprobs (single forward pass with gradients)
         policy_logprobs = get_response_log_probs(
             model,
-            batch_token_ids_t,
-            target_token_ids,
+            ppb,
+            device,
         )
 
         # get the importance weights
         # use exp here to avoid numerical instability
-        ratio = torch.exp(policy_logprobs - ref_logprobs)
+        ratio = torch.exp(policy_logprobs - all_ref_logprobs[micro_batch_idx])
         # TODO normalize per group
         # advantages already contains only the current micro-batch, no need to slice
         micro_batch_adv = advantages.unsqueeze(-1)
@@ -579,7 +559,6 @@ def update_policy(
         # Get the loss per token, by multiplying by the mask
         masked_loss: T = per_token_loss * mask
         # Compute loss as mean over all masked tokens (not per-prompt average)
-        # This avoids the issue where averaging per-prompt losses zeros out due to normalized advantages
         total_masked_tokens = mask.sum().clamp_min(1)
         loss = masked_loss.sum() / total_masked_tokens / gradient_accumulation_steps
         if apply_loss:
@@ -605,7 +584,7 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             logger.info(
-                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"
+                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"  # noqa: E501
             )
 
         micro_batch_duration = time.perf_counter() - micro_batch_start_time
@@ -620,8 +599,6 @@ def update_policy(
         del masked_loss
         del loss
         del ref_logprobs
-        del batch_token_ids_t
-        del target_token_ids
         del advantages
         del batch_episodes
         del ppb
@@ -660,7 +637,6 @@ def compute_metrics(
     metrics_wrapper: MetricsWrapper,
     step: int,
     optimizer: torch.optim.Optimizer,
-    temperature: float | None = None,
     log_text: bool = False,
 ) -> dict[str, float]:
     reward = [episode.reward for episode in episodes]
@@ -683,8 +659,6 @@ def compute_metrics(
     metrics_wrapper.add_scalar("train/learning_rate", lr, step)
     metrics_wrapper.add_scalar("train/mean_policy_ratio", mean_policy_ratio, step)
     metrics_wrapper.add_scalar("train/mean_kl", mean_kl, step)
-    if temperature is not None:
-        metrics_wrapper.add_scalar("train/temperature", temperature, step)
     if log_text:
         for i, episode in enumerate(episodes):
             # Convert conversation to text format for logging
@@ -704,7 +678,5 @@ def compute_metrics(
         "loss": loss,
         "num_finished_episodes": float(num_finished_episodes),
     }
-    if temperature is not None:
-        log_dict["temperature"] = temperature
     logger.info(f"Metrics: {log_dict}")
     return log_dict

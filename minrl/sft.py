@@ -1,17 +1,19 @@
+import time
+from contextlib import nullcontext
+from typing import Any, cast
+
+import torch
+import torch.nn.functional as F
+from loguru import logger
+from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from minrl.algorithms import get_token_ids_and_assistant_mask
 from minrl.constants import Conversation
 from minrl.packing import pack_bfd
 from minrl.tasks.dataset import MinRLDataset
 from minrl.trainer import Trainer
-import torch
-import torch.nn.functional as F
-from loguru import logger
-from minrl.utils import log_memory_usage, clear_memory
-from minrl.algorithms import get_token_ids_and_assistant_mask
-from torch.utils.data import DataLoader
-from typing import Any, cast
-import time
-from contextlib import nullcontext
+from minrl.utils import clear_memory, log_memory_usage
 
 
 class SFTTrainer(Trainer):

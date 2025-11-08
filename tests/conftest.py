@@ -1,12 +1,13 @@
 import pytest
 import torch
-from minrl.constants import SMOL_LM_2_135M, TrainerConfig
-from vllm import LLM
-from vllm.envs import set_vllm_use_v1
-from transformers.models.auto.tokenization_auto import AutoTokenizer
+import torch.nn as nn
 from loguru import logger
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
-import torch.nn as nn
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from vllm import LLM
+from vllm.envs import set_vllm_use_v1
+
+from minrl.constants import SMOL_LM_2_135M, TrainerConfig
 
 
 @pytest.fixture(scope="session")

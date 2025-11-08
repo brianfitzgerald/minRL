@@ -2,6 +2,7 @@
 """Test script for the _pack_bfd function implementation."""
 
 import torch
+
 from minrl.packing import pack_bfd
 
 

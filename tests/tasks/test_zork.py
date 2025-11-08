@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import MagicMock, patch
-from minrl.tasks.zork import parse_command, ZorkDataset
+
+import pytest
+
+from minrl.tasks.zork import ZorkDataset, parse_command
 
 
 def test_parse_command():

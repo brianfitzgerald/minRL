@@ -1,13 +1,12 @@
+import fire
+import torch
+
 from minrl.algorithms import (
     get_token_ids_and_assistant_mask,
     preprocess_batch,
 )
 from minrl.constants import AlgorithmChoice, Conversation, Episode, TrainerConfig
 from minrl.trainer import Trainer
-import torch
-
-import fire
-
 
 config = TrainerConfig(groups_per_batch=4)
 

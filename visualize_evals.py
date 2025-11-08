@@ -1,12 +1,14 @@
-import os
-import fire
-import pandas as pd
-from pathlib import Path
-from loguru import logger
-import matplotlib.pyplot as plt
-from minrl.constants import EvalSample, TaskChoice
 import json
+import os
+from pathlib import Path
+
+import fire
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+from loguru import logger
+
+from minrl.constants import EvalSample, TaskChoice
 
 
 def eval_single_step(task: TaskChoice = "connections"):

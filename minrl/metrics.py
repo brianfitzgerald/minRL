@@ -1,7 +1,7 @@
 from tensorboardX import SummaryWriter
-from minrl.constants import LoggerChoice, TaskChoice, TrainerConfig
 
 import wandb
+from minrl.constants import LoggerChoice, TaskChoice, TrainerConfig
 
 
 class MetricsWrapper:

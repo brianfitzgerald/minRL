@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, NotRequired, Required, TypeAlias, TypedDict
 
+from pydantic import BaseModel
+
 from minrl.lora import LoRAConfig
-from dataclasses import dataclass
 
 
 class StepMetadata(TypedDict):
@@ -126,7 +127,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = GEMMA_3_1B
+    model_id: str = SMOL_LM_2_135M
     eval_interval: int = 10
     eval_batch_size: int = 64
     max_new_tokens: int = 256
@@ -140,9 +141,6 @@ class TrainerConfig(BaseModel):
     wandb_project: str = "minrl"
     wandb_entity: str | None = None
     temperature: float = 1
-    temperature_scaling: bool = False
-    temperature_min: float = 0.2
-    temperature_max: float = 1.5
     # NOTE: setting to >0 will cause OOM with large vocabularies such as Gemma
     # TODO implement vocab wise entropy calculation
     entropy_coef: float = 0.00  # Entropy regularization coefficient

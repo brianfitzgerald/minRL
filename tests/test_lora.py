@@ -1,6 +1,7 @@
 import torch
+
 from minrl.algorithms import sync_weights_to_vllm
-from minrl.lora import apply_lora_to_model, LoRAConfig, LoRALinear
+from minrl.lora import LoRAConfig, LoRALinear, apply_lora_to_model
 
 
 def test_sync_weights_to_vllm_with_lora(hf_model, vllm_model):

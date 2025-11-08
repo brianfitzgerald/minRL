@@ -1,9 +1,10 @@
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from minrl.tasks.dataset import MinRLDataset, Split
 import re
-from minrl.constants import Conversation, HostType, Sample
-from datasets import load_dataset
 
+from datasets import load_dataset
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+
+from minrl.constants import Conversation, HostType, Sample
+from minrl.tasks.dataset import MinRLDataset, Split
 
 _SOLUTION_CLIP_CHARS = 300
 

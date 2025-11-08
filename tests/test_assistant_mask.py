@@ -1,7 +1,8 @@
 import pytest
 from transformers import AutoTokenizer
+
 from minrl.algorithms import get_token_ids_and_assistant_mask
-from minrl.constants import Conversation, GEMMA_3_1B, QWEN_3_0_6B
+from minrl.constants import GEMMA_3_1B, QWEN_3_0_6B, Conversation
 
 
 def visualize_token_mask(token_ids, assistant_mask, tokenizer, title=None):

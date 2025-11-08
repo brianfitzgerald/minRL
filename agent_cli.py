@@ -1,13 +1,15 @@
-import textworld
-import textworld.gym
-from textworld.gym.envs import TextworldGymEnv
-from minrl.constants import INFERENCE_MODELS
-from minrl.tasks.zork import TextWorldAgent
-from loguru import logger
-from dotenv import load_dotenv
-import fire
 import os
 from pathlib import Path
+
+import fire
+import textworld
+import textworld.gym
+from dotenv import load_dotenv
+from loguru import logger
+from textworld.gym.envs import TextworldGymEnv
+
+from minrl.constants import INFERENCE_MODELS
+from minrl.tasks.zork import TextWorldAgent
 
 load_dotenv()
 

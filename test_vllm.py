@@ -1,8 +1,8 @@
-from minrl.constants import QWEN_3_0_6B
 from vllm import LLM, SamplingParams
-from minrl.tasks.connections import CONNECTIONS_PROMPT
-from minrl.constants import TrainerConfig
 from vllm.envs import set_vllm_use_v1
+
+from minrl.constants import QWEN_3_0_6B, TrainerConfig
+from minrl.tasks.connections import CONNECTIONS_PROMPT
 
 cfg = TrainerConfig()
 set_vllm_use_v1(True)

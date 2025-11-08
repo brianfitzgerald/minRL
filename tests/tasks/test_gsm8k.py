@@ -1,12 +1,13 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from minrl.tasks.gsm8k import (
-    GSM8KDataset,
-    extract_solution,
-    compute_score,
     SYSTEM_PROMPT,
     TEMPLATE,
+    GSM8KDataset,
+    compute_score,
+    extract_solution,
 )
 
 

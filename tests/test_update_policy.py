@@ -1,11 +1,10 @@
 import pytest
 import torch
-from minrl.algorithms import update_policy, normalize_rewards_per_group
-from minrl.constants import TrainerConfig, Conversation
-from minrl.constants import Episode
+import torch.nn as nn
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-import torch.nn as nn
+from minrl.algorithms import normalize_rewards_per_group, update_policy
+from minrl.constants import Conversation, Episode, TrainerConfig
 
 
 @pytest.fixture

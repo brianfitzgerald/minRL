@@ -1,7 +1,7 @@
 import gc
 import time
 from pathlib import Path
-from typing import Any, cast, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -14,16 +14,21 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
 from vllm.envs import set_vllm_use_v1
-from minrl.algorithms import compute_metrics, compute_scaled_temperature
-from minrl.lora import apply_lora_to_model
-from minrl.algorithms import rollout, sync_weights_to_vllm, update_policy
+
+from minrl.algorithms import (
+    compute_metrics,
+    rollout,
+    sync_weights_to_vllm,
+    update_policy,
+)
 from minrl.constants import DeviceType, Episode, HostType, LoggerChoice, TrainerConfig
+from minrl.lora import apply_lora_to_model
 from minrl.metrics import MetricsWrapper
 from minrl.tasks import TASK_DATASETS
 from minrl.tasks.dataset import MinRLDataset
 from minrl.utils import (
-    clear_memory,
     USING_MPS,
+    clear_memory,
     log_memory_usage,
 )
 
@@ -286,16 +291,12 @@ class Trainer:
             current_rewards = [episode.reward for episode in episodes]
             current_reward_std = float(np.std(current_rewards))
 
-            # Get temperature used for logging
-            temperature_used = compute_scaled_temperature(self.config, prev_reward_std)
-
             compute_metrics(
                 episodes,
                 results,  # pyright: ignore[reportArgumentType]
                 self.metrics_wrapper,
                 step,
                 self.optimizer,
-                temperature_used,
             )
 
             # Clear memory after each step more aggressively
