@@ -465,16 +465,6 @@ def update_policy(
 
     episodes = filtered_episodes
 
-    # Debug: Log overall episode statistics
-    all_rewards = [e.reward for e in episodes]
-    logger.debug(
-        f"update_policy: Total episodes={len(episodes)}, "
-        f"rewards - mean={sum(all_rewards) / len(all_rewards):.4f}, "
-        f"min={min(all_rewards):.4f}, max={max(all_rewards):.4f}, "
-        f"std={torch.tensor(all_rewards).std().item():.4f}, "
-        f"all_zero={all(r == 0 for r in all_rewards)}"
-    )
-
     total_loss = 0.0
     grad_norm = 0.0
     num_micro_batches = 0
@@ -516,14 +506,8 @@ def update_policy(
             all_ref_logprobs.append(ref_logprobs)
 
     # Iterate over micro-batches, preprocessing on-the-fly to save memory
-    micro_batch_idx = 0
-    for micro_batch_start in tqdm(
-        range(0, len(episodes), micro_batch_size), desc="Policy training"
-    ):
-        micro_batch_end = min(micro_batch_start + micro_batch_size, len(episodes))
-        batch_episodes = episodes[micro_batch_start:micro_batch_end]
+    for i, ppb in tqdm(enumerate(preprocessed_batches), desc="Policy training"):
         micro_batch_start_time = time.perf_counter()
-        ppb = preprocessed_batches[micro_batch_idx]
 
         mask: T = ppb["target_masks"].to(device, non_blocking=True)
         advantages = ppb["advantages"].to(device, non_blocking=True)
@@ -538,7 +522,7 @@ def update_policy(
 
         # get the importance weights
         # use exp here to avoid numerical instability
-        ratio = torch.exp(policy_logprobs - all_ref_logprobs[micro_batch_idx])
+        ratio = torch.exp(policy_logprobs - all_ref_logprobs[i])
         # TODO normalize per group
         # advantages already contains only the current micro-batch, no need to slice
         micro_batch_adv = advantages.unsqueeze(-1)
@@ -558,23 +542,24 @@ def update_policy(
 
         # Get the loss per token, by multiplying by the mask
         masked_loss: T = per_token_loss * mask
-        # Compute loss as mean over all masked tokens (not per-prompt average)
-        total_masked_tokens = mask.sum().clamp_min(1)
-        loss = masked_loss.sum() / total_masked_tokens / gradient_accumulation_steps
+
+        # normalize by the number of tokens in the prompt
+        denom = mask.sum(dim=-1).clamp_min(1)
+        # sum loss over all tokens and divide by the number of tokens in the prompt
+        loss_per_prompt = masked_loss.sum(dim=-1) / denom
+        # average loss over all prompts and divide by the number of gradient accumulation steps
+        loss = loss_per_prompt.mean() / gradient_accumulation_steps
         if apply_loss:
             loss.backward()
-            logger.info(
-                f"Applied loss for micro-batch {micro_batch_idx}, loss: {loss:.4f}"
-            )
+            logger.info(f"Applied loss for micro-batch {i}, loss: {loss:.4f}")
 
         total_loss += float(loss.detach().cpu())
         num_micro_batches += 1
-        micro_batch_idx += 1
 
         # Update weights after accumulating gradient_accumulation_steps batches
         # or if this is the last batch
-        should_update = (micro_batch_idx % gradient_accumulation_steps == 0) or (
-            micro_batch_end >= len(episodes)
+        should_update = (i % gradient_accumulation_steps == 0) or (
+            i + micro_batch_size >= len(episodes)
         )
 
         if apply_loss and should_update:
@@ -584,13 +569,11 @@ def update_policy(
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             logger.info(
-                f"Updated weights after micro-batch {micro_batch_idx}, grad_norm: {grad_norm:.4f}"  # noqa: E501
+                f"Updated weights after micro-batch {i}, grad_norm: {grad_norm:.4f}"
             )
 
         micro_batch_duration = time.perf_counter() - micro_batch_start_time
-        logger.info(
-            f"Micro-batch {micro_batch_idx} completed in {micro_batch_duration:.2f}s"
-        )
+        logger.info(f"Micro-batch {i} completed in {micro_batch_duration:.2f}s")
 
         del policy_logprobs
         del ratio
@@ -599,7 +582,6 @@ def update_policy(
         del masked_loss
         del loss
         del advantages
-        del batch_episodes
         del ppb
         clear_memory()
 

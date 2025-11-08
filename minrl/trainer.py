@@ -33,7 +33,7 @@ from minrl.utils import (
 )
 
 if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports]
+    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports, reportPrivateImportUsage]
 else:
     Adam8bit = torch.optim.AdamW
 
