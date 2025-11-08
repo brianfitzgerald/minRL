@@ -127,7 +127,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = GEMMA_3_1B
+    model_id: str = QWEN_3_1_7_B
     eval_interval: int = 10
     eval_batch_size: int = 64
     max_new_tokens: int = 256
@@ -168,10 +168,10 @@ class TrainerConfig(BaseModel):
     lora_config: LoRAConfig | None = None
 
     # N samples to process per micro-batch
-    micro_batch_size: int = 16
+    micro_batch_size: int = 4
     # N micro-batches to accumulate gradients over before updating
     # If None, defaults to the full batch size
-    gradient_accumulation_steps: int | None = 16
+    gradient_accumulation_steps: int | None = 64
     groups_per_batch: int = 32
     group_size: int = 8
     # Total batch size is (groups_per_batch * group_size) / micro_batch_size
