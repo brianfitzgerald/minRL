@@ -127,7 +127,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = SMOL_LM_2_135M
+    model_id: str = GEMMA_3_1B
     eval_interval: int = 10
     eval_batch_size: int = 64
     max_new_tokens: int = 256

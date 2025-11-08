@@ -457,10 +457,11 @@ def update_policy(
         group_mean = np.mean(rewards)
         group_std = np.std(rewards)
         # Filter out groups where mean or std == 0
-        if not (group_std == 0 or group_mean == 0):
+        if group_std == 0:
             logger.info(
-                f"Filtering group {group_index} with mean {group_mean} and std {group_std}"
+                f"Skipping group {group_index} with mean {group_mean} and std {group_std}"
             )
+        else:
             filtered_episodes.extend(group)
 
     episodes = filtered_episodes
