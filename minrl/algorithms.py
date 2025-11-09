@@ -289,25 +289,32 @@ def compute_algorithm_loss(
     return loss
 
 
+def _load_custom_weights(worker_self, state_dict):
+    """
+    This function runs on each worker.
+    worker_self is the worker instance.
+    """
+    print(worker_self)
+    print(worker_self.model_runner)
+    model = worker_self.model_runner.get_model()
+    print(model)
+    weights_iterable = state_dict.items()
+    loaded_params = model.load_weights(weights_iterable)
+    return loaded_params
+
+
 def sync_weights_to_vllm(
     model: nn.Module,
     vllm_model: LLM,
 ) -> None:
+    """Sync weights to vLLM."""
     logger.info("Syncing params to vLLM...")
 
-    state_dict = model.state_dict()
+    # TODO why do we need to move to CPU?
+    state_dict: dict[str, T] = model.cpu().state_dict()
 
-    try:
-        model_runner: ModelRunnerBase = (
-            vllm_model.llm_engine.model_executor.driver_worker.model_runner  # type: ignore
-        )
-        model_runner.model.load_weights(state_dict.items())  # type: ignore
-        logger.info("Param update succesful.")
-    except AttributeError:
-        # vLLM API change: model_executor might not be available in newer versions
-        logger.warning(
-            "Cannot sync params to vLLM - model_executor not found. Hint: disable v1 API."
-        )
+    results = vllm_model.collective_rpc(_load_custom_weights, args=(state_dict,))
+    print(results)
 
 
 class UpdatePolicyResults(TypedDict):

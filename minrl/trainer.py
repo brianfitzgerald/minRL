@@ -1,4 +1,5 @@
 import gc
+import os
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -13,7 +14,6 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from vllm import LLM
-from vllm.envs import set_vllm_use_v1
 
 from minrl.algorithms import (
     compute_metrics,
@@ -32,8 +32,11 @@ from minrl.utils import (
     log_memory_usage,
 )
 
+# bitsandbytes is not supported on MPS
 if not USING_MPS:
-    from bitsandbytes.optim import Adam8bit  # pyright: ignore[reportMissingImports, reportPrivateImportUsage]
+    from bitsandbytes.optim import (  # pyright: ignore[reportMissingImports]
+        Adam8bit,  # pyright: ignore[reportMissingImports, reportPrivateImportUsage]
+    )
 else:
     Adam8bit = torch.optim.AdamW
 
@@ -74,7 +77,6 @@ class Trainer:
         torch.set_default_device(self.device)
         if self.device_type == "mps":
             logger.warning("vLLM does not support MPS backend, falling back to CPU.")
-        set_vllm_use_v1(False)
         torch.random.manual_seed(42)
 
         # Reduce vLLM memory usage significantly
@@ -149,6 +151,7 @@ class Trainer:
         logger.info("Initializing vLLM model")
 
         self._setup_hf_model()
+        # set_vllm_use_v1(False)
 
         self.vllm_model = LLM(
             max_num_seqs=self.config.max_num_seqs,
@@ -165,6 +168,8 @@ class Trainer:
             max_model_len=self.config.max_seq_length,
             logprobs_mode="processed_logprobs",
         )
+        os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
+        sync_weights_to_vllm(self.model, self.vllm_model)
         log_memory_usage(
             "init_vllm_model", metrics_wrapper=self.metrics_wrapper, step=0
         )
@@ -276,10 +281,11 @@ class Trainer:
             )
             self._wake_sleep_vllm("wake")
 
-            sync_weights_to_vllm(
-                cast(nn.Module, self.model),
-                self.vllm_model,
-            )
+            if not self.config.lora_config:
+                sync_weights_to_vllm(
+                    cast(nn.Module, self.model),
+                    self.vllm_model,
+                )
 
             # Reset prefix cache after weight sync - cached KV states are invalid with new weights
             if self.config.enable_prefix_caching:

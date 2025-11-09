@@ -127,7 +127,7 @@ INFERENCE_MODELS: dict[ModelName, EvalModel] = {
 
 
 class TrainerConfig(BaseModel):
-    model_id: str = QWEN_3_1_7_B
+    model_id: str = SMOL_LM_2_135M
     eval_interval: int = 10
     eval_batch_size: int = 64
     max_new_tokens: int = 256
@@ -165,7 +165,7 @@ class TrainerConfig(BaseModel):
     enable_sleep_mode: bool = True
     enable_prefix_caching: bool = True
 
-    lora_config: LoRAConfig | None = None
+    lora_config: LoRAConfig | None = LoRAConfig()
 
     # N samples to process per micro-batch
     micro_batch_size: int = 4
