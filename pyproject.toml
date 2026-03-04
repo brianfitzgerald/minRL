@@ -10,8 +10,6 @@ dependencies = [
     "datasets>=3.5.0",
     "fire>=0.7.0",
     "huggingface-hub[cli,hf-transfer]>=0.32.3",
-    "ipykernel>=6.29.5",
-    "ipywidgets>=8.1.7",
     "jinja2>=3.1.6",
     "loguru>=0.7.3",
     "matplotlib>=3.10.3",
@@ -40,10 +38,11 @@ dependencies = [
 [dependency-groups]
 training = ["vllm==0.10.2", "flash-attn; sys_platform == 'linux'"]
 games = ["textworld", "pip>=25.1.1"]
+notebooks = ["marimo>=0.13.0"]
 
 
 [tool.uv]
-default-groups = ["training", "games"]
+default-groups = ["training", "games", "notebooks"]
 no-build-isolation-package = ["flash-attn"]
 
 [tool.uv.sources]
